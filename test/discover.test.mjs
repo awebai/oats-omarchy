@@ -13,7 +13,8 @@ import {
 
 const write = (path, text) => { mkdirSync(join(path, ".."), { recursive: true }); writeFileSync(path, text); };
 const entry = (lines) => `[Desktop Entry]\nType=Application\nName=OATS Desktop\n${lines.join("\n")}\n`;
-// Far-future mtimes, so the sandbox's AppImages are newer than any on the host's /opt.
+// Far-future mtimes, so the sandbox's AppImages are newer than any on the host's /opt;
+// years before 2446, the latest ext4 stores, so they stay distinct on a CI runner.
 const future = (path, year) => { const d = new Date(`${year}-01-01T00:00:00Z`); utimesSync(path, d, d); };
 const mine = (root, list) => list.filter((p) => p.startsWith(root));
 
@@ -190,7 +191,7 @@ test("desktop: several AppImages → the newest by mtime, the others listed", (t
   const older = join(s.home, "Applications", "OATS-Desktop-1.0.AppImage");
   const newest = join(s.home, "Downloads", "OATS-Desktop-1.1.AppImage");
   const oldest = join(s.home, ".local", "bin", "OATS-Desktop-0.9.AppImage");
-  for (const [path, year] of [[older, 2998], [newest, 2999], [oldest, 2997]]) { writeExecutable(path, "#!/bin/sh\n"); future(path, year); }
+  for (const [path, year] of [[older, 2401], [newest, 2402], [oldest, 2400]]) { writeExecutable(path, "#!/bin/sh\n"); future(path, year); }
   const d = desktop(p);
   assert.equal(d.source, "appimage");
   assert.equal(d.appImage, newest);
@@ -203,7 +204,7 @@ test("desktop: the newest AppImage is not executable → no source, and a chmod 
   const image = join(s.home, "Applications", "OATS-Desktop.AppImage");
   write(image, "");
   chmodSync(image, 0o644);
-  future(image, 2999);
+  future(image, 2402);
   const d = desktop(p);
   assert.equal(d.source, null);
   assert.equal(d.reason, `${image} is not executable`);
