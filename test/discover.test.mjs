@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sandbox, writeExecutable } from "./helpers/sandbox.mjs";
 import {
-  appImages, deployment, desktop, desktopEntries, features, fuse, GET_DESKTOP, kernel, launchEnvironment,
+  appImages, deployment, desktop, desktopEntries, extractAndRun, features, fuse, GET_DESKTOP, kernel, launchEnvironment,
   layout, menuDefaults, MINIMAL_PATH, missing, FEATURES, NOTIFY, OMARCHY_PATH, paths, printBindings, soulName,
 } from "../oats-package/capabilities/oats-omarchy/lib/discover.mjs";
 
@@ -242,6 +242,27 @@ test("desktop: --desktop overrides an entry and AppImages; refused unless absolu
   assert.equal(desktop(p, { flag: join(s.root, "elsewhere") }).source, null);
 });
 
+test("the Desktop's standard install: the entry is matched by its Exec (no StartupWMClass), and the AppImage alone is found", (t) => {
+  const s = sandbox(t);
+  const p = paths(s.env);
+  const image = join(s.home, ".local/opt/oats-desktop/OATS-Desktop.AppImage");
+  writeExecutable(image, "#!/bin/sh\n");
+  assert.deepEqual(mine(s.root, appImages(p).map((i) => i.path)), [image]);
+  assert.deepEqual(desktop(p), { source: "appimage", appImage: image, others: [] });
+  const file = join(p.applications, "oats-desktop.desktop");
+  write(file, `[Desktop Entry]\nType=Application\nName=OATS Desktop\nExec=${image} %U\nTerminal=false\nCategories=Development;\n`);
+  assert.deepEqual(desktop(p), { source: "entry", entry: file, exec: [image], program: image, appImage: image, extracted: false, others: [] });
+  write(file, `[Desktop Entry]\nType=Application\nName=OATS Desktop\nExec=${image} --appimage-extract-and-run %U\n`);
+  assert.equal(desktop(p).extracted, true);
+});
+
+test("extractAndRun: right after the AppImage, after an env prefix too, never twice", () => {
+  assert.deepEqual(extractAndRun(["/a/OATS.AppImage", "--x"], "/a/OATS.AppImage"), ["/a/OATS.AppImage", "--appimage-extract-and-run", "--x"]);
+  assert.deepEqual(extractAndRun(["env", "A=1", "/a/OATS.AppImage"], "/a/OATS.AppImage"), ["env", "A=1", "/a/OATS.AppImage", "--appimage-extract-and-run"]);
+  assert.deepEqual(extractAndRun(["/a/OATS.AppImage", "--appimage-extract-and-run"], "/a/OATS.AppImage"), ["/a/OATS.AppImage", "--appimage-extract-and-run"]);
+  assert.deepEqual(extractAndRun(["/other"], "/a/OATS.AppImage"), ["/other"]);
+});
+
 test("desktop: none found → a reason and the GET_DESKTOP fix", (t) => {
   const s = sandbox(t);
   const p = paths(s.env);
@@ -249,7 +270,9 @@ test("desktop: none found → a reason and the GET_DESKTOP fix", (t) => {
   const d = desktop(p);
   assert.equal(d.source, null);
   assert.match(d.reason, /^no OATS Desktop found \(no launcher entry with StartupWMClass=awebai-oats-desktop/);
+  assert.match(d.reason, /or an Exec that runs an OATS Desktop AppImage, no AppImage in ~\/\.local\/opt\/oats-desktop \(the standard install, OATS-Desktop\.AppImage\), ~\/Applications, ~\/\.local\/bin, ~\/Downloads or \/opt\)$/);
   assert.equal(d.fix, GET_DESKTOP);
+  assert.match(GET_DESKTOP, /save it as ~\/\.local\/opt\/oats-desktop\/OATS-Desktop\.AppImage, make it executable \(chmod \+x\)/);
 });
 
 test("layout: Lua only, hyprlang only, both (Lua wins), neither", (t) => {

@@ -43,7 +43,10 @@ the files it wants, compares them with what is there, and only then writes:
   and soul from the kernel's environment, the Omarchy launchers on the
   session's PATH (`systemctl --user show-environment`, else the process
   PATH), the Hyprland layout, the Desktop (a flag, an existing launcher
-  entry, then an AppImage), FUSE, and the bindings
+  entry, then an AppImage; its standard install is
+  `~/.local/opt/oats-desktop/OATS-Desktop.AppImage` with an entry whose
+  Exec runs it, and an entry that runs an AppImage is treated as one, so
+  without FUSE the key and the menu extract and run it), FUSE, and the bindings
   `omarchy menu keybindings --print` reports.
 - `lib/keys.mjs` turns that report into the suggested key and its snippet.
   Setup never writes key bindings.

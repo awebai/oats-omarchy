@@ -117,8 +117,8 @@ function desiredParts(facts, p, state) {
   if (appsMissing.length) skip("desktop", `not on ${facts.launch.featureSource}: ${appsMissing.join(", ")}`);
   else if (!d.source) skip("desktop", d.reason);
   else if (d.source === "entry") {
-    desktopExec = d.exec;
-    skip("desktop", `the existing launcher entry ${d.entry} provides it, so no entry is written; the key and the menu use its Exec`);
+    desktopExec = d.appImage && !facts.fuse.ok ? discover.extractAndRun(d.exec, d.appImage) : d.exec;
+    skip("desktop", `the existing launcher entry ${d.entry} provides it, so no entry is written; the key and the menu use its Exec${desktopExec !== d.exec ? " with --appimage-extract-and-run (libfuse2 is missing)" : ""}`);
   } else {
     let reason = null;
     try { assertSafePath("the AppImage path", d.appImage); assertSafePath("the deployment path", facts.deployment.path); } catch (e) { reason = e.message; }
@@ -255,8 +255,11 @@ function keysFor(facts, desired, parts) {
 
 function fixes(facts) {
   const out = [];
-  if (!facts.fuse.ok && (facts.desktop.source === "appimage" || facts.desktop.source === "flag")) {
-    out.push({ fix: "sudo pacman -S fuse2", why: "libfuse2 is missing, so the Desktop entry starts the AppImage with --appimage-extract-and-run (slower: it unpacks at every start). With fuse2 installed, run --apply again." });
+  if (!facts.fuse.ok && facts.desktop.appImage && !facts.desktop.extracted) {
+    const starts = facts.desktop.source === "entry"
+      ? `the key and the menu start the AppImage your launcher entry ${facts.desktop.entry} runs with --appimage-extract-and-run (your entry is left as it is, and needs fuse2 to start)`
+      : "the Desktop entry starts the AppImage with --appimage-extract-and-run";
+    out.push({ fix: "sudo pacman -S fuse2", why: `libfuse2 is missing, so ${starts} (slower: it unpacks at every start). With fuse2 installed, run --apply again.` });
   }
   if (!facts.tmux) out.push({ fix: "sudo pacman -S tmux", why: `tmux is not on ${facts.launch.source === "session" ? "the user session's PATH" : "the launch PATH"}: the TUI and session attach need it.` });
   if (facts.desktop.fix) out.push({ fix: facts.desktop.fix, why: "to set up OATS Desktop too" });
@@ -291,6 +294,7 @@ function planOrApply(env, args, p, state) {
   const notes = [];
   if (facts.desktop.others?.length) notes.push(`More than one OATS Desktop AppImage was found; the newest, ${facts.desktop.appImage}, is used. Others: ${facts.desktop.others.join(", ")}. Pass --desktop <path> to choose.`);
   if (desired.desktopExec && facts.desktop.source !== "entry") notes.push("A Desktop that is already running is focused, not switched to this deployment.");
+  if (!facts.fuse.ok && facts.desktop.extracted) notes.push(`The launcher entry ${facts.desktop.entry} already runs the AppImage extracted (--appimage-extract-and-run), so it needs no libfuse2.`);
   if (other) notes.push(`Setup is applied for another deployment, ${other}: --apply refuses until \`oats omarchy setup --remove\` runs there.`);
   const result = {
     mode: args.mode, deployment: facts.deployment.path, soul: facts.soul,
@@ -498,9 +502,10 @@ function check(env, p, state) {
   if (state.desktop?.appImage && !existsSync(state.desktop.appImage)) drift.push(`the Desktop AppImage ${state.desktop.appImage} is gone`);
   if (state.desktop?.entry && !existsSync(state.desktop.entry)) drift.push(`the Desktop's launcher entry ${state.desktop.entry} is gone`);
   const launch = discover.launchEnvironment(env);
-  // The program a found entry runs: a path, or a name on the launch PATH.
+  // The program a found entry runs, when it is not an AppImage (checked
+  // above, as for every source): a path, or a name on the launch PATH.
   const program = state.desktop?.program;
-  if (program && !(isAbsolute(program) ? existsSync(program) : which(program, launch.featurePath))) drift.push(`the Desktop program ${program}, which the launcher entry ${state.desktop.entry} runs, is gone`);
+  if (program && program !== state.desktop.appImage && !(isAbsolute(program) ? existsSync(program) : which(program, launch.featurePath))) drift.push(`the Desktop program ${program}, which the launcher entry ${state.desktop.entry} runs, is gone`);
   const found = discover.features(launch);
   const has = (part) => (state.parts || []).includes(part);
   const need = [...(has("tui") || has("desktop") ? discover.FEATURES.apps : []), ...(has("hook") ? discover.FEATURES.hook : []), ...(has("menu") ? discover.FEATURES.menu : [])];

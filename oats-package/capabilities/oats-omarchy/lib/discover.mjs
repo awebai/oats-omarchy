@@ -159,9 +159,10 @@ export function desktopEntries(p, ours = new Set()) {
   return found;
 }
 
-// AppImages in the usual places, depth <= 2.
+// AppImages in the usual places, depth <= 2. ~/.local/opt/oats-desktop is
+// where the Desktop's own install puts it (OATS-Desktop.AppImage).
 export function appImages(p) {
-  const roots = [join(p.home, "Applications"), join(p.home, ".local", "bin"), join(p.home, "Downloads"), "/opt"];
+  const roots = [join(p.home, ".local", "opt", "oats-desktop"), join(p.home, "Applications"), join(p.home, ".local", "bin"), join(p.home, "Downloads"), "/opt"];
   const hits = [];
   const visit = (dir, depth) => {
     let entries;
@@ -180,7 +181,9 @@ export function appImages(p) {
   return hits.sort((a, b) => b.mtimeMs - a.mtimeMs || a.path.localeCompare(b.path));
 }
 
-export const GET_DESKTOP = "Get OATS Desktop from https://github.com/awebai/oats/releases (oats-desktop-<version>-linux-x86_64.AppImage), put it in ~/Applications, make it executable (chmod +x), and run setup again; or pass --desktop <path>.";
+// The Desktop's standard install on Linux: the AppImage, executable, at
+// ~/.local/opt/oats-desktop/OATS-Desktop.AppImage.
+export const GET_DESKTOP = "Get OATS Desktop from https://github.com/awebai/oats/releases (oats-desktop-<version>-linux-x86_64.AppImage) and install it the standard way: save it as ~/.local/opt/oats-desktop/OATS-Desktop.AppImage, make it executable (chmod +x), and run setup again; or pass --desktop <path>.";
 
 // The Desktop, in order: an existing entry, an AppImage in the usual places,
 // or --desktop (which overrides both).
@@ -191,9 +194,18 @@ export function desktop(p, { flag, ours } = {}) {
     return { source: "flag", appImage: flag, others: [] };
   }
   const entries = desktopEntries(p, ours);
-  if (entries.length) return { source: "entry", entry: entries[0].path, exec: entries[0].exec, program: entries[0].program, others: entries.slice(1).map((e) => e.path) };
+  if (entries.length) {
+    const [first, ...rest] = entries;
+    // An entry that runs an AppImage (the Desktop's own install writes one)
+    // is an AppImage too: it needs libfuse2 like any other.
+    const appImage = first.program && isAbsolute(first.program) && APPIMAGE.test(first.program) ? first.program : null;
+    // Without FUSE the user may have added --appimage-extract-and-run to
+    // the entry's Exec already.
+    const extracted = Boolean(appImage) && first.exec.includes("--appimage-extract-and-run");
+    return { source: "entry", entry: first.path, exec: first.exec, program: first.program, ...(appImage ? { appImage, extracted } : {}), others: rest.map((e) => e.path) };
+  }
   const images = appImages(p);
-  if (!images.length) return { source: null, reason: `no OATS Desktop found (no launcher entry with StartupWMClass=${DESKTOP_CLASS}, no AppImage in ~/Applications, ~/.local/bin, ~/Downloads or /opt)`, fix: GET_DESKTOP };
+  if (!images.length) return { source: null, reason: `no OATS Desktop found (no launcher entry with StartupWMClass=${DESKTOP_CLASS} or an Exec that runs an OATS Desktop AppImage, no AppImage in ~/.local/opt/oats-desktop (the standard install, OATS-Desktop.AppImage), ~/Applications, ~/.local/bin, ~/Downloads or /opt)`, fix: GET_DESKTOP };
   const [newest, ...others] = images;
   if (!newest.executable) return { source: null, reason: `${newest.path} is not executable`, fix: `chmod +x '${newest.path}', then run setup again`, others: others.map((i) => i.path) };
   return { source: "appimage", appImage: newest.path, others: others.map((i) => i.path) };
@@ -230,6 +242,15 @@ export function printBindings(env, launch) {
   } finally {
     rmSync(cache, { recursive: true, force: true });
   }
+}
+
+// A found entry's argv with --appimage-extract-and-run right after the
+// AppImage it runs (after an `env` prefix too), for a machine without
+// libfuse2. The entry itself is never changed.
+export function extractAndRun(argv, appImage) {
+  const at = argv.indexOf(appImage);
+  if (at < 0 || argv.includes("--appimage-extract-and-run")) return argv;
+  return [...argv.slice(0, at + 1), "--appimage-extract-and-run", ...argv.slice(at + 1)];
 }
 
 export const describeDesktopSource = (d) => d.source === "entry" ? `the launcher entry ${d.entry}`
