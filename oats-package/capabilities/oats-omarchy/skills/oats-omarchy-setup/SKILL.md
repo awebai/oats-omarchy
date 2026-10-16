@@ -38,7 +38,8 @@ these steps and stop:
    soul has `oats.omarchy` or from the deployment with `--soul <soul>`. It
    writes nothing. Show the person the whole plan. It has:
    - each part and its status: *will apply*, *already applied* or *skipped*,
-     with the reason;
+     with the reason, and any file of theirs a part replaces (it is backed
+     up, and `--remove` restores it);
    - what was found, and where;
    - the key snippet;
    - the fixes they can take, such as `sudo pacman -S fuse2`.
@@ -93,5 +94,6 @@ these steps and stop:
 | `E_NO_DEPLOYMENT` | not run through `oats` from an instance home or a deployment |
 | `E_OTHER_DEPLOYMENT` | applied for another deployment; remove it there first |
 | `E_MODIFIED` | a file setup wrote, or the menu block, was changed since; it is left in place |
+| `E_STATE_REFUSED` | `--remove` found an entry in setup's state file that names a path setup does not manage, or a backup outside its backup directory; that entry is left untouched and named, the rest is restored |
 | `E_APPLY_FAILED` | a write failed; everything this run wrote was rolled back |
 | `E_BAD_ARGS` (exit 2) | the arguments; it prints its usage |

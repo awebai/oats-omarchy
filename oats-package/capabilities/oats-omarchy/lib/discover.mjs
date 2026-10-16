@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { readDesktopEntry } from "./desktop-entry.mjs";
 import { onlyStatic, parsePrint } from "./keys.mjs";
-import { parseDesktopExec } from "./quote.mjs";
+import { parseDesktopExec, shellQuote } from "./quote.mjs";
 import { failureText, isExecutableFile, run, sessionEnvironment, which } from "./system.mjs";
 
 export const DESKTOP_CLASS = "awebai-oats-desktop";
@@ -208,7 +208,7 @@ export function desktop(p, { flag, ours } = {}) {
   const images = appImages(p);
   if (!images.length) return { source: null, reason: `no OATS Desktop found (no launcher entry with StartupWMClass=${DESKTOP_CLASS} or an Exec that runs an OATS Desktop AppImage, no AppImage in ~/.local/opt/oats-desktop (the standard install, OATS-Desktop.AppImage), ~/Applications, ~/.local/bin, ~/Downloads or /opt)`, fix: GET_DESKTOP };
   const [newest, ...others] = images;
-  if (!newest.executable) return { source: null, reason: `${newest.path} is not executable`, fix: `chmod +x '${newest.path}', then run setup again`, others: others.map((i) => i.path) };
+  if (!newest.executable) return { source: null, reason: `${newest.path} is not executable`, fix: `chmod +x ${shellQuote(newest.path)}, then run setup again`, others: others.map((i) => i.path) };
   return { source: "appimage", appImage: newest.path, others: others.map((i) => i.path) };
 }
 

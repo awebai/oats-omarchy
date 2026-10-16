@@ -69,7 +69,12 @@ the files it wants, compares them with what is there, and only then writes:
   there before (backed up beside it) and the directories setup created; for
   the menu block, its exact bytes and whether setup added the comma or
   created the file. `--remove` restores from it and deletes only those
-  directories, only when empty.
+  directories, only when empty. The state file is the user's to edit, so
+  `--remove` checks every entry before it touches anything: an entry whose
+  path is not one setup manages for its role, or whose backup is not a
+  regular file directly in `backup/`, is refused by name (`E_STATE_REFUSED`)
+  and the rest is restored (`managedPaths` and `refusal` in
+  `lib/setup.mjs`).
 - `lib/system.mjs` runs commands with a timeout and a given environment.
 
 `oats omarchy waiting` (`lib/waiting.mjs`) is the menu's "Waiting on you"

@@ -5,8 +5,8 @@
 // every recorded path back as it was; --check reports drift and always exits
 // 0. The key binding is printed, never written.
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, readlinkSync, realpathSync, renameSync, symlinkSync, unlinkSync } from "node:fs";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, renameSync, symlinkSync, unlinkSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as discover from "./discover.mjs";
 import * as files from "./files.mjs";
@@ -82,8 +82,22 @@ function gather(env, args, p, state) {
 }
 
 // Each part → { part, status: "ready" | "skipped", reason?, files[] }.
+// Every path setup writes, by role. --remove touches no other path.
+export function managedPaths(p) {
+  return {
+    shim: p.shim,
+    "tui-entry": join(p.applications, `${files.TUI_ID}.desktop`),
+    "tui-icon": join(p.iconDir, `${files.TUI_ID}.png`),
+    "desktop-entry": join(p.applications, `${files.DESKTOP_ID}.desktop`),
+    "desktop-icon": join(p.iconDir, `${files.DESKTOP_ID}.png`),
+    hook: join(p.hookDir, "oats-omarchy.hook"),
+    menu: p.menuFile,
+  };
+}
+
 function desiredParts(facts, p, state) {
   const parts = [];
+  const at = managedPaths(p);
   const skip = (part, reason) => parts.push({ part, status: "skipped", reason, files: [] });
   const appsMissing = discover.missing(facts.features, discover.FEATURES.apps);
   const hookMissing = discover.missing(facts.features, discover.FEATURES.hook);
@@ -107,8 +121,8 @@ function desiredParts(facts, p, state) {
   if (kernelReason) skip("tui", kernelReason);
   else if (appsMissing.length) skip("tui", `not on ${facts.launch.featureSource}: ${appsMissing.join(", ")}`);
   else parts.push({ part: "tui", status: "ready", files: [
-    { role: "tui-entry", path: join(p.applications, `${files.TUI_ID}.desktop`), bytes: Buffer.from(files.tuiEntry(spec)), mode: 0o644 },
-    { role: "tui-icon", path: join(p.iconDir, `${files.TUI_ID}.png`), bytes: icon, mode: 0o644 },
+    { role: "tui-entry", path: at["tui-entry"], bytes: Buffer.from(files.tuiEntry(spec)), mode: 0o644 },
+    { role: "tui-icon", path: at["tui-icon"], bytes: icon, mode: 0o644 },
   ] });
 
   // A: the Desktop.
@@ -126,8 +140,8 @@ function desiredParts(facts, p, state) {
     else {
       desktopExec = [d.appImage, ...(facts.fuse.ok ? [] : ["--appimage-extract-and-run"]), "--dir", facts.deployment.path];
       parts.push({ part: "desktop", status: "ready", files: [
-        { role: "desktop-entry", path: join(p.applications, `${files.DESKTOP_ID}.desktop`), bytes: Buffer.from(files.desktopEntry({ execArgv: desktopExec })), mode: 0o644 },
-        { role: "desktop-icon", path: join(p.iconDir, `${files.DESKTOP_ID}.png`), bytes: icon, mode: 0o644 },
+        { role: "desktop-entry", path: at["desktop-entry"], bytes: Buffer.from(files.desktopEntry({ execArgv: desktopExec })), mode: 0o644 },
+        { role: "desktop-icon", path: at["desktop-icon"], bytes: icon, mode: 0o644 },
       ] });
     }
   }
@@ -140,7 +154,7 @@ function desiredParts(facts, p, state) {
   else if (hookMissing.length) skip("hook", `not on ${facts.launch.featureSource}: ${hookMissing.join(", ")}`);
   else if (soulReason) skip("hook", soulReason);
   else parts.push({ part: "hook", status: "ready", files: [
-    { role: "hook", path: join(p.hookDir, "oats-omarchy.hook"), bytes: Buffer.from(files.hook({ ...spec, soul: facts.soul })), mode: 0o755 },
+    { role: "hook", path: at.hook, bytes: Buffer.from(files.hook({ ...spec, soul: facts.soul })), mode: 0o755 },
   ] });
 
   // B: the oats submenu.
@@ -159,13 +173,13 @@ function desiredParts(facts, p, state) {
     });
     const edit = menuEdit(p, state, blockText);
     if (edit.skip) skip("menu", edit.skip);
-    else parts.push({ part: "menu", status: "ready", files: [{ role: "menu", kind: "block", path: p.menuFile, block: blockText, ...edit }] });
+    else parts.push({ part: "menu", status: "ready", files: [{ role: "menu", kind: "block", path: at.menu, block: blockText, ...edit }] });
   }
 
   // The shim, when anything calls it.
   if (parts.some((x) => x.status === "ready" && (x.part === "tui" || x.part === "hook" || x.part === "menu"))) {
     parts.unshift({ part: "shim", status: "ready", files: [
-      { role: "shim", path: p.shim, bytes: Buffer.from(files.shim(safe)), mode: 0o755 },
+      { role: "shim", path: at.shim, bytes: Buffer.from(files.shim(safe)), mode: 0o755 },
     ] });
   } else skip("shim", kernelReason || "no part that calls it is applied");
 
@@ -219,7 +233,8 @@ const sortParts = (parts) => [...parts].sort((a, b) => PART_ORDER.indexOf(a.part
 
 // Compares each desired file with what is on disk and in the state.
 // → per file: "current" (already applied), "write" (absent, ours to update,
-// or not ours: backed up first), or "modified" (ours, changed since).
+// or not ours: backed up first, and `replaces` says what it was), or
+// "modified" (ours, changed since).
 function classify(parts, state) {
   const recorded = new Map((state?.files || []).map((f) => [f.path, f]));
   for (const part of parts) {
@@ -231,6 +246,7 @@ function classify(parts, state) {
       if (rec && (!disk || digest(disk.bytes) !== rec.digest)) file.action = "modified";
       else if (rec && disk.bytes.equals(file.bytes) && disk.mode === file.mode) file.action = "current";
       else file.action = "write";
+      if (file.action === "write" && !rec && disk) file.replaces = disk.link ? "link" : "file";
       file.disk = disk;
     }
     if (part.status === "ready") {
@@ -283,7 +299,10 @@ function found(facts) {
   };
 }
 
-const publicParts = (parts) => parts.map(({ part, status, reason, files: fs }) => ({ part, status, ...(reason ? { reason } : {}), paths: fs.map((f) => f.path) }));
+const publicParts = (parts) => parts.map(({ part, status, reason, files: fs }) => {
+  const replaces = fs.filter((f) => f.replaces).map((f) => ({ path: f.path, existing: f.replaces }));
+  return { part, status, ...(reason ? { reason } : {}), paths: fs.map((f) => f.path), ...(replaces.length ? { replaces } : {}) };
+});
 
 function planOrApply(env, args, p, state) {
   const facts = gather(env, args, p, state);
@@ -426,21 +445,51 @@ function refreshCaches(p, env) {
   return warnings;
 }
 
+// A backup setup made: a name directly in <stateDir>/backup. → its path,
+// or null.
+function backupPath(backup, p) {
+  if (typeof backup !== "string" || !backup) return null;
+  const path = resolve(p.stateDir, backup);
+  return dirname(path) === join(p.stateDir, "backup") ? path : null;
+}
+
+// Why --remove refuses a recorded file, or null. The state file sits in the
+// user's state directory and may have been edited: --remove restores only
+// the paths setup manages, from backups in its own backup directory.
+function refusal(file, p) {
+  const managed = managedPaths(p);
+  if (!file || typeof file.path !== "string" || managed[file.role] !== file.path) return `not a path setup manages${file?.role ? ` as ${file.role}` : ""}`;
+  const prior = file.prior;
+  if ((file.kind === "block") !== (file.role === "menu")) return "not an entry setup records";
+  if (file.role === "menu") return (prior == null || prior.state === "absent" || (prior.state === "text" && typeof prior.text === "string")) ? null : "not a menu edit setup records";
+  if (prior?.state === "absent" || (prior?.state === "link" && typeof prior.target === "string")) return null;
+  if (prior?.state !== "file") return "its prior state is not one setup records";
+  const backup = backupPath(prior.backup, p);
+  if (!backup) return `its backup ${JSON.stringify(prior.backup)} is not in ${join(p.stateDir, "backup")}`;
+  let st;
+  try { st = lstatSync(backup); } catch { return `its backup ${backup} is missing`; }
+  return st.isFile() ? null : `its backup ${backup} is not a regular file`;
+}
+
 function remove(env, p, state) {
   if (!state) return { mode: "remove", restored: [], message: "nothing to remove: setup is not applied" };
   const stateFile = join(p.stateDir, "state.json");
   const restored = [];
   const left = [];
-  const ordered = [...state.files.filter((f) => f.role !== "shim").reverse(), ...state.files.filter((f) => f.role === "shim")];
+  // Every entry is checked before anything is restored or deleted.
+  const refused = new Map(state.files.map((f) => [f, refusal(f, p)]).filter(([, why]) => why));
+  const backupsRefused = (state.backups || []).filter((b) => !backupPath(b, p));
+  const ordered = [...state.files.filter((f) => f?.role !== "shim").reverse(), ...state.files.filter((f) => f?.role === "shim")];
   for (const file of ordered) {
-    if (file.role === "shim" && left.length) { left.push({ ...file, why: "kept until everything else is restored" }); continue; }
+    if (refused.has(file)) { left.push({ file, path: String(file?.path), why: refused.get(file), refused: true }); continue; }
+    if (file.role === "shim" && (left.length || backupsRefused.length)) { left.push({ file, path: file.path, why: "kept until everything else is restored" }); continue; }
     if (file.kind === "block") {
       if (removeEdit(file)) restored.push(file.path);
-      else left.push({ ...file, why: "changed since setup wrote it" });
+      else left.push({ file, path: file.path, why: "changed since setup wrote it", changed: true });
       continue;
     }
     const disk = readFileState(file.path);
-    if (disk && digest(disk.bytes) !== file.digest) { left.push({ ...file, why: "changed since setup wrote it" }); continue; }
+    if (disk && digest(disk.bytes) !== file.digest) { left.push({ file, path: file.path, why: "changed since setup wrote it", changed: true }); continue; }
     if (!disk && file.prior.state === "absent") { restored.push(file.path); continue; }
     restorePrior(file.path, file.prior, p.stateDir);
     restored.push(file.path);
@@ -448,18 +497,24 @@ function remove(env, p, state) {
   removeEmptyDirs(state.dirs || []);
   // Every backup setup made, including those of files a partial --remove
   // already restored: they are deleted only when everything is restored.
-  const backups = [...new Set([...(state.backups || []), ...state.files.map((f) => f.prior?.backup).filter(Boolean)])];
+  const backups = [...new Set([...(state.backups || []), ...state.files.filter((f) => !refused.has(f) && f.prior?.state === "file").map((f) => f.prior.backup)])];
   const warnings = refreshCaches(p, env);
-  if (left.length) {
-    const kept = { ...state, files: state.files.filter((f) => left.some((l) => l.path === f.path)), backups };
+  if (left.length || backupsRefused.length) {
+    const kept = { ...state, files: state.files.filter((f) => left.some((l) => l.file === f)), backups };
     atomicWrite(stateFile, Buffer.from(`${JSON.stringify(kept, null, 2)}\n`), 0o600);
-    const changed = left.filter((l) => l.why.startsWith("changed"));
-    throw new SetupError("E_MODIFIED", `left in place because ${changed.length === 1 ? "it was" : "they were"} changed since setup wrote ${changed.length === 1 ? "it" : "them"}: ${changed.map((l) => l.path).join(", ")}. Everything else was restored. Restore or delete ${changed.length === 1 ? "it" : "them"} by hand, then run --remove again.`, { restored, left: left.map(({ path, why }) => ({ path, why })) });
+    const details = { restored, left: left.map(({ path, why }) => ({ path, why })) };
+    const changed = left.filter((l) => l.changed);
+    const changedText = changed.length ? `left in place because ${changed.length === 1 ? "it was" : "they were"} changed since setup wrote ${changed.length === 1 ? "it" : "them"}: ${changed.map((l) => l.path).join(", ")}` : "";
+    const bad = [...left.filter((l) => l.refused).map((l) => `${l.path}: ${l.why}`), ...backupsRefused.map((b) => `the backup ${JSON.stringify(b)}: not in ${join(p.stateDir, "backup")}`)];
+    if (bad.length) {
+      throw new SetupError("E_STATE_REFUSED", `${stateFile} has ${bad.length === 1 ? "an entry" : "entries"} --remove refuses, and nothing was restored or deleted for ${bad.length === 1 ? "it" : "them"}: ${bad.join("; ")}.${changedText ? ` Also ${changedText}.` : ""} Everything else was restored. Check ${stateFile}, then run --remove again.`, { ...details, refused: bad });
+    }
+    throw new SetupError("E_MODIFIED", `${changedText}. Everything else was restored. Restore or delete ${changed.length === 1 ? "it" : "them"} by hand, then run --remove again.`, details);
   }
   // Last, and only now: the backups setup recorded (anything else in the
   // state directory stays), the state, and the state directories it made.
   for (const backup of backups) {
-    try { unlinkSync(join(p.stateDir, backup)); } catch (e) { if (e.code !== "ENOENT") throw e; }
+    try { unlinkSync(backupPath(backup, p)); } catch (e) { if (e.code !== "ENOENT") throw e; }
   }
   unlinkSync(stateFile);
   removeEmptyDirs(state.stateDirs || []);
@@ -574,7 +629,10 @@ function render(r) {
   lines.push("", "Parts");
   for (const x of r.parts) {
     lines.push(`  ${x.part.padEnd(8)} ${x.status}${x.reason ? `: ${x.reason}` : ""}`);
-    for (const path of x.paths) lines.push(`           ${path}`);
+    for (const path of x.paths) {
+      const existing = x.replaces?.find((r) => r.path === path)?.existing;
+      lines.push(`           ${path}${existing === "file" ? " (replaces an existing file, backed up; --remove restores it)" : existing === "link" ? " (replaces an existing link; --remove restores it)" : ""}`);
+    }
   }
   const f = r.found;
   if (r.mode === "plan") {

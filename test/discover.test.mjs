@@ -2,7 +2,8 @@
 // directories and PATH of fakes (never the real ones).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sandbox, writeExecutable } from "./helpers/sandbox.mjs";
@@ -331,4 +332,18 @@ test("printBindings: runs omarchy with a temporary XDG_CACHE_HOME that is gone a
     assert.equal(existsSync(join(box.home, ".cache")), false);
   }
   assert.equal(existsSync(join(s.home, ".cache")), false);
+});
+
+test("desktop: the chmod fix quotes the path for the shell, a single quote included", (t) => {
+  const s = sandbox(t);
+  const p = paths(s.env);
+  const image = join(s.home, "Applications", "it's mine", "OATS-Desktop.AppImage");
+  write(image, "");
+  chmodSync(image, 0o644);
+  future(image, 2300);
+  const d = desktop(p);
+  assert.equal(d.fix, `chmod +x '${join(s.home, "Applications", "it")}'\\''s mine/OATS-Desktop.AppImage', then run setup again`);
+  const r = spawnSync("bash", ["-c", d.fix.replace(/, then run setup again$/, "")], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(statSync(image).mode & 0o111, 0o111, "the printed command makes that file executable");
 });
