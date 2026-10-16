@@ -1,5 +1,5 @@
-// The skeleton's command surface: the manifest the kernel dispatches from and
-// the stub executable behind it.
+// The command surface: the manifest the kernel dispatches from and the
+// executable behind it. Setup's own behaviour is test/setup.test.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -28,7 +28,7 @@ test("--help prints the usage and exits 0", () => {
   assert.match(r.stdout, /waiting/);
 });
 
-for (const args of [[], ["setup"], ["setup", "--plan"], ["waiting"], ["--help", "extra"], ["bogus"]]) {
+for (const args of [[], ["waiting"], ["--help", "extra"], ["bogus"]]) {
   test(`anything else exits 2: [${args.join(" ")}]`, () => {
     const r = run(...args);
     assert.equal(r.status, 2);
@@ -36,3 +36,12 @@ for (const args of [[], ["setup"], ["setup", "--plan"], ["waiting"], ["--help", 
     assert.match(r.stderr, /usage: oats omarchy <command>/);
   });
 }
+
+test("setup is dispatched: --help prints its usage, a bad argument exits 2", () => {
+  const help = run("setup", "--help");
+  assert.equal(help.status, 0);
+  assert.match(help.stdout, /^usage: oats omarchy setup/);
+  const bad = run("setup", "--bogus");
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /unknown argument: --bogus\nusage: oats omarchy setup/);
+});

@@ -1,0 +1,2 @@
+SHIFT ALT + D                       → Download Video from Web App
+SHIFT ALT + L                       → Copy URL from Web App
