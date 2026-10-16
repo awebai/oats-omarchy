@@ -1,0 +1,17 @@
+{
+  "name": "@awebai/oats-omarchy",
+  "version": "0.1.0",
+  "description": "Repository tooling for the oats.omarchy package; the package payload is oats-package/.",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "lint": "node scripts/lint.mjs",
+    "validate": "node scripts/validate-manifests.mjs",
+    "test": "node --test 'test/**/*.test.mjs'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/awebai/oats-omarchy"
+  }
+}

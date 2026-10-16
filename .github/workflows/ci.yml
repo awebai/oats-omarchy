@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: npm run lint && npm run validate && npm test
+
+  # Omarchy's real packages, from Omarchy's own repository with signature
+  # checking (ci/omarchy-bootstrap.sh says how the key is trusted).
+  omarchy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: archlinux:base@sha256:3c64b538588416593f69a1aebd2f2ec0f2541b29159f32556fa7def2167147a0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Omarchy
+        run: ci/omarchy-bootstrap.sh
+      - name: Installed versions
+        run: pacman -Q omarchy hyprland
+      - name: A known-good submap passes Hyprland --verify-config
+        run: |
+          runuser -u ci -- ci/verify-hypr-config.sh --expect ok test/fixtures/hypr/submap-good.lua
+          runuser -u ci -- ci/verify-hypr-config.sh --expect ok test/fixtures/hypr/submap-good.conf
+      - name: A known-bad submap fails Hyprland --verify-config
+        run: |
+          runuser -u ci -- ci/verify-hypr-config.sh --expect error test/fixtures/hypr/submap-bad.lua
+          runuser -u ci -- ci/verify-hypr-config.sh --expect error test/fixtures/hypr/submap-bad.conf

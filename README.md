@@ -16,3 +16,5 @@ The plan and its progress are tracked in
 [awebai/oats#1311](https://github.com/awebai/oats/issues/1311).
 
 Status: under construction; nothing here is released yet.
+
+Developing it: [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oats.dev/schemas/oats-package.schema.json",
+  "title": "OATS distribution package manifest (oats-package.json)",
+  "description": "Manifest at a distribution-package root. A package is the source, dependency, integrity, review and atomic-update unit — it is TRANSPORT, not the installed entity. A workspace declares it in `packages:`; `oats sync` resolves it to a commit, verifies its integrity and locks it, and each spawn copies the capabilities a soul selects into that instance's home; there is no persistent package store. Every package must therefore export at least one capability, and each capability entry must name a DEDICATED capability root whose declared paths and symlinks all resolve inside it, so the copied artifact is self-contained and independently hashable. Config templates are optional package SOURCE MATERIAL, never applied behavior; nothing ambiently loads undeclared files.",
+  "type": "object",
+  "required": [
+    "package",
+    "version",
+    "description",
+    "compatibility",
+    "capabilities"
+  ],
+  "properties": {
+    "package": {
+      "description": "Package identity. Namespaced separately from capability IDs; unique at one config scope.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "compatibility": {
+      "type": "object",
+      "properties": {
+        "oats": {
+          "description": "OATS kernel compatibility floor. Accepted grammar exactly: >=x.y.z, ^x.y.z, or exact x.y.z.",
+          "type": "string",
+          "pattern": "^(>=|\\^)?\\d+\\.\\d+\\.\\d+$"
+        }
+      },
+      "required": [
+        "oats"
+      ],
+      "additionalProperties": false
+    },
+    "capabilities": {
+      "description": "Package-relative DEDICATED capability roots, each containing one capability oats.json. At least one is required — config-only and empty packages are rejected. A root of \".\" (the package root itself) is READ COMPATIBILITY for already-published packages only (e.g. oats.authoring@1.0.0, which is capabilities:[\".\"] and ships no templates at all): the compatibility reader accepts it whenever the manifest does not carry `configTemplates`, and rejects it as soon as it does, because a `configTemplates` manifest is unambiguously new. Authoring must never emit \".\"; newly authored packages use conventional roots such as \"capabilities/<slug>\". Paths must not escape the package root after symlink resolution, and everything the capability declares must resolve inside its OWN root — a capability that reaches package-only paths cannot be materialized and is rejected.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[^/].*$",
+        "not": {
+          "pattern": "(^|/)\\.\\.(/|$)"
+        }
+      },
+      "uniqueItems": true
+    },
+    "souls": {
+      "description": "Package souls: package-relative soul directories, each an ordinary soul (soul.yaml + AGENTS.md, optional skills/). A soul's name is its directory's. They are versioned and locked with the package (oats-lock.json records each soul's name, path and digest), listed with their package origin, and spawned by the qualified name <package>/<soul> (or the bare name when unique). `from: here` in a package soul is its own package at the locked commit.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[^/].*$",
+        "not": {
+          "pattern": "(^|/)\\.\\.(/|$)"
+        }
+      },
+      "uniqueItems": true
+    },
+    "triggers": {
+      "description": "Trigger templates: `oats trigger add --from <package>:<id> [--set <name>=<value>]…` instantiates one from the locked package. Each file is { parameters: { <name>: { path, required?, default?, description? } }, definition: { …a trigger definition… } }; see docs/schedules.md#triggers.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "file"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^/].*$",
+            "not": {
+              "pattern": "(^|/)\\.\\.(/|$)"
+            }
+          }
+        }
+      }
+    },
+    "configTemplates": {
+      "description": "Tolerated and ignored: named classic config templates, accepted so published packages still validate; the workspace model reads nothing from them.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9._-]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "description": "Package-relative path to the template's oats-config.yaml. CANONICAL LOCATION: it must live under config-templates/ with a nonempty contained file path (e.g. config-templates/default/oats-config.yaml). The deprecated `configs` spelling is exempt so already-published 0.19 tags stay readable. Runtime validation enforces the same rule — see isCanonicalTemplatePath in lib/core.mjs.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^config-templates/(?!\\.\\.?(/|$))[^/\\\\][^\\\\]*$",
+            "not": {
+              "pattern": "(^|/)\\.\\.(/|$)"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "default": {
+            "description": "At most one template may be marked default; it removes the need for --config at adoption.",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "configs": {
+      "description": "Tolerated and ignored: the old spelling of `configTemplates`.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9._-]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^/].*$",
+            "not": {
+              "pattern": "(^|/)\\.\\.(/|$)"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "default": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "dependencies": {
+      "description": "Tolerated and ignored: package source specifications from the classic line. The workspace model resolves only the workspace's `packages:`; a package's dependencies are not followed.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}

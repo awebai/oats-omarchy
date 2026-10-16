@@ -1,0 +1,392 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oats.dev/schemas/capability-manifest.schema.json",
+  "title": "OATS capability package manifest",
+  "type": "object",
+  "required": [
+    "capability",
+    "version",
+    "description"
+  ],
+  "$defs": {
+    "HelperInjection": {
+      "deprecated": true,
+      "description": "Tolerated and ignored: accepted so existing manifests validate; it changes nothing. Omit it.",
+      "oneOf": [
+        {"type":"object","required":["version","mode"],"additionalProperties":false,"properties":{"version":{"const":1},"mode":{"enum":["inherit","omit"]}}},
+        {"type":"object","required":["version","mode","path"],"additionalProperties":false,"properties":{"version":{"const":1},"mode":{"const":"file"},"path":{"type":"string","minLength":1,"pattern":"^(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))[^/\\\\\u0000]+(?:/[^/\\\\\u0000]+)*$"}}}
+      ]
+    },
+    "HookInputs": {
+      "type":"object","additionalProperties":false,
+      "properties":{"sourceReceipt":{"type":"object","required":["version"],"additionalProperties":false,"properties":{"version":{"const":1}}}}
+    },
+    "OptionalHook": {
+      "oneOf":[
+        {"type":"string"},
+        {"type":"object","required":["command"],"additionalProperties":false,"properties":{"command":{"type":"string"},"required":{"const":false,"description":"Only the spawn and worktree hooks may be required."},"inputs":{"$ref":"#/$defs/HookInputs"}}}
+      ]
+    }
+  },
+  "properties": {
+    "capability": {
+      "type": "string",
+      "pattern": "^(?:@?[a-z0-9][a-z0-9._-]*[./])[a-z0-9][a-z0-9._/-]*$"
+    },
+    "command": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "compatibility": {
+      "type": "object",
+      "properties": {
+        "oats": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "oats"
+      ],
+      "additionalProperties": false
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "private": {
+      "type": "boolean",
+      "description": "Workspace discovery: true makes this member capability repo-owned — listed (private: true) but usable only by souls of its own repository (E_CAPABILITY_PRIVATE elsewhere)."
+    },
+    "launchPreview": {
+      "type": "boolean",
+      "description": "true declares the launch hook preview-aware: it changes nothing under OATS_LAUNCH_PREVIEW=1 and returns the same contribution (apart from its preview answer's volatileEnv values), so a start runs it as a preview during preflight and for real after it, and a launch preview runs it. Without it the hook runs once per start, for real, during preflight, and never for a launch preview. Top-level so that older kernels ignore it."
+    },
+    "layer": {
+      "enum": [
+        "knowledge",
+        "messaging",
+        "tasks"
+      ]
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "inject": {
+      "type": "string"
+    },
+    "helperInjection": {"$ref":"#/$defs/HelperInjection","deprecated":true,"description":"Tolerated and ignored (accepted so existing manifests validate; changes nothing). Omit it."},
+    "environment": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+      },
+      "uniqueItems": true,
+      "description": "Exact launch-environment names this artifact asks the executable trust gate to approve; spawn hook output must be a subset."
+    },
+    "requires": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "title": "host command requirement",
+            "description": "A command that must be present on PATH before the capability can work.",
+            "type": "object",
+            "required": [
+              "command",
+              "why"
+            ],
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              },
+              "install": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "harness package requirement",
+            "description": "A package that must be installed into a specific harness's own package manager. Raised only for deployments using that harness, satisfied by the harness's package list rather than by PATH, and installed only with explicit consent. The harness is named by `harness` or by `runtime`, its old name that released manifests use: exactly one of the two.",
+            "type": "object",
+            "required": [
+              "package",
+              "why"
+            ],
+            "oneOf": [
+              { "required": ["harness"], "not": { "required": ["runtime"] } },
+              { "required": ["runtime"], "not": { "required": ["harness"] } }
+            ],
+            "properties": {
+              "harness": {
+                "type": "string",
+                "enum": [
+                  "pi",
+                  "claude"
+                ]
+              },
+              "runtime": {
+                "type": "string",
+                "description": "The old name of `harness`, accepted for released manifests.",
+                "enum": [
+                  "pi",
+                  "claude"
+                ]
+              },
+              "package": {
+                "type": "string",
+                "description": "Source spec in that harness's own naming: \"npm:@scope/name\" for pi, \"plugin@marketplace\" for Claude."
+              },
+              "why": {
+                "type": "string"
+              },
+              "install": {
+                "type": "string",
+                "description": "Documentation URL shown alongside the consent prompt."
+              },
+              "marketplace": {
+                "type": "string",
+                "description": "Optional source to register before installing (Claude marketplaces). Shown at the consent prompt, since registering a third-party source is part of what is being agreed to."
+              },
+              "when": {
+                "type": "object",
+                "description": "Applies only when every named capability setting has the given effective value (a requirement conditional on configuration, e.g. delivery: channel).",
+                "additionalProperties": {}
+              },
+              "minVersion": {
+                "type": "string",
+                "description": "Lowest acceptable installed version of the package, read from the package.json under the install directory the harness's listing names; an older or absent manifest fails the requirement with the install remedy.",
+                "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+"
+              },
+              "ifInstalled": {
+                "type": "boolean",
+                "description": "When true, an absent package satisfies the row; the row's minVersion and loadability checks apply only to a package that is installed (an ambient extension that must honour a contract if present)."
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "commands": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "binding": {
+      "description": "Versioned provider-owned normalize/bind/check phases, each naming an existing command in this manifest. Runtime validation enforces that the phases belong to a core capability (a manifest with `layer`) and command references; presence is not approval or provider readiness.",
+      "type": "object",
+      "required": ["version", "normalize", "bind", "check"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "const": 1 },
+        "normalize": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "bind": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "check": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "reasons": {
+          "description": "Fixed nonsecret diagnostic strings allowed across the binding wire by exact match only. 1-64 unique printable ASCII strings of 1-200 characters, no braces/interpolation, operator values or paths. Omission uses the kernel's per-capability compatibility list when available; an invalid declaration never falls back.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200, "not": { "pattern": "[{}]|[^\\x20-\\x7e]" } }
+        },
+        "keys": {
+          "description": "Owned operator-key declarations: exact names or trailing-dot namespaces, no other pattern syntax. The kernel validates their shape only; providers must ignore foreign keys themselves.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*\\.?$(?![\\s\\S])" }
+        }
+      }
+    },
+    "operations": {
+      "description": "Named operations a GUI or scheduler may invoke through `oats operation run`, each delegating to one of this manifest's commands. kind \"view\" answers { documents: [{label, kind, path, text}] }; \"action\" (default) runs something. context \"home\" (default) runs in an instance home, \"scope\" in the config scope.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["command"],
+        "additionalProperties": false,
+        "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["action", "view"] },
+          "context": { "enum": ["home", "scope"] },
+          "description": { "type": "string" },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name"],
+              "additionalProperties": false,
+              "properties": {
+                "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+                "flag": { "type": "string", "pattern": "^--[a-z][a-z0-9-]*$" },
+                "required": { "type": "boolean" },
+                "description": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "triggerSources": {
+      "description": "Trigger sources (#669): each a command of this capability that, at each poll, lists the events due now; a trigger names one as on.source \"<capability>:<source>\". Validated only where a source is used (trigger add, a poll, trigger test and trigger poll), never when the capability loads: a malformed declaration fails the triggers naming it (E_TRIGGER_SOURCE) and nothing else. Checked at use only, not by this schema: every pattern compiles; command names a key of commands; a parameter default matches its pattern. A pattern is ECMA-262 with the u flag, matched anchored as ^(?:…)$; the default parameter value pattern is ^[A-Za-z0-9._/:@ ,*-]{0,200}$ and the default field pattern ^[A-Za-z0-9._/:@-]{1,200}$. Whatever its pattern admits, an event's field value is at most 200 code points and carries no control, bidi, invisible or tag character.",
+      "type": "object",
+      "maxProperties": 16,
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-]{0,39}$" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["command", "events"],
+        "additionalProperties": false,
+        "properties": {
+          "command": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "One of this manifest's commands: the source's program, run once per poll (one JSON request on stdin, one JSON answer on stdout)." },
+          "description": { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*$" },
+          "events": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,39}$" } },
+          "parameters": {
+            "type": "object",
+            "maxProperties": 16,
+            "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_]{0,39}$" },
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "required": { "type": "boolean" },
+                "default": { "type": "string", "maxLength": 200 },
+                "description": { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*$" },
+                "pattern": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "fields": {
+            "type": "object",
+            "maxProperties": 16,
+            "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_]{0,39}$" },
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "pattern": { "type": "string", "minLength": 1 } }
+            }
+          },
+          "urlHosts": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "maxLength": 253, "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$" } }
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "properties": {
+        "soul-scaffold": {"$ref":"#/$defs/OptionalHook"},
+        "spawn": {
+          "oneOf":[
+            {"type":"string"},
+            {"type":"object","required":["command"],"additionalProperties":false,"properties":{"command":{"type":"string"},"required":{"type":"boolean","description":"When true, a failure fails the spawn."},"inputs":{"$ref":"#/$defs/HookInputs"}}}
+          ]
+        },
+        "retire": {"$ref":"#/$defs/OptionalHook"},
+        "launch": {"$ref":"#/$defs/OptionalHook"},
+        "worktree": {
+          "description": "Runs once in each tree the kernel creates: ./work of a work: worktree spawn (after the spawn hooks) and each `oats worktree add`. Its cwd is the new tree; see docs/capabilities.md, The worktree event.",
+          "oneOf":[
+            {"type":"string"},
+            {"type":"object","required":["command"],"additionalProperties":false,"properties":{"command":{"type":"string"},"required":{"type":"boolean","description":"When true, a failure or timeout fails the spawn, or removes the tree `oats worktree add` made."},"inputs":{"$ref":"#/$defs/HookInputs"}}}
+          ]
+        }
+      },
+      "additionalProperties": {"$ref":"#/$defs/OptionalHook"},
+      "description": "Lifecycle events to commands. An event this kernel does not run (a newer kernel's) is accepted with a warning and ignored, unless it is declared required: that is refused. Kernels before 0.49.0 refuse every unknown event."
+    },
+    "settings": {
+      "type": "object",
+      "description": "Declared capability settings: name to { default, values?, description }. Documentation for the values a soul, oats-local.yaml or `oats spawn --provider` supplies; undeclared settings are still accepted.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "default": {},
+          "values": {
+            "type": "array",
+            "description": "Accepted scalar values; an effective value outside the list is refused at resolution.",
+            "items": {}
+          },
+          "description": {
+            "type": "string"
+          },
+          "hostOnly": {
+            "type": "boolean",
+            "description": "When true, this key is a host fact (a custody path, a state directory): the resolver accepts it only from the deployment's oats-local.yaml settings.<capability> and refuses it in the workspace file, a soul's slot payload and --provider flags (E_WORKSPACE_SCHEMA reason host-only-key). Decision 27."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "environmentNamespaces": {
+      "type": "array",
+      "description": "Additional environment-name prefixes this capability may declare besides its vendor's own (e.g. AWEB_ for the official oats.aweb messaging capability). Each is an uppercase prefix ending in an underscore; the reserved core (OATS_, PI_AGENT_) and process bootstrap namespaces cannot be claimed. Disclosed at trust time with the environment list.",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9]*_$"
+      }
+    },
+    "retirement": {
+      "type": "object",
+      "description": "What retirement treats as the provider's own state rather than the instance's work.",
+      "required": ["disposable"],
+      "properties": {
+        "disposable": {
+          "type": "object",
+          "properties": {
+            "home": {
+              "type": "array",
+              "description": "Provider-owned state that is not the instance's work, left in place until the home is removed, and not copied to recovery (the preservation of a failed spawn in directory mode is the exception: it copies the whole home, declared entries included). Each entry names top-level entries of the instance home: one hidden name (.aw) or a prefix (.aweb-identity-*, every top-level name that starts with the text before the *). Recorded at spawn: a running instance is unaffected until it is respawned.",
+              "items": {
+                "type": "string",
+                "pattern": "^\\.[A-Za-z0-9_][A-Za-z0-9._-]*(?:-\\*)?$",
+                "not": {
+                  "description": "Home entries the kernel owns cannot be declared.",
+                  "anyOf": [
+                    {"pattern": "^\\.(?:oats|agents|claude)$"},
+                    {"pattern": "^\\.oats-(?:events|stop|restart|rollback|agents-md|start|attachments)"},
+                    {"pattern": "^\\.oats-.*\\*$"}
+                  ]
+                }
+              }
+            },
+            "work": {
+              "type": "array",
+              "description": "Relative roots under work/ that a worktree instance's capability generates. Their untracked or ignored bytes do not count as the instance's untracked or ignored worktree bytes; they are still copied when a recovery copy is made. A backslash reads as /, one leading ./ and one trailing / are dropped, and what is left must be a relative path with no empty, . or .. segment; an absolute path (/x, C:/x) is refused. Two entries of one manifest that overlap (the same root, or one inside the other) are refused; spawn also refuses roots of different capabilities that overlap, and a root that is a symlink in the work.",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?:\\.[/\\\\])?(?!\\.{1,2}(?:[/\\\\]|$))[^/\\\\]+(?:[/\\\\](?!\\.{1,2}(?:[/\\\\]|$))[^/\\\\]+)*[/\\\\]?$",
+                "not": {
+                  "description": "A Windows absolute path is refused on every host.",
+                  "pattern": "^[A-Za-z]:[/\\\\]"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
