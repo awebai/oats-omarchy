@@ -1,0 +1,9 @@
+{
+  "capability": "fixture.x",
+  "command": "x",
+  "version": "0.0.1",
+  "compatibility": { "oats": ">=0.53.0" },
+  "description": "A capability whose command escapes the payload root.",
+  "skills": ["skills"],
+  "commands": { "run": "../../../outside.mjs run" }
+}

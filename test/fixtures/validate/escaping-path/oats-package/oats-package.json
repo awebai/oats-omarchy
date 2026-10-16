@@ -1,0 +1,7 @@
+{
+  "package": "fixture.x",
+  "version": "0.0.1",
+  "description": "A validator fixture.",
+  "compatibility": { "oats": ">=0.53.0" },
+  "capabilities": ["capabilities/x"]
+}

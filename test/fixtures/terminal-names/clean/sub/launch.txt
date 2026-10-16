@@ -1,0 +1,1 @@
+omarchy-launch-or-focus-tui --app-id=org.oats.tui oats tui

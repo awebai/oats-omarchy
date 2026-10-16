@@ -1,0 +1,14 @@
+{
+  "capability": "oats.omarchy",
+  "command": "omarchy",
+  "version": "0.1.0",
+  "compatibility": {
+    "oats": ">=0.53.0"
+  },
+  "description": "Makes both OATS clients Omarchy apps: launcher entries and icons for the TUI and OATS Desktop, a suggested key, and an oats submenu in the Omarchy menu. Set up with oats omarchy setup.",
+  "skills": ["skills"],
+  "commands": {
+    "setup": "bin/oats-omarchy.mjs setup",
+    "waiting": "bin/oats-omarchy.mjs waiting"
+  }
+}
