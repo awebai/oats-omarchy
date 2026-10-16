@@ -499,13 +499,16 @@ function check(env, p, state) {
   }
   if (!existsSync(state.deployment)) drift.push(`the deployment ${state.deployment} is gone`);
   for (const [what, path] of [["node", state.node], ["the OATS CLI", state.cli]]) if (path && !existsSync(path)) drift.push(`${what} ${path} is gone`);
-  if (state.desktop?.appImage && !existsSync(state.desktop.appImage)) drift.push(`the Desktop AppImage ${state.desktop.appImage} is gone`);
-  if (state.desktop?.entry && !existsSync(state.desktop.entry)) drift.push(`the Desktop's launcher entry ${state.desktop.entry} is gone`);
   const launch = discover.launchEnvironment(env);
+  // A path, or a name a found entry runs from the launch PATH.
+  const present = (x) => (isAbsolute(x) ? existsSync(x) : Boolean(which(x, launch.featurePath)));
+  const onPath = (x) => (isAbsolute(x) ? "" : ` from ${launch.featureSource}`);
+  if (state.desktop?.appImage && !present(state.desktop.appImage)) drift.push(`the Desktop AppImage ${state.desktop.appImage} is gone${onPath(state.desktop.appImage)}`);
+  if (state.desktop?.entry && !existsSync(state.desktop.entry)) drift.push(`the Desktop's launcher entry ${state.desktop.entry} is gone`);
   // The program a found entry runs, when it is not an AppImage (checked
-  // above, as for every source): a path, or a name on the launch PATH.
+  // above, as for every source).
   const program = state.desktop?.program;
-  if (program && program !== state.desktop.appImage && !(isAbsolute(program) ? existsSync(program) : which(program, launch.featurePath))) drift.push(`the Desktop program ${program}, which the launcher entry ${state.desktop.entry} runs, is gone`);
+  if (program && program !== state.desktop.appImage && !present(program)) drift.push(`the Desktop program ${program}, which the launcher entry ${state.desktop.entry} runs, is gone`);
   const found = discover.features(launch);
   const has = (part) => (state.parts || []).includes(part);
   const need = [...(has("tui") || has("desktop") ? discover.FEATURES.apps : []), ...(has("hook") ? discover.FEATURES.hook : []), ...(has("menu") ? discover.FEATURES.menu : [])];

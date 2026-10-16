@@ -88,3 +88,34 @@ test("the entry already extracts and runs (no libfuse2): the flag is not added t
   assert.equal(action, `omarchy-launch-or-focus awebai-oats-desktop "uwsm-app -- ${image} ${FLAG}"`);
   assert.equal(count(action, FLAG), 1);
 });
+
+// An entry may run the AppImage by its name on PATH; it is the same
+// AppImage, and needs libfuse2 the same way.
+test("an entry that runs the AppImage by name, without libfuse2: the fuse2 fix, the flag after the name, --check looks it up on PATH", (t) => {
+  const s = sandbox(t, { fuse: false });
+  const name = "OATS-Desktop.AppImage";
+  writeExecutable(join(s.fakebin, name), "#!/bin/sh\nexit 0\n");
+  const { file } = install(s, { appImage: false, exec: `${name} %U` });
+  const plan = s.run(["setup", "--plan", "--json"]);
+  assert.deepEqual(plan.json.result.found.desktop, { source: "entry", entry: file, appImage: name });
+  assert.ok(plan.json.result.fixes.some((f) => f.fix === "sudo pacman -S fuse2"));
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.equal(menuItems(s)["oats.desktop"].action, `omarchy-launch-or-focus awebai-oats-desktop "uwsm-app -- ${name} ${FLAG}"`);
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
+  unlinkSync(join(s.fakebin, name));
+  const drift = s.run(["setup", "--check", "--json"]).json.result.drift;
+  assert.equal(drift.length, 1, drift.join("\n"));
+  assert.match(drift[0], /^the Desktop AppImage OATS-Desktop\.AppImage is gone from /);
+});
+
+test("an entry that already extracts and runs the AppImage by name: no fuse2 fix, the flag once", (t) => {
+  const s = sandbox(t, { fuse: false });
+  const name = "OATS-Desktop.AppImage";
+  writeExecutable(join(s.fakebin, name), "#!/bin/sh\nexit 0\n");
+  install(s, { appImage: false, exec: `${name} ${FLAG} %U` });
+  const plan = s.run(["setup", "--plan", "--json"]);
+  assert.ok(!plan.json.result.fixes.some((f) => f.fix === "sudo pacman -S fuse2"));
+  assert.ok(plan.json.result.notes.some((n) => /already runs the AppImage extracted/.test(n)));
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.equal(menuItems(s)["oats.desktop"].action, `omarchy-launch-or-focus awebai-oats-desktop "uwsm-app -- ${name} ${FLAG}"`);
+});

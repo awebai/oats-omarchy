@@ -197,8 +197,9 @@ export function desktop(p, { flag, ours } = {}) {
   if (entries.length) {
     const [first, ...rest] = entries;
     // An entry that runs an AppImage (the Desktop's own install writes one)
-    // is an AppImage too: it needs libfuse2 like any other.
-    const appImage = first.program && isAbsolute(first.program) && APPIMAGE.test(first.program) ? first.program : null;
+    // is an AppImage too: it needs libfuse2 like any other. `appImage` is the
+    // Exec's own token, a path or a name on PATH.
+    const appImage = first.program && APPIMAGE.test(first.program) ? first.program : null;
     // Without FUSE the user may have added --appimage-extract-and-run to
     // the entry's Exec already.
     const extracted = Boolean(appImage) && first.exec.includes("--appimage-extract-and-run");

@@ -45,8 +45,9 @@ the files it wants, compares them with what is there, and only then writes:
   PATH), the Hyprland layout, the Desktop (a flag, an existing launcher
   entry, then an AppImage; its standard install is
   `~/.local/opt/oats-desktop/OATS-Desktop.AppImage` with an entry whose
-  Exec runs it, and an entry that runs an AppImage is treated as one, so
-  without FUSE the key and the menu extract and run it), FUSE, and the bindings
+  Exec runs it, and an entry that runs an AppImage, by path or by name on
+  PATH, is treated as one, so without FUSE the key and the menu extract and
+  run it), FUSE, and the bindings
   `omarchy menu keybindings --print` reports.
 - `lib/keys.mjs` turns that report into the suggested key and its snippet.
   Setup never writes key bindings.
