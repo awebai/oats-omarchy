@@ -303,6 +303,9 @@ function applyFiles(toWrite, state, facts, desired, p) {
       files: [...records.values()],
       dirs: [...new Set([...(previous.dirs || []), ...createdDirs])],
       stateDirs: [...new Set([...(previous.stateDirs || []), ...createdStateDirs])],
+      // Backups a partial --remove kept for files it already restored: they
+      // are deleted only when a --remove completes.
+      ...(previous.backups?.length ? { backups: previous.backups } : {}),
     };
     atomicWrite(stateFile, Buffer.from(`${JSON.stringify(next, null, 2)}\n`), 0o600);
     return toWrite.map((f) => f.path);

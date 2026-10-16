@@ -133,3 +133,24 @@ test("a partial --remove keeps every backup until everything is restored, then d
   assert.equal(s.run(["setup", "--remove"]).status, 0);
   assert.deepEqual(snapshot(s.home), before);
 });
+
+test("--apply after a partial --remove keeps the kept backups for the final --remove", (t) => {
+  const s = sandbox(t);
+  fs.mkdirSync(join(HOOK(s), ".."), { recursive: true });
+  fs.writeFileSync(HOOK(s), "echo the user's own hook\n");
+  const before = snapshot(s.home);
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  const stateFile = join(s.home, ".local/state/oats-omarchy/state.json");
+  const tuiEntry = join(s.home, ".local/share/applications/org.oats.tui.desktop");
+  const written = fs.readFileSync(tuiEntry);
+  fs.appendFileSync(tuiEntry, "# the user's edit\n");
+  assert.equal(s.run(["setup", "--remove"]).status, 1);
+  const kept = JSON.parse(fs.readFileSync(stateFile, "utf8")).backups;
+  assert.equal(kept.length, 1);
+
+  fs.writeFileSync(tuiEntry, written);
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(stateFile, "utf8")).backups, kept, "the kept backup is still owned");
+  assert.equal(s.run(["setup", "--remove"]).status, 0);
+  assert.deepEqual(snapshot(s.home), before);
+});
