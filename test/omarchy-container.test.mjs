@@ -1,0 +1,206 @@
+// Setup against a real Omarchy: its launchers, its hook runner, its
+// keybindings --print and Hyprland's own --verify-config. Runs in CI's
+// Arch + Omarchy container (OATS_OMARCHY_CONTAINER=1), as an unprivileged
+// user, every case with a temporary HOME and XDG directories.
+//
+// The kernel is the sandbox's stand-in (test/helpers/sandbox.mjs), which
+// dispatches `oats omarchy` to this package with the environment the kernel
+// gives a dispatched command; the real dispatch runs in the rehearsal.
+// Without a running Hyprland, `omarchy menu keybindings --print` answers with
+// its static bindings only, so the "keys taken" cases serve the captured
+// --print through a PATH fake of `omarchy`.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { parseDesktopExec } from "../oats-package/capabilities/oats-omarchy/lib/quote.mjs";
+import { readDesktopEntry } from "../oats-package/capabilities/oats-omarchy/lib/desktop-entry.mjs";
+import { fixture, repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
+
+const enabled = process.env.OATS_OMARCHY_CONTAINER === "1";
+const OMARCHY = process.env.OMARCHY_PATH || "/usr/share/omarchy";
+const verify = join(repo, "ci", "verify-hypr-config.sh");
+const skip = enabled ? false : "set OATS_OMARCHY_CONTAINER=1 (CI's Omarchy container)";
+
+// A sandbox whose PATH has the real Omarchy commands after the fakes. Only
+// systemctl stays real too: in the container it has no user bus, which is
+// the "no session" path.
+function omarchySandbox(t, options = {}) {
+  const s = sandbox(t, { launchers: false, print: "fail", fuse: true, ...options });
+  for (const fake of ["systemctl", "ldconfig", "omarchy"]) spawnSync("rm", ["-f", join(s.fakebin, fake)]);
+  if (options.print && options.print !== "fail") {
+    writeExecutable(join(s.fakebin, "omarchy"), `#!/bin/sh\n[ "$1 $2 $3" = "menu keybindings --print" ] && cat "${join(s.root, "print.txt")}" && exit 0\nexec ${OMARCHY}/bin/omarchy "$@"\n`);
+  }
+  s.env.PATH = `${s.fakebin}:${OMARCHY}/bin:/usr/bin:/bin`;
+  s.env.OMARCHY_PATH = OMARCHY;
+  return s;
+}
+
+// The user's Hyprland config as Omarchy installs it: its config/hypr files.
+function userHypr(s, { layout }) {
+  const dir = join(s.home, ".config", "hypr");
+  mkdirSync(dir, { recursive: true });
+  cpSync(join(OMARCHY, "config", "hypr"), dir, { recursive: true });
+  if (layout === "conf") {
+    spawnSync("rm", ["-f", join(dir, "bindings.lua")]);
+    writeFileSync(join(dir, "bindings.conf"), "# the older layout\n");
+  }
+  return dir;
+}
+
+// Writes the printed snippet where the plan says, then checks the user's
+// whole config with Hyprland --verify-config.
+function verifySnippet(s, keys) {
+  assert.ok(keys.snippet, "a snippet was printed");
+  if (keys.format === "lua") {
+    writeFileSync(keys.file, `${readFileSync(keys.file, "utf8")}\n${keys.snippet}`);
+    return spawnSync("bash", [verify, "--expect", "ok", join(s.home, ".config", "hypr", "hyprland.lua"), s.home], { encoding: "utf8" });
+  }
+  const conf = join(s.root, "snippet.conf");
+  writeFileSync(conf, keys.snippet);
+  return spawnSync("bash", [verify, "--expect", "ok", conf, s.home], { encoding: "utf8" });
+}
+
+const plan = (s, extra = []) => {
+  const r = s.run(["setup", "--plan", "--json", ...extra]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  return r.json.result;
+};
+
+test("Omarchy is installed", { skip }, () => {
+  const r = spawnSync("pacman", ["-Q", "omarchy", "hyprland"], { encoding: "utf8" });
+  assert.equal(r.status, 0);
+  process.stdout.write(`# ${r.stdout.trim().replace(/\n/g, ", ")}\n`);
+});
+
+test("Lua layout, no Desktop: plan, apply, the real post-update hook, check, remove", { skip }, (t) => {
+  const s = omarchySandbox(t);
+  userHypr(s, { layout: "lua" });
+  const before = snapshot(s.home);
+  const p = plan(s);
+  assert.equal(p.found.launchPath.source, "minimal", "no user bus in the container");
+  assert.deepEqual(p.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "skipped"], ["hook", "will apply"]]);
+  assert.equal(p.keys.status, "unchecked", "--print without Hyprland");
+  assert.match(p.keys.notes[0], /no running Hyprland answered/);
+  assert.equal(p.found.libfuse2.ok, false, "fuse2 is not in Omarchy's packages");
+
+  const apply = s.run(["setup", "--apply", "--json"]);
+  assert.equal(apply.status, 0, apply.stdout + apply.stderr);
+  const hook = spawnSync("omarchy-hook", ["post-update"], { env: s.env, cwd: s.home, encoding: "utf8" });
+  assert.equal(hook.status, 0, hook.stderr);
+  assert.equal(hook.stdout, "", "Omarchy's hook runner ran our hook, which found no drift");
+  assert.equal(s.run(["setup", "--check"]).stdout, "");
+
+  const v = verifySnippet(s, p.keys);
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+  // The snippet went into the user's bindings.lua for the check; take it out again.
+  cpSync(join(OMARCHY, "config", "hypr", "bindings.lua"), p.keys.file);
+
+  const removed = s.run(["setup", "--remove"]);
+  assert.equal(removed.status, 0, removed.stdout + removed.stderr);
+  assert.deepEqual(snapshot(s.home), before);
+});
+
+test("the .conf layout: the hyprlang snippet passes --verify-config", { skip }, (t) => {
+  const s = omarchySandbox(t);
+  userHypr(s, { layout: "conf" });
+  const p = plan(s);
+  assert.equal(p.found.bindings.format, "conf");
+  assert.equal(p.keys.format, "conf");
+  const v = verifySnippet(s, p.keys);
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+});
+
+test("an AppImage without libfuse2: the entry extracts and runs, the plan names fuse2, and apply/remove is exact", { skip }, (t) => {
+  const s = omarchySandbox(t);
+  userHypr(s, { layout: "lua" });
+  mkdirSync(join(s.home, "Applications"));
+  writeExecutable(join(s.home, "Applications", "OATS-Desktop.AppImage"), "#!/bin/sh\nexit 0\n");
+  const before = snapshot(s.home);
+  const p = plan(s);
+  assert.ok(p.fixes.some((f) => f.fix === "sudo pacman -S fuse2"));
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  const entry = readDesktopEntry(readFileSync(join(s.home, ".local/share/applications/awebai-oats-desktop.desktop"), "utf8"));
+  assert.deepEqual(parseDesktopExec(entry.Exec).slice(1), ["--appimage-extract-and-run", "--dir", s.deployment]);
+  const v = verifySnippet(s, p.keys);
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+  cpSync(join(OMARCHY, "config", "hypr", "bindings.lua"), p.keys.file);
+  assert.equal(s.run(["setup", "--remove"]).status, 0);
+  assert.deepEqual(snapshot(s.home), before);
+});
+
+const rebound = (action) => readFileSync(fixture("print", "omarchy-4.0.4.txt"), "utf8")
+  .split("\n").map((l) => (l.startsWith("SUPER + O ") ? `${"SUPER + O".padEnd(35)} → ${action}` : l)).join("\n");
+
+for (const [name, print, expect] of [
+  ["Omarchy's defaults", readFileSync(fixture("print", "omarchy-4.0.4.txt"), "utf8"), "default"],
+  ["SUPER + O rebound to a command", rebound("omarchy-launch-browser"), "command"],
+  ["SUPER + O rebound with a description (commented double tap)", rebound("Scratch notes"), "description"],
+]) {
+  test(`keys taken, ${name}: the snippet passes --verify-config`, { skip }, (t) => {
+    const s = omarchySandbox(t, { print });
+    userHypr(s, { layout: "lua" });
+    const p = plan(s);
+    assert.equal(p.keys.status, "suggested");
+    assert.equal(p.keys.pop.kind, expect);
+    const v = verifySnippet(s, p.keys);
+    assert.equal(v.status, 0, v.stdout + v.stderr);
+  });
+}
+
+test("keys taken, a user submap named oats: the next free key, and it passes --verify-config", { skip }, (t) => {
+  const s = omarchySandbox(t, { print: readFileSync(fixture("print", "omarchy-4.0.4.txt"), "utf8") });
+  const dir = userHypr(s, { layout: "lua" });
+  writeFileSync(join(dir, "bindings.lua"), `${readFileSync(join(dir, "bindings.lua"), "utf8")}\nhl.define_submap("oats", "reset", function()\n  hl.bind("escape", hl.dsp.submap("reset"))\nend)\n`);
+  const p = plan(s);
+  assert.notEqual(p.keys.entry, "SUPER + O");
+  assert.equal(p.keys.submap, "oats-omarchy");
+  const v = verifySnippet(s, p.keys);
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+});
+
+test("the real launchers run what setup wrote, with a deployment path that has a space", { skip }, (t) => {
+  const s = omarchySandbox(t, { deploymentName: "my agents & co" });
+  mkdirSync(join(s.home, "Applications"));
+  const image = join(s.home, "Applications", "OATS Desktop.AppImage");
+  const argvLog = join(s.root, "argv.log");
+  writeExecutable(image, `#!/bin/sh\nfor a; do echo "desktop:$a"; done >> "${argvLog}"\n`);
+  // uwsm-app is where Omarchy's chain leaves the launchers; hyprctl answers
+  // that no window matches, as on a desktop with neither app open.
+  writeExecutable(join(s.fakebin, "uwsm-app"), `#!/bin/sh\n[ "$1" = "--" ] && shift\nif [ "$1" = xdg-terminal-exec ]; then for a; do echo "terminal:$a"; done >> "${argvLog}"; exit 0; fi\nexec "$@"\n`);
+  writeExecutable(join(s.fakebin, "hyprctl"), "#!/bin/sh\necho '[]'\n");
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  const p = plan(s);
+  const shim = join(s.home, ".local/share/oats-omarchy/oats");
+  const terminal = ["terminal:xdg-terminal-exec", "terminal:--app-id=org.oats.tui", "terminal:-e", `terminal:${shim}`, "terminal:tui", "terminal:--dir", `terminal:${s.deployment}`];
+
+  // The TUI's desktop entry, launched by GLib as the app launcher does.
+  const entry = join(s.home, ".local/share/applications/org.oats.tui.desktop");
+  const gio = spawnSync("gio", ["launch", entry], { env: s.env, encoding: "utf8", timeout: 30_000 });
+  assert.equal(gio.status, 0, gio.stderr);
+  waitFor(argvLog, terminal.length);
+  assert.deepEqual(readFileSync(argvLog, "utf8").trim().split("\n"), terminal);
+
+  // The key's command line, as Hyprland runs it (sh -c).
+  writeFileSync(argvLog, "");
+  const tuiCommand = p.keys.snippet.match(/o\.bind\("T", "OATS TUI", "(.*)"\)/)[1].replace(/\\(.)/g, "$1");
+  assert.equal(spawnSync("sh", ["-c", tuiCommand], { env: s.env, encoding: "utf8" }).status, 0);
+  waitFor(argvLog, terminal.length);
+  assert.deepEqual(readFileSync(argvLog, "utf8").trim().split("\n"), terminal);
+
+  writeFileSync(argvLog, "");
+  const desktopCommand = p.keys.snippet.match(/o\.bind\("D", "OATS Desktop", "(.*)"\)/)[1].replace(/\\(.)/g, "$1");
+  assert.equal(spawnSync("sh", ["-c", desktopCommand], { env: s.env, encoding: "utf8" }).status, 0);
+  const extract = p.found.libfuse2.ok ? [] : ["desktop:--appimage-extract-and-run"];
+  waitFor(argvLog, extract.length + 2);
+  assert.deepEqual(readFileSync(argvLog, "utf8").trim().split("\n"), [...extract, "desktop:--dir", `desktop:${s.deployment}`]);
+});
+
+// The launchers detach (setsid); give the end of the chain a moment.
+function waitFor(file, lines) {
+  for (let i = 0; i < 50; i++) {
+    if (existsSync(file) && readFileSync(file, "utf8").trim().split("\n").filter(Boolean).length >= lines) return;
+    spawnSync("sleep", ["0.1"]);
+  }
+}
