@@ -137,7 +137,7 @@ export function desktopEntries(p, ours = new Set()) {
       if (keys.Hidden === "true" || !keys.Exec) continue;
       const argv = parseDesktopExec(keys.Exec);
       const program = argv[0] === "env" ? argv.find((a, i) => i > 0 && !a.includes("=")) : argv[0];
-      if (keys.StartupWMClass === DESKTOP_CLASS || (program && APPIMAGE.test(program))) found.push({ path, exec: argv });
+      if (keys.StartupWMClass === DESKTOP_CLASS || (program && APPIMAGE.test(program))) found.push({ path, exec: argv, program: program || null });
     }
   }
   return found;
@@ -175,7 +175,7 @@ export function desktop(p, { flag, ours } = {}) {
     return { source: "flag", appImage: flag, others: [] };
   }
   const entries = desktopEntries(p, ours);
-  if (entries.length) return { source: "entry", entry: entries[0].path, exec: entries[0].exec, others: entries.slice(1).map((e) => e.path) };
+  if (entries.length) return { source: "entry", entry: entries[0].path, exec: entries[0].exec, program: entries[0].program, others: entries.slice(1).map((e) => e.path) };
   const images = appImages(p);
   if (!images.length) return { source: null, reason: `no OATS Desktop found (no launcher entry with StartupWMClass=${DESKTOP_CLASS}, no AppImage in ~/Applications, ~/.local/bin, ~/Downloads or /opt)`, fix: GET_DESKTOP };
   const [newest, ...others] = images;

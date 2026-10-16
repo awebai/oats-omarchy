@@ -127,7 +127,10 @@ test("--apply then --remove restores the whole tree byte for byte, with the user
   const r = s.run(["setup", "--apply", "--json"]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const state = JSON.parse(readFileSync(p.state, "utf8"));
-  assert.deepEqual(state.files.find((f) => f.role === "tui-entry").prior, { state: "file", backup: "backup/tui-entry", mode: 0o750, digest: state.files.find((f) => f.role === "tui-entry").prior.digest });
+  const prior = state.files.find((f) => f.role === "tui-entry").prior;
+  assert.match(prior.backup, /^backup\/tui-entry-[0-9a-f]{12}$/);
+  assert.deepEqual(prior, { state: "file", backup: prior.backup, mode: 0o750, digest: prior.digest });
+  assert.equal(readFileSync(join(s.home, ".local/state/oats-omarchy", prior.backup), "utf8"), "[Desktop Entry]\nName=My own OATS entry\nExec=true\n");
   assert.equal(state.files.find((f) => f.role === "tui-icon").prior.state, "link");
   assert.equal(readFileSync(join(s.home, "dotfiles/icon.png"), "utf8"), "not really a png", "a link's target is never written through");
 

@@ -56,14 +56,16 @@ export function desktopEntry({ execArgv }) {
 }
 
 // Omarchy's post-update hook: re-check, print only what drifted, exit 0.
+// Every value in it is a single-quoted word, messages included: a path is
+// data, never shell source.
 export function hook({ shimPath, deployment, soul }) {
-  const dep = shellQuote(deployment);
+  const say = (text) => `printf '%s\\n' ${shellQuote(text)}`;
   return `#!/bin/bash
 # Managed by \`oats omarchy setup\` (oats.omarchy); \`oats omarchy setup --remove\` removes it.
 # After an Omarchy update, report what drifted from the OATS setup. Advisory: always exits 0.
-cd ${dep} 2>/dev/null || { echo "oats-omarchy: the OATS deployment ${deployment} is gone, so its Omarchy setup cannot be checked"; exit 0; }
+cd ${shellQuote(deployment)} 2>/dev/null || { ${say(`oats-omarchy: the OATS deployment ${deployment} is gone, so its Omarchy setup cannot be checked`)}; exit 0; }
 if ! out=$(${shellQuote(shimPath)} omarchy setup --check --soul ${shellQuote(soul)} 2>&1); then
-  echo "oats-omarchy: \\\`oats omarchy\\\` no longer runs for soul ${soul}:"
+  ${say(`oats-omarchy: \`oats omarchy\` no longer runs for soul ${soul}:`)}
   printf '%s\\n' "$out" | head -n 5
   exit 0
 fi

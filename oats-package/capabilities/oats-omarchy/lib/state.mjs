@@ -22,17 +22,23 @@ export function readFileState(path) {
   return { bytes: readFileSync(path), mode: st.mode & 0o7777 };
 }
 
-// Temp file in the same directory, fsync, chmod, rename over the target.
+// Temp file in the same directory, every byte written, fsync, chmod, rename
+// over the target (rename replaces a link itself, never what it points to).
+// On any failure the temp file is removed and the target is untouched.
 export function atomicWrite(path, bytes, mode) {
   const tmp = join(dirname(path), `.${basename(path)}.oats-omarchy-${randomBytes(6).toString("hex")}`);
   const fd = openSync(tmp, "wx", 0o600);
   try {
-    writeSync(fd, bytes);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  try {
+    try {
+      for (let at = 0; at < bytes.length;) {
+        const n = writeSync(fd, bytes, at, bytes.length - at);
+        if (n <= 0) throw Object.assign(new Error(`writing ${tmp} made no progress`), { code: "EIO" });
+        at += n;
+      }
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
     chmodSync(tmp, mode);
     renameSync(tmp, path);
   } catch (e) {
@@ -41,12 +47,13 @@ export function atomicWrite(path, bytes, mode) {
   }
 }
 
-// mkdir -p that returns the directories it created, outermost first.
-export function makeDirs(dir) {
+// mkdir -p. Each directory it creates is pushed onto `created` (outermost
+// first) as soon as it exists, so a failure part-way still reports them.
+export function makeDirs(dir, created = []) {
   const missing = [];
   for (let d = dir; !existsSync(d); d = dirname(d)) missing.unshift(d);
-  for (const d of missing) mkdirSync(d, { mode: 0o755 });
-  return missing;
+  for (const d of missing) { mkdirSync(d, { mode: 0o755 }); created.push(d); }
+  return created;
 }
 
 // Removes each directory that is empty, innermost first; → those removed.

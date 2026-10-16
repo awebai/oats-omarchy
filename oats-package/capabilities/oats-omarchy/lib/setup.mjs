@@ -4,8 +4,9 @@
 // exactly that, atomically, recording each path's prior state; --remove puts
 // every recorded path back as it was; --check reports drift and always exits
 // 0. The key binding is printed, never written.
-import { existsSync, readFileSync, readlinkSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { randomBytes } from "node:crypto";
+import { existsSync, readFileSync, readlinkSync, renameSync, symlinkSync, unlinkSync } from "node:fs";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as discover from "./discover.mjs";
 import * as files from "./files.mjs";
@@ -248,33 +249,45 @@ function planOrApply(env, args, p, state) {
   };
 }
 
-// Writes the files, then the state. A failure rolls back what this run wrote,
-// in reverse, and reports only what it confirmed.
+// A backup name nothing else uses: setup never overwrites a file it did not
+// write, even in its own state directory.
+function backupName(backupDir, role) {
+  for (;;) {
+    const name = `${role}-${randomBytes(6).toString("hex")}`;
+    if (!existsSync(join(backupDir, name))) return name;
+  }
+}
+
+// Writes the files, then the state. Every step that changes the disk
+// registers its undo before the next step can fail; a failure rolls back what
+// this run did, in reverse, and removes the directories it created.
 function applyFiles(toWrite, state, facts, desired, p) {
   const stateFile = join(p.stateDir, "state.json");
   const backupDir = join(p.stateDir, "backup");
   const done = [];
+  const createdStateDirs = [];
   const createdDirs = [];
   const records = new Map((state?.files || []).map((f) => [f.path, f]));
   try {
-    createdDirs.push(...makeDirs(backupDir).map((d) => ({ dir: d, state: true })));
+    makeDirs(backupDir, createdStateDirs);
     for (const file of toWrite) {
       let prior = file.recorded?.prior;
       if (!prior) {
         prior = { state: "absent" };
-        if (file.disk) {
-          const backup = join(backupDir, file.role);
+        if (file.disk?.link) prior = { state: "link", target: readlinkSync(file.path), digest: digest(file.disk.bytes) };
+        else if (file.disk) {
+          const name = backupName(backupDir, file.role);
+          const backup = join(backupDir, name);
           atomicWrite(backup, file.disk.bytes, 0o600);
           done.push({ undo: () => unlinkSync(backup) });
-          prior = file.disk.link
-            ? { state: "link", target: readlinkSync(file.path), digest: digest(file.disk.bytes) }
-            : { state: "file", backup: `backup/${file.role}`, mode: file.disk.mode, digest: digest(file.disk.bytes) };
+          prior = { state: "file", backup: `backup/${name}`, mode: file.disk.mode, digest: digest(file.disk.bytes) };
         }
       }
-      createdDirs.push(...makeDirs(dirname(file.path)).map((d) => ({ dir: d })));
+      makeDirs(dirname(file.path), createdDirs);
       const before = file.disk;
       const beforeLink = before?.link ? readlinkSync(file.path) : null;
-      if (beforeLink) unlinkSync(file.path);
+      // The rename in atomicWrite replaces a link itself; until it has
+      // succeeded the path is untouched.
       atomicWrite(file.path, file.bytes, file.mode);
       done.push({ undo: () => restorePrior(file.path, before ? (beforeLink ? { state: "link", target: beforeLink } : { state: "bytes", bytes: before.bytes, mode: before.mode }) : { state: "absent" }) });
       records.set(file.path, { path: file.path, role: file.role, digest: digest(file.bytes), mode: file.mode, prior });
@@ -285,18 +298,18 @@ function applyFiles(toWrite, state, facts, desired, p) {
       package: manifest.capability, version: manifest.version,
       deployment: facts.deployment.path, soul: facts.soul,
       node: facts.kernel.node, cli: facts.kernel.cli,
-      desktop: facts.desktop.source ? { source: facts.desktop.source, ...(facts.desktop.entry ? { entry: facts.desktop.entry } : {}), ...(facts.desktop.appImage ? { appImage: facts.desktop.appImage } : {}), exec: desired.desktopExec } : null,
+      desktop: facts.desktop.source ? { source: facts.desktop.source, ...(facts.desktop.entry ? { entry: facts.desktop.entry } : {}), ...(facts.desktop.program ? { program: facts.desktop.program } : {}), ...(facts.desktop.appImage ? { appImage: facts.desktop.appImage } : {}), exec: desired.desktopExec } : null,
       parts: desired.parts.filter((x) => x.files.length).map((x) => x.part),
       files: [...records.values()],
-      dirs: [...new Set([...(previous.dirs || []), ...createdDirs.filter((d) => !d.state).map((d) => d.dir)])],
-      stateDirs: [...new Set([...(previous.stateDirs || []), ...createdDirs.filter((d) => d.state).map((d) => d.dir)])],
+      dirs: [...new Set([...(previous.dirs || []), ...createdDirs])],
+      stateDirs: [...new Set([...(previous.stateDirs || []), ...createdStateDirs])],
     };
     atomicWrite(stateFile, Buffer.from(`${JSON.stringify(next, null, 2)}\n`), 0o600);
     return toWrite.map((f) => f.path);
   } catch (e) {
     const rollbackErrors = [];
     for (const step of done.reverse()) { try { step.undo(); } catch (u) { rollbackErrors.push(u.message); } }
-    removeEmptyDirs(createdDirs.map((d) => d.dir));
+    removeEmptyDirs([...createdDirs, ...createdStateDirs]);
     throw new SetupError("E_APPLY_FAILED", `--apply failed and was rolled back: ${e.message}${rollbackErrors.length ? `; rollback also failed: ${rollbackErrors.join("; ")}` : ""}`, { written: [] });
   }
 }
@@ -305,8 +318,10 @@ function restorePrior(path, prior, stateDir) {
   if (prior.state === "absent") { try { unlinkSync(path); } catch (e) { if (e.code !== "ENOENT") throw e; } return; }
   makeDirs(dirname(path));
   if (prior.state === "link") {
-    try { unlinkSync(path); } catch (e) { if (e.code !== "ENOENT") throw e; }
-    symlinkSync(prior.target, path);
+    // A new link beside the path, renamed over it: the path is never missing.
+    const tmp = join(dirname(path), `.${basename(path)}.oats-omarchy-${randomBytes(6).toString("hex")}`);
+    symlinkSync(prior.target, tmp);
+    try { renameSync(tmp, path); } catch (e) { try { unlinkSync(tmp); } catch { /* gone */ } throw e; }
     return;
   }
   const bytes = prior.state === "bytes" ? prior.bytes : readFileSync(join(stateDir, prior.backup));
@@ -347,6 +362,13 @@ function remove(env, p, state) {
     restored.push(file.path);
   }
   removeEmptyDirs(state.dirs || []);
+  // The backups of what was restored; a file left in place keeps its own.
+  // Only backups setup recorded are deleted: anything else in the state
+  // directory is left as it is.
+  for (const file of state.files) {
+    if (!file.prior?.backup || !restored.includes(file.path)) continue;
+    try { unlinkSync(join(p.stateDir, file.prior.backup)); } catch (e) { if (e.code !== "ENOENT") throw e; }
+  }
   const warnings = refreshCaches(p, env);
   if (left.length) {
     const kept = { ...state, files: state.files.filter((f) => left.some((l) => l.path === f.path)) };
@@ -354,7 +376,6 @@ function remove(env, p, state) {
     const changed = left.filter((l) => l.why.startsWith("changed"));
     throw new SetupError("E_MODIFIED", `left in place because ${changed.length === 1 ? "it was" : "they were"} changed since setup wrote ${changed.length === 1 ? "it" : "them"}: ${changed.map((l) => l.path).join(", ")}. Everything else was restored. Restore or delete ${changed.length === 1 ? "it" : "them"} by hand, then run --remove again.`, { restored, left: left.map(({ path, why }) => ({ path, why })) });
   }
-  rmSync(join(p.stateDir, "backup"), { recursive: true, force: true });
   unlinkSync(stateFile);
   removeEmptyDirs(state.stateDirs || []);
   return { mode: "remove", restored, warnings };
@@ -374,6 +395,9 @@ function check(env, p, state) {
   if (state.desktop?.appImage && !existsSync(state.desktop.appImage)) drift.push(`the Desktop AppImage ${state.desktop.appImage} is gone`);
   if (state.desktop?.entry && !existsSync(state.desktop.entry)) drift.push(`the Desktop's launcher entry ${state.desktop.entry} is gone`);
   const launch = discover.launchEnvironment(env);
+  // The program a found entry runs: a path, or a name on the launch PATH.
+  const program = state.desktop?.program;
+  if (program && !(isAbsolute(program) ? existsSync(program) : which(program, launch.featurePath))) drift.push(`the Desktop program ${program}, which the launcher entry ${state.desktop.entry} runs, is gone`);
   const found = discover.features(launch);
   const need = [...((state.parts || []).some((x) => x === "tui" || x === "desktop") ? discover.FEATURES.apps : []), ...((state.parts || []).includes("hook") ? discover.FEATURES.hook : [])];
   const gone = discover.missing(found, need);
