@@ -6,7 +6,7 @@
 // 0. The key binding is printed, never written.
 import { randomBytes } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, renameSync, symlinkSync, unlinkSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as discover from "./discover.mjs";
 import * as files from "./files.mjs";
@@ -412,7 +412,8 @@ function applyFiles(toWrite, state, facts, desired, p) {
   }
 }
 
-function restorePrior(path, prior, stateDir) {
+// `backup` is the checked backup file of a "file" prior.
+function restorePrior(path, prior, backup) {
   if (prior.state === "absent") { try { unlinkSync(path); } catch (e) { if (e.code !== "ENOENT") throw e; } return; }
   makeDirs(dirname(path));
   if (prior.state === "link") {
@@ -422,7 +423,7 @@ function restorePrior(path, prior, stateDir) {
     try { renameSync(tmp, path); } catch (e) { try { unlinkSync(tmp); } catch { /* gone */ } throw e; }
     return;
   }
-  const bytes = prior.state === "bytes" ? prior.bytes : readFileSync(join(stateDir, prior.backup));
+  const bytes = prior.state === "bytes" ? prior.bytes : readFileSync(backup);
   atomicWrite(path, bytes, prior.mode);
 }
 
@@ -445,18 +446,24 @@ function refreshCaches(p, env) {
   return warnings;
 }
 
-// A backup setup made: a name directly in <stateDir>/backup. → its path,
-// or null.
-function backupPath(backup, p) {
-  if (typeof backup !== "string" || !backup) return null;
-  const path = resolve(p.stateDir, backup);
-  return dirname(path) === join(p.stateDir, "backup") ? path : null;
+// Setup's backup directory, when it is a directory in the state directory
+// and not a link out of it. → its path, or null.
+function backupDir(p) {
+  const dir = join(p.stateDir, "backup");
+  try { return lstatSync(dir).isDirectory() ? dir : null; } catch { return null; }
+}
+
+// A backup as setup records it, `backup/<name>`, and nothing else. → the
+// file in `dir`, which is the path --remove reads and deletes; or null.
+function backupPath(backup, dir) {
+  const m = typeof backup === "string" ? /^backup\/([^/]+)$/.exec(backup) : null;
+  return m && dir && m[1] !== "." && m[1] !== ".." ? join(dir, m[1]) : null;
 }
 
 // Why --remove refuses a recorded file, or null. The state file sits in the
 // user's state directory and may have been edited: --remove restores only
 // the paths setup manages, from backups in its own backup directory.
-function refusal(file, p) {
+function refusal(file, p, dir) {
   const managed = managedPaths(p);
   if (!file || typeof file.path !== "string" || managed[file.role] !== file.path) return `not a path setup manages${file?.role ? ` as ${file.role}` : ""}`;
   const prior = file.prior;
@@ -464,8 +471,9 @@ function refusal(file, p) {
   if (file.role === "menu") return (prior == null || prior.state === "absent" || (prior.state === "text" && typeof prior.text === "string")) ? null : "not a menu edit setup records";
   if (prior?.state === "absent" || (prior?.state === "link" && typeof prior.target === "string")) return null;
   if (prior?.state !== "file") return "its prior state is not one setup records";
-  const backup = backupPath(prior.backup, p);
-  if (!backup) return `its backup ${JSON.stringify(prior.backup)} is not in ${join(p.stateDir, "backup")}`;
+  if (!dir) return `setup's backup directory ${join(p.stateDir, "backup")} is missing or is not a directory`;
+  const backup = backupPath(prior.backup, dir);
+  if (!backup) return `its backup ${JSON.stringify(prior.backup)} is not in ${dir}`;
   let st;
   try { st = lstatSync(backup); } catch { return `its backup ${backup} is missing`; }
   return st.isFile() ? null : `its backup ${backup} is not a regular file`;
@@ -477,8 +485,9 @@ function remove(env, p, state) {
   const restored = [];
   const left = [];
   // Every entry is checked before anything is restored or deleted.
-  const refused = new Map(state.files.map((f) => [f, refusal(f, p)]).filter(([, why]) => why));
-  const backupsRefused = (state.backups || []).filter((b) => !backupPath(b, p));
+  const dir = backupDir(p);
+  const refused = new Map(state.files.map((f) => [f, refusal(f, p, dir)]).filter(([, why]) => why));
+  const backupsRefused = (state.backups || []).filter((b) => !backupPath(b, join(p.stateDir, "backup")));
   const ordered = [...state.files.filter((f) => f?.role !== "shim").reverse(), ...state.files.filter((f) => f?.role === "shim")];
   for (const file of ordered) {
     if (refused.has(file)) { left.push({ file, path: String(file?.path), why: refused.get(file), refused: true }); continue; }
@@ -491,7 +500,7 @@ function remove(env, p, state) {
     const disk = readFileState(file.path);
     if (disk && digest(disk.bytes) !== file.digest) { left.push({ file, path: file.path, why: "changed since setup wrote it", changed: true }); continue; }
     if (!disk && file.prior.state === "absent") { restored.push(file.path); continue; }
-    restorePrior(file.path, file.prior, p.stateDir);
+    restorePrior(file.path, file.prior, file.prior.state === "file" ? backupPath(file.prior.backup, dir) : null);
     restored.push(file.path);
   }
   removeEmptyDirs(state.dirs || []);
@@ -513,8 +522,9 @@ function remove(env, p, state) {
   }
   // Last, and only now: the backups setup recorded (anything else in the
   // state directory stays), the state, and the state directories it made.
-  for (const backup of backups) {
-    try { unlinkSync(backupPath(backup, p)); } catch (e) { if (e.code !== "ENOENT") throw e; }
+  // Nothing is deleted through a backup directory that is not setup's own.
+  for (const backup of dir ? backups : []) {
+    try { unlinkSync(backupPath(backup, dir)); } catch (e) { if (e.code !== "ENOENT") throw e; }
   }
   unlinkSync(stateFile);
   removeEmptyDirs(state.stateDirs || []);

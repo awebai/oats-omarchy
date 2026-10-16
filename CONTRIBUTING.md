@@ -71,10 +71,11 @@ the files it wants, compares them with what is there, and only then writes:
   created the file. `--remove` restores from it and deletes only those
   directories, only when empty. The state file is the user's to edit, so
   `--remove` checks every entry before it touches anything: an entry whose
-  path is not one setup manages for its role, or whose backup is not a
-  regular file directly in `backup/`, is refused by name (`E_STATE_REFUSED`)
-  and the rest is restored (`managedPaths` and `refusal` in
-  `lib/setup.mjs`).
+  path is not one setup manages for its role, or whose backup is not recorded
+  as `backup/<name>`, a regular file in a `backup/` that is a directory (not
+  a link), is refused by name (`E_STATE_REFUSED`) and the rest is restored.
+  The path that check returns is the one `--remove` reads and deletes
+  (`managedPaths`, `backupPath` and `refusal` in `lib/setup.mjs`).
 - `lib/system.mjs` runs commands with a timeout and a given environment.
 
 `oats omarchy waiting` (`lib/waiting.mjs`) is the menu's "Waiting on you"

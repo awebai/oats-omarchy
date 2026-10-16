@@ -4,7 +4,7 @@
 // in its own backup directory.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { digest } from "../oats-package/capabilities/oats-omarchy/lib/state.mjs";
 import { sandbox } from "./helpers/sandbox.mjs";
@@ -77,6 +77,36 @@ test("a recorded backup that is a link is refused", (t) => {
   assert.equal(r.json.error.code, "E_STATE_REFUSED");
   assert.match(r.json.error.message, /is not a regular file/);
   assert.notEqual(readFileSync(p.hook, "utf8"), "outside\n");
+});
+
+test("a backup recorded by its absolute path is refused, and the next entry is still restored", (t) => {
+  const { s, p } = applied(t);
+  const hookWritten = readFileSync(p.hook, "utf8");
+  tamper(p, (state) => { const prior = state.files.find((f) => f.role === "hook").prior; prior.backup = join(p.stateDir, prior.backup); });
+  const r = s.run(["setup", "--remove", "--json"]);
+  assert.equal(r.status, 1);
+  assert.equal(r.json.error.code, "E_STATE_REFUSED");
+  assert.match(r.json.error.message, /its backup ".*" is not in /);
+  assert.equal(readFileSync(p.hook, "utf8"), hookWritten);
+  assert.equal(readFileSync(p.tuiEntry, "utf8"), MY_ENTRY, "the entry after it is restored");
+});
+
+test("a backup directory that is a link out of the state directory is never read or deleted through", (t) => {
+  const { s, p } = applied(t);
+  const hookWritten = readFileSync(p.hook, "utf8");
+  const backupDir = join(p.stateDir, "backup");
+  const elsewhere = join(s.root, "elsewhere");
+  const backup = readState(p).files.find((f) => f.role === "hook").prior.backup;
+  mkdirSync(elsewhere);
+  writeFileSync(join(elsewhere, backup.slice("backup/".length)), "not a backup of setup's\n");
+  renameSync(backupDir, join(s.root, "real-backup"));
+  symlinkSync(elsewhere, backupDir);
+  const r = s.run(["setup", "--remove", "--json"]);
+  assert.equal(r.status, 1);
+  assert.equal(r.json.error.code, "E_STATE_REFUSED");
+  assert.match(r.json.error.message, /setup's backup directory .* is missing or is not a directory/);
+  assert.equal(readFileSync(p.hook, "utf8"), hookWritten, "nothing is restored from it");
+  assert.equal(readFileSync(join(elsewhere, backup.slice("backup/".length)), "utf8"), "not a backup of setup's\n", "nothing is deleted through it");
 });
 
 test("a recorded path setup does not manage is refused by name and left alone, even when its digest matches", (t) => {
