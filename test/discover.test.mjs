@@ -132,9 +132,9 @@ test("desktop entries: by StartupWMClass, or by an Exec that runs an OATS Deskto
   write(join(p.applications, "g-notes.txt"), entry(["Exec=/apps/OATS-Desktop.AppImage"]));
   const found = desktopEntries(p);
   assert.deepEqual(found, [
-    { path: join(p.applications, "a-class.desktop"), exec: ["/apps/oats-bin", "--flag"] },
-    { path: join(p.applications, "b-appimage.desktop"), exec: ["/apps/my apps/OATS-Desktop-1.2.AppImage"] },
-    { path: join(p.applications, "c-env.desktop"), exec: ["env", "FOO=1", "BAR=2", "/apps/oats_desktop.AppImage"] },
+    { path: join(p.applications, "a-class.desktop"), exec: ["/apps/oats-bin", "--flag"], program: "/apps/oats-bin" },
+    { path: join(p.applications, "b-appimage.desktop"), exec: ["/apps/my apps/OATS-Desktop-1.2.AppImage"], program: "/apps/my apps/OATS-Desktop-1.2.AppImage" },
+    { path: join(p.applications, "c-env.desktop"), exec: ["env", "FOO=1", "BAR=2", "/apps/oats_desktop.AppImage"], program: "/apps/oats_desktop.AppImage" },
   ]);
 });
 

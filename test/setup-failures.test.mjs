@@ -110,3 +110,26 @@ test("--check reports the program behind a found Desktop entry when it is gone",
   assert.equal(r.status, 0);
   assert.deepEqual(r.json.result.drift, [`the Desktop program ${image}, which the launcher entry ${entry} runs, is gone`]);
 });
+
+test("a partial --remove keeps every backup until everything is restored, then deletes only those", (t) => {
+  const s = sandbox(t);
+  fs.mkdirSync(join(HOOK(s), ".."), { recursive: true });
+  fs.writeFileSync(HOOK(s), "echo the user's own hook\n");
+  const before = snapshot(s.home);
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  const stateDir = join(s.home, ".local/state/oats-omarchy");
+  const hookBackup = JSON.parse(fs.readFileSync(join(stateDir, "state.json"), "utf8")).files.find((f) => f.role === "hook").prior.backup;
+  const tuiEntry = join(s.home, ".local/share/applications/org.oats.tui.desktop");
+  fs.appendFileSync(tuiEntry, "# the user's edit\n");
+
+  const partial = s.run(["setup", "--remove", "--json"]);
+  assert.equal(partial.status, 1);
+  assert.equal(partial.json.error.code, "E_MODIFIED");
+  assert.equal(fs.readFileSync(HOOK(s), "utf8"), "echo the user's own hook\n", "the hook was restored");
+  assert.ok(fs.existsSync(join(stateDir, hookBackup)), "its backup stays until everything is restored");
+  assert.deepEqual(JSON.parse(fs.readFileSync(join(stateDir, "state.json"), "utf8")).backups, [hookBackup]);
+
+  fs.unlinkSync(tuiEntry);
+  assert.equal(s.run(["setup", "--remove"]).status, 0);
+  assert.deepEqual(snapshot(s.home), before);
+});

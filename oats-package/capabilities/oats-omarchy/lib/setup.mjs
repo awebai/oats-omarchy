@@ -362,19 +362,20 @@ function remove(env, p, state) {
     restored.push(file.path);
   }
   removeEmptyDirs(state.dirs || []);
-  // The backups of what was restored; a file left in place keeps its own.
-  // Only backups setup recorded are deleted: anything else in the state
-  // directory is left as it is.
-  for (const file of state.files) {
-    if (!file.prior?.backup || !restored.includes(file.path)) continue;
-    try { unlinkSync(join(p.stateDir, file.prior.backup)); } catch (e) { if (e.code !== "ENOENT") throw e; }
-  }
+  // Every backup setup made, including those of files a partial --remove
+  // already restored: they are deleted only when everything is restored.
+  const backups = [...new Set([...(state.backups || []), ...state.files.map((f) => f.prior?.backup).filter(Boolean)])];
   const warnings = refreshCaches(p, env);
   if (left.length) {
-    const kept = { ...state, files: state.files.filter((f) => left.some((l) => l.path === f.path)) };
+    const kept = { ...state, files: state.files.filter((f) => left.some((l) => l.path === f.path)), backups };
     atomicWrite(stateFile, Buffer.from(`${JSON.stringify(kept, null, 2)}\n`), 0o600);
     const changed = left.filter((l) => l.why.startsWith("changed"));
     throw new SetupError("E_MODIFIED", `left in place because ${changed.length === 1 ? "it was" : "they were"} changed since setup wrote ${changed.length === 1 ? "it" : "them"}: ${changed.map((l) => l.path).join(", ")}. Everything else was restored. Restore or delete ${changed.length === 1 ? "it" : "them"} by hand, then run --remove again.`, { restored, left: left.map(({ path, why }) => ({ path, why })) });
+  }
+  // Last, and only now: the backups setup recorded (anything else in the
+  // state directory stays), the state, and the state directories it made.
+  for (const backup of backups) {
+    try { unlinkSync(join(p.stateDir, backup)); } catch (e) { if (e.code !== "ENOENT") throw e; }
   }
   unlinkSync(stateFile);
   removeEmptyDirs(state.stateDirs || []);
