@@ -10,10 +10,11 @@
 //     anywhere else in the repository is refused, so nothing the kernel would
 //     not copy can look like part of the package.
 //
-//   node scripts/validate-manifests.mjs [--repo <dir>]
+//   node scripts/validate-manifests.mjs [--repo <dir>] [--schemas <dir>]
 //
 // --repo validates another checkout (the tests point it at fixtures); the
 // default is this repository. The payload root is <repo>/oats-package.
+// --schemas reads the schemas from another directory (default: schemas/).
 import { readFileSync, readdirSync, realpathSync, statSync, lstatSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,9 +28,11 @@ const SCAN_SKIP = new Set([".git", "node_modules", "test/fixtures"]);
 const toolRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
 let repoRoot = toolRoot;
+let schemaDir = join(toolRoot, "schemas");
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--repo" && argv[i + 1]) repoRoot = resolve(argv[++i]);
-  else { process.stderr.write(`usage: validate-manifests.mjs [--repo <dir>]\n`); process.exit(2); }
+  else if (argv[i] === "--schemas" && argv[i + 1]) schemaDir = resolve(argv[++i]);
+  else { process.stderr.write(`usage: validate-manifests.mjs [--repo <dir>] [--schemas <dir>]\n`); process.exit(2); }
 }
 const root = join(repoRoot, PAYLOAD);
 const errors = [];
@@ -43,6 +46,32 @@ const readJson = (path, at) => {
 // A small JSON Schema evaluator for the keywords the kernel's schemas use.
 // oneOf, anyOf and not evaluate each subschema in full and keep only whether
 // it validated; local "#/..." references are followed, anything else fails.
+// A schema that uses a keyword outside KEYWORDS is refused before anything is
+// validated (schemaKeywordProblems), so a refreshed schema can never have an
+// assertion this evaluator silently skips.
+const ANNOTATIONS = ["$schema", "$id", "$comment", "title", "description", "deprecated", "default", "examples"];
+const KEYWORDS = new Set([
+  ...ANNOTATIONS, "$ref", "$defs", "type", "const", "enum", "oneOf", "anyOf", "not",
+  "minLength", "maxLength", "pattern", "items", "minItems", "maxItems", "uniqueItems",
+  "properties", "required", "additionalProperties", "propertyNames", "minProperties", "maxProperties",
+]);
+// Keywords whose value is a map from names to subschemas, or a subschema list.
+const SCHEMA_MAPS = new Set(["properties", "$defs"]);
+const SCHEMA_LISTS = new Set(["oneOf", "anyOf"]);
+const SCHEMA_VALUES = new Set(["not", "items", "additionalProperties", "propertyNames"]);
+
+function schemaKeywordProblems(schema, at) {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return [];
+  const problems = [];
+  for (const [key, value] of Object.entries(schema)) {
+    if (!KEYWORDS.has(key)) { problems.push(`${at}/${key}: keyword "${key}" is not evaluated by scripts/validate-manifests.mjs`); continue; }
+    if (SCHEMA_MAPS.has(key)) for (const [name, sub] of Object.entries(value || {})) problems.push(...schemaKeywordProblems(sub, `${at}/${key}/${name}`));
+    else if (SCHEMA_LISTS.has(key)) (Array.isArray(value) ? value : []).forEach((sub, i) => problems.push(...schemaKeywordProblems(sub, `${at}/${key}/${i}`)));
+    else if (SCHEMA_VALUES.has(key)) problems.push(...schemaKeywordProblems(value, `${at}/${key}`));
+  }
+  return problems;
+}
+
 function validateSchema(value, schema, at, rootSchema = schema, refs = []) {
   if (!schema || typeof schema !== "object") return;
   if (Object.hasOwn(schema, "$ref")) {
@@ -68,8 +97,11 @@ function validateSchema(value, schema, at, rootSchema = schema, refs = []) {
   if (schema.not && validates(schema.not)) report(at, schema.not.pattern ? `must not match ${schema.not.pattern}` : "must not match the excluded schema");
   if ("const" in schema && !Object.is(schema.const, value)) report(at, `must equal ${JSON.stringify(schema.const)}`);
   if (schema.enum && !schema.enum.some((item) => Object.is(item, value))) report(at, `must be one of ${schema.enum.join(", ")}`);
-  const actual = Array.isArray(value) ? "array" : value === null ? "null" : typeof value;
-  if (schema.type && actual !== schema.type) { report(at, `must be ${schema.type}, got ${actual}`); return; }
+  const actual = Array.isArray(value) ? "array" : value === null ? "null" : Number.isInteger(value) ? "integer" : typeof value;
+  const types = schema.type === undefined ? [] : [].concat(schema.type);
+  if (types.length && !types.some((type) => type === actual || (type === "number" && actual === "integer"))) {
+    report(at, `must be ${types.join(" or ")}, got ${actual}`); return;
+  }
   if (typeof value === "string") {
     if (schema.minLength !== undefined && value.length < schema.minLength) report(at, `must contain at least ${schema.minLength} character(s)`);
     if (schema.maxLength !== undefined && value.length > schema.maxLength) report(at, `must contain at most ${schema.maxLength} character(s)`);
@@ -83,9 +115,12 @@ function validateSchema(value, schema, at, rootSchema = schema, refs = []) {
   }
   if (value && actual === "object") {
     for (const key of schema.required || []) if (!Object.hasOwn(value, key)) report(at, `missing required property ${key}`);
+    const count = Object.keys(value).length;
+    if (schema.minProperties !== undefined && count < schema.minProperties) report(at, `must have at least ${schema.minProperties} propert(ies)`);
+    if (schema.maxProperties !== undefined && count > schema.maxProperties) report(at, `must have at most ${schema.maxProperties} propert(ies)`);
     const properties = schema.properties || {};
     for (const [key, item] of Object.entries(value)) {
-      if (schema.propertyNames?.pattern && !new RegExp(schema.propertyNames.pattern, "u").test(key)) report(`${at}.${key}`, `property name must match ${schema.propertyNames.pattern}`);
+      if (schema.propertyNames) validateSchema(key, schema.propertyNames, `${at}.${key} (property name)`, rootSchema, refs);
       if (Object.hasOwn(properties, key)) validateSchema(item, properties[key], `${at}.${key}`, rootSchema, refs);
       else if (schema.additionalProperties === false) report(`${at}.${key}`, "unknown property");
       else if (schema.additionalProperties && typeof schema.additionalProperties === "object") validateSchema(item, schema.additionalProperties, `${at}.${key}`, rootSchema, refs);
@@ -151,8 +186,14 @@ function strayManifests(dir, rel = "") {
   return found;
 }
 
-const packageSchema = readJson(join(toolRoot, "schemas", "oats-package.schema.json"), "schemas/oats-package.schema.json");
-const capabilitySchema = readJson(join(toolRoot, "schemas", "capability-manifest.schema.json"), "schemas/capability-manifest.schema.json");
+const loadSchema = (name) => {
+  const schema = readJson(join(schemaDir, name), `schemas/${name}`);
+  const problems = schemaKeywordProblems(schema, `schemas/${name}#`);
+  for (const problem of problems) report(problem, "the validator would skip it");
+  return problems.length ? undefined : schema;
+};
+const packageSchema = loadSchema("oats-package.schema.json");
+const capabilitySchema = loadSchema("capability-manifest.schema.json");
 
 let payloadOk = true;
 try { payloadOk = lstatSync(root).isDirectory(); } catch { payloadOk = false; }
@@ -166,6 +207,15 @@ if (payloadOk) {
   const manifestPath = contained(root, "oats-package.json", "oats-package.json", { boundary: root, type: "file" });
   packageManifest = manifestPath ? readJson(manifestPath, "oats-package.json") : undefined;
   if (packageManifest && packageSchema) validateSchema(packageManifest, packageSchema, "oats-package.json");
+
+  // Every other path the package manifest may name (this package declares
+  // none of them today; they are checked so that adding one cannot escape).
+  const pkg = packageManifest && typeof packageManifest === "object" ? packageManifest : {};
+  for (const [i, dir] of (Array.isArray(pkg.souls) ? pkg.souls : []).entries()) contained(root, dir, `oats-package.json.souls[${i}]`, { boundary: root, type: "directory", recursive: true });
+  for (const [i, trigger] of (Array.isArray(pkg.triggers) ? pkg.triggers : []).entries()) contained(root, trigger?.file, `oats-package.json.triggers[${i}].file`, { boundary: root, type: "file" });
+  for (const field of ["configTemplates", "configs"]) {
+    for (const [name, spec] of entries(pkg[field])) contained(root, spec?.path, `oats-package.json.${field}.${name}.path`, { boundary: root, type: "file" });
+  }
 
   const declared = Array.isArray(packageManifest?.capabilities) ? packageManifest.capabilities : [];
   for (const [index, dir] of declared.entries()) {
@@ -183,6 +233,7 @@ if (payloadOk) {
       if (tree) validateSkillTree(tree, `${at}.skills[${i}]`, capRoot);
     }
     if ("inject" in manifest) contained(capRoot, manifest.inject, `${at}.inject`, { ...own, type: "file" });
+    if (manifest.helperInjection?.mode === "file") contained(capRoot, manifest.helperInjection.path, `${at}.helperInjection.path`, { ...own, type: "file" });
     for (const [name, command] of entries(manifest.commands)) contained(capRoot, entrypoint(command), `${at}.commands.${name}`, { ...own, type: "file" });
     for (const [event, hook] of entries(manifest.hooks)) contained(capRoot, entrypoint(hook), `${at}.hooks.${event}`, { ...own, type: "file" });
   }

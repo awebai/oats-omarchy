@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,4 +95,37 @@ test("a declared command whose script is missing is refused", (t) => {
   const r = validate("--repo", dir);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /commands\.gone: cannot be resolved \(ENOENT\)/);
+});
+
+test("package-level paths (souls, triggers) that link out of the payload are refused", (t) => {
+  const dir = scratchRepo(t);
+  writeFileSync(join(dir, "outside.json"), "{}\n");
+  mkdirSync(join(dir, "outside-soul"));
+  symlinkSync(join(dir, "outside.json"), join(dir, "oats-package", "trigger.json"));
+  symlinkSync(join(dir, "outside-soul"), join(dir, "oats-package", "soul"));
+  editJson(join(dir, "oats-package", "oats-package.json"), (m) => ({ ...m, souls: ["soul"], triggers: [{ id: "outside", file: "trigger.json" }, { id: "gone", file: "gone.json" }] }));
+  const r = validate("--repo", dir);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /oats-package\.json\.souls\[0\]: escapes oats-package after symlink resolution/);
+  assert.match(r.stderr, /oats-package\.json\.triggers\[0\]\.file: escapes oats-package after symlink resolution/);
+  assert.match(r.stderr, /oats-package\.json\.triggers\[1\]\.file: cannot be resolved \(ENOENT\)/);
+});
+
+test("maxProperties is enforced (triggerSources holds at most 16)", (t) => {
+  const dir = scratchRepo(t);
+  const sources = Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`source-${i}`, { command: "setup", events: ["example"] }]));
+  editJson(join(dir, capDir, "oats.json"), (m) => ({ ...m, triggerSources: sources }));
+  const r = validate("--repo", dir);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /oats\.json\.triggerSources: must have at most 16 propert/);
+});
+
+test("a schema keyword the validator does not evaluate is refused, not skipped", (t) => {
+  const schemas = mkdtempSync(join(tmpdir(), "oats-omarchy-schemas-"));
+  t.after(() => rmSync(schemas, { recursive: true, force: true }));
+  cpSync(join(repo, "schemas"), schemas, { recursive: true });
+  editJson(join(schemas, "capability-manifest.schema.json"), (s) => ({ ...s, properties: { ...s.properties, command: { ...s.properties.command, multipleOf: 2 } } }));
+  const r = validate("--schemas", schemas);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /capability-manifest\.schema\.json#\/properties\/command\/multipleOf: keyword "multipleOf" is not evaluated/);
 });
