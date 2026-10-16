@@ -10,10 +10,13 @@ oats-package/            the payload: everything the kernel copies, nothing else
   capabilities/oats-omarchy/
     oats.json            capability oats.omarchy, command namespace `omarchy`
     bin/oats-omarchy.mjs the one executable: `oats omarchy <command>` runs it
+    lib/                 its modules (below)
+    assets/              the icon both launcher entries use
     skills/              the skills a soul with the capability receives
 schemas/                 kernel schemas the manifests are validated against
 scripts/                 lint and manifest validation
-test/                    node:test suites; test/fixtures holds their inputs
+test/                    node:test suites; test/fixtures holds their inputs,
+                         test/helpers/sandbox.mjs the temporary machine they run on
 ci/                      the Arch Linux + Omarchy container bootstrap and checks
 .github/workflows/ci.yml
 ```
@@ -31,6 +34,39 @@ Rules the checks hold:
   default terminal through `xdg-terminal-exec`.
   `test/no-terminal-names.test.mjs` scans every file and holds the list.
 
+## How setup is built
+
+`oats omarchy setup` (`lib/setup.mjs`) gathers what the machine has, works out
+the files it wants, compares them with what is there, and only then writes:
+
+- `lib/discover.mjs` finds things instead of assuming them: the deployment
+  and soul from the kernel's environment, the Omarchy launchers on the
+  session's PATH (`systemctl --user show-environment`, else the process
+  PATH), the Hyprland layout, the Desktop (a flag, an existing launcher
+  entry, then an AppImage), FUSE, and the bindings
+  `omarchy menu keybindings --print` reports.
+- `lib/keys.mjs` turns that report into the suggested key and its snippet.
+  Setup never writes key bindings.
+- `lib/files.mjs` renders each file (the shim, the launcher entries, the
+  post-update hook); `lib/desktop-entry.mjs` reads and writes desktop
+  entries.
+- `lib/state.mjs` writes atomically and keeps the state file under
+  `$XDG_STATE_HOME/oats-omarchy`: every file written, its digest, what was
+  there before (backed up beside it) and the directories setup created.
+  `--remove` restores from it and deletes only those directories, only when
+  empty.
+- `lib/system.mjs` runs commands with a timeout and a given environment.
+
+### Quoting
+
+A launch command can be read three times: by its outer reader (`sh -c` for a
+Hyprland exec or a menu action, GLib for a desktop entry's `Exec`, Lua or
+hyprlang for the snippet), then by `omarchy-launch-or-focus`, which runs
+`eval exec setsid $LAUNCH_COMMAND` unquoted, so bash word-splits and may glob
+it before the eval. `lib/quote.mjs` has one function per layer, and a value
+is quoted for the eval first and for the outer reader second. A path with a
+single quote or a control character is refused (`E_UNSAFE_PATH`).
+
 ## Commands
 
 ```bash
@@ -41,6 +77,13 @@ npm test           # every test/**/*.test.mjs
 
 The `lint` job of CI runs all three on Node 22. There are no dependencies to
 install.
+
+Tests run on a temporary machine (`test/helpers/sandbox.mjs`): a temporary
+HOME and XDG directories, a PATH of fakes (the Omarchy launchers, `omarchy`,
+`systemctl`, `ldconfig`, `tmux`) before a private directory of basic tools,
+and a stand-in for the kernel that dispatches `oats omarchy` to the package
+with the environment the kernel gives a dispatched command. Nothing on the
+host's PATH leaks in, so a test sees only what it set up.
 
 ## The Omarchy job
 
@@ -54,6 +97,10 @@ CI's `omarchy` job runs in a pinned `archlinux:base` container:
   a config with `Hyprland --verify-config`, which needs no compositor.
   `test/fixtures/hypr/` holds known-good and known-bad submaps in both layouts:
   Lua (`bindings.lua`, Omarchy 4) and hyprlang (`bindings.conf`).
+- `test/omarchy-container.test.mjs` (as `ci`, with `OATS_OMARCHY_CONTAINER=1`;
+  it skips without it) runs setup against the real Omarchy: its launchers,
+  through `gio launch` and `sh -c`, its hook runner, and `--verify-config` on
+  the user's whole configuration with the printed snippet added.
 
 Installing `omarchy` in a container works as it is: Limine's post-transaction
 hooks report that there is no FAT32 boot partition, which pacman treats as
@@ -64,7 +111,8 @@ Wayland compositor with a GPU render node, Hyprland stops at start
 (`CBackend::create() failed!`), and its headless backend is only a fallback
 beside those. So nothing that needs `hyprctl` (for example
 `omarchy menu keybindings --print`) runs against a live Hyprland in CI.
-Tests feed captured output instead.
+Tests serve `--print` from captured output in `test/fixtures/print/`, taken
+from a machine with Omarchy's default bindings.
 
 ## Testing on a desktop machine
 

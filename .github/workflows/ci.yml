@@ -44,3 +44,7 @@ jobs:
         run: |
           runuser -u ci -- ci/verify-hypr-config.sh --expect error test/fixtures/hypr/submap-bad.lua
           runuser -u ci -- ci/verify-hypr-config.sh --expect error test/fixtures/hypr/submap-bad.conf
+      - name: Install Node.js
+        run: pacman -S --noconfirm --needed nodejs
+      - name: Setup against the real Omarchy
+        run: runuser -u ci -- env OATS_OMARCHY_CONTAINER=1 node --test test/omarchy-container.test.mjs
