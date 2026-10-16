@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import vm from "node:vm";
 import { parseDesktopExec } from "../oats-package/capabilities/oats-omarchy/lib/quote.mjs";
 import { readDesktopEntry } from "../oats-package/capabilities/oats-omarchy/lib/desktop-entry.mjs";
 import { fixture, repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
@@ -80,7 +81,8 @@ test("Lua layout, no Desktop: plan, apply, the real post-update hook, check, rem
   const before = snapshot(s.home);
   const p = plan(s);
   assert.equal(p.found.launchPath.source, "minimal", "no user bus in the container");
-  assert.deepEqual(p.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "skipped"], ["hook", "will apply"]]);
+  assert.deepEqual(p.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "skipped"], ["hook", "will apply"], ["menu", "will apply"]]);
+  assert.equal(p.found.menu.defaults, join(OMARCHY, "default", "omarchy", "omarchy-menu.jsonc"));
   assert.equal(p.keys.status, "unchecked", "--print without Hyprland");
   assert.match(p.keys.notes[0], /no running Hyprland answered/);
   assert.equal(p.found.libfuse2.ok, false, "fuse2 is not in Omarchy's packages");
@@ -204,3 +206,62 @@ function waitFor(file, lines) {
     spawnSync("sleep", ["0.1"]);
   }
 }
+
+// Omarchy's own menu parser, shell/plugins/menu/MenuModel.js. Menu.qml
+// imports it as a JS library (`import "MenuModel.js" as MenuModel`); it is
+// plain functions with no QML imports, so it runs as a script in a vm
+// context. A `.pragma` or `.import` line, should one appear, is dropped first.
+function menuModel() {
+  const src = readFileSync(join(OMARCHY, "shell", "plugins", "menu", "MenuModel.js"), "utf8").replace(/^\s*\.(pragma|import)\b.*$/gm, "");
+  const context = {};
+  vm.runInNewContext(`${src}\nthis.parseMenuJsonc = parseMenuJsonc; this.mergeMenuSources = mergeMenuSources;`, context);
+  // Plain objects of this realm, for deepEqual.
+  const plain = (x) => JSON.parse(JSON.stringify(x));
+  return { parse: (text) => plain(context.parseMenuJsonc(text)), merge: (a, b) => plain(context.mergeMenuSources(a, b)) };
+}
+
+for (const [name, text] of [
+  ["no menu file", null],
+  ["a user file with a trailing comma", '{\n  // mine\n  "mine": {"icon":"m","label":"Mine","action":"true"},\n  "system.lock": {"label":"Lock it"},\n}\n'],
+  ["a user file without one", '{\n  "mine": {"icon":"m","label":"Mine","action":"true"}\n}'],
+  ["a user file with an items wrapper", '{\n  "items": {\n    "mine": {"label":"Mine","action":"true"}\n  }\n}\n'],
+]) {
+  test(`Omarchy's MenuModel reads the oats block, the user's items unchanged: ${name}`, { skip }, (t) => {
+    const s = omarchySandbox(t);
+    const file = join(s.home, ".config", "omarchy", "extensions", "omarchy-menu.jsonc");
+    if (text !== null) { mkdirSync(join(file, ".."), { recursive: true }); writeFileSync(file, text); }
+    const before = snapshot(s.home);
+    const model = menuModel();
+    const defaults = model.parse(readFileSync(join(OMARCHY, "default", "omarchy", "omarchy-menu.jsonc"), "utf8"));
+    const userBefore = text === null ? [] : model.parse(text);
+    assert.equal(s.run(["setup", "--apply"]).status, 0);
+
+    const user = model.parse(readFileSync(file, "utf8"));
+    const byId = Object.fromEntries(user.map((item) => [item.id, item]));
+    for (const item of userBefore) assert.deepEqual(byId[item.id], item, `${item.id} reads the same`);
+    const merged = model.merge(defaults, user);
+    const oats = ["oats", "oats.tui", "oats.waiting", "oats.status"].map((id) => merged.items[id]);
+    assert.deepEqual(oats.map((x) => [x.id, x.parent, x.kind]), [["oats", "root", "menu"], ["oats.tui", "oats", "action"], ["oats.waiting", "oats", "action"], ["oats.status", "oats", "action"]]);
+    assert.equal(merged.items["oats.waiting"].label, "Waiting on you");
+    assert.equal(merged.items["oats.desktop"], undefined, "no Desktop here");
+    for (const item of defaults) if (!byId[item.id]) assert.ok(merged.items[item.id], `Omarchy's ${item.id} is still there`);
+
+    assert.equal(s.run(["setup", "--remove"]).status, 0);
+    assert.deepEqual(snapshot(s.home), before);
+  });
+}
+
+test("waiting opens the chosen session through Omarchy's real floating terminal: the detach key arrives as argv", { skip }, (t) => {
+  const s = omarchySandbox(t, { launchers: ["omarchy-menu-select"], deploymentName: "my agents" });
+  const home = join(s.deployment, "agents", "x", "instances", "with space");
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(s.root, "status.json"), JSON.stringify({ agents: [{ instances: [{ instance: "with space", home, waitingOnYou: { reason: "attention" } }] }] }));
+  // The end of Omarchy's chain: uwsm-app runs the terminal's -e command.
+  writeExecutable(join(s.fakebin, "uwsm-app"), '#!/bin/bash\n[[ $1 == -- ]] && shift\nif [[ $1 == xdg-terminal-exec ]]; then while [[ $1 != -e ]]; do shift; done; shift; fi\nexec "$@"\n');
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  const r = s.run(["waiting", "--soul", "github.com/acme/agents/builder"], { FAKE_SELECT: "first" });
+  assert.equal(r.status, 0, r.stderr);
+  const log = join(s.root, "kernel.log");
+  waitFor(log, 1);
+  assert.deepEqual(JSON.parse(readFileSync(log, "utf8").trim()), ["session", "attach", "--home", home, "--detach-key", "C-\\"]);
+});

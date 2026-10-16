@@ -5,12 +5,13 @@
 // every recorded path back as it was; --check reports drift and always exits
 // 0. The key binding is printed, never written.
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, readlinkSync, renameSync, symlinkSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, readlinkSync, realpathSync, renameSync, symlinkSync, unlinkSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as discover from "./discover.mjs";
 import * as files from "./files.mjs";
 import { planKeys } from "./keys.mjs";
+import * as menu from "./menu.mjs";
 import { assertSafePath } from "./quote.mjs";
 import { STATE_SCHEMA, atomicWrite, digest, makeDirs, readFileState, readState, removeEmptyDirs } from "./state.mjs";
 import { failureText, run, which } from "./system.mjs";
@@ -27,7 +28,7 @@ export class SetupError extends Error {
 export const USAGE = `usage: oats omarchy setup [--plan | --apply | --remove | --check] [--desktop <abs path to AppImage>] [--json]
 
   --plan     say what --apply would write, and what was found (the default; writes nothing)
-  --apply    write the launcher entries, icons, shim and post-update hook
+  --apply    write the launcher entries, icons, shim, post-update hook and the oats menu
   --remove   put back exactly what was there before --apply
   --check    report what drifted since --apply (always exits 0)
 `;
@@ -73,6 +74,7 @@ function gather(env, args, p, state) {
     tmux: which("tmux", launch.path),
     fuse: discover.fuse(env),
     desktop,
+    menuDefaults: discover.menuDefaults(launch),
     layout: discover.layout(p),
     print: discover.printBindings(env, launch),
     userText: discover.userHyprText(p),
@@ -80,7 +82,7 @@ function gather(env, args, p, state) {
 }
 
 // Each part → { part, status: "ready" | "skipped", reason?, files[] }.
-function desiredParts(facts, p) {
+function desiredParts(facts, p, state) {
   const parts = [];
   const skip = (part, reason) => parts.push({ part, status: "skipped", reason, files: [] });
   const appsMissing = discover.missing(facts.features, discover.FEATURES.apps);
@@ -131,15 +133,37 @@ function desiredParts(facts, p) {
   }
 
   // The post-update hook.
+  const soulReason = !facts.soul || !SOUL_NAME.test(facts.soul)
+    ? (facts.soulId ? `the soul id ${facts.soulId} does not give a --soul name` : "OATS_SOUL_ID is not set (the kernel sets it for oats >= 0.43.3)")
+    : null;
   if (kernelReason) skip("hook", kernelReason);
   else if (hookMissing.length) skip("hook", `not on ${facts.launch.featureSource}: ${hookMissing.join(", ")}`);
-  else if (!facts.soul || !SOUL_NAME.test(facts.soul)) skip("hook", facts.soulId ? `the soul id ${facts.soulId} does not give a --soul name` : "OATS_SOUL_ID is not set (the kernel sets it for oats >= 0.43.3)");
+  else if (soulReason) skip("hook", soulReason);
   else parts.push({ part: "hook", status: "ready", files: [
     { role: "hook", path: join(p.hookDir, "oats-omarchy.hook"), bytes: Buffer.from(files.hook({ ...spec, soul: facts.soul })), mode: 0o755 },
   ] });
 
+  // B: the oats submenu.
+  const tuiReady = parts.some((x) => x.part === "tui" && x.status === "ready");
+  const menuMissing = discover.missing(facts.features, discover.FEATURES.menu);
+  if (kernelReason) skip("menu", kernelReason);
+  else if (!facts.menuDefaults.ok) skip("menu", `Omarchy's menu definition ${facts.menuDefaults.path} is not there`);
+  else if (menuMissing.length) skip("menu", `not on ${facts.launch.featureSource}: ${menuMissing.join(", ")}`);
+  else if (soulReason) skip("menu", soulReason);
+  else {
+    const blockText = menu.block({
+      tui: tuiReady ? files.tuiCommand(spec) : null,
+      desktop: desktopExec ? files.desktopCommand(desktopExec) : null,
+      waiting: menu.waitingAction({ ...spec, soul: facts.soul }),
+      status: menu.statusAction(spec),
+    });
+    const edit = menuEdit(p, state, blockText);
+    if (edit.skip) skip("menu", edit.skip);
+    else parts.push({ part: "menu", status: "ready", files: [{ role: "menu", kind: "block", path: p.menuFile, block: blockText, ...edit }] });
+  }
+
   // The shim, when anything calls it.
-  if (parts.some((x) => x.status === "ready" && (x.part === "tui" || x.part === "hook"))) {
+  if (parts.some((x) => x.status === "ready" && (x.part === "tui" || x.part === "hook" || x.part === "menu"))) {
     parts.unshift({ part: "shim", status: "ready", files: [
       { role: "shim", path: p.shim, bytes: Buffer.from(files.shim(safe)), mode: 0o755 },
     ] });
@@ -147,13 +171,49 @@ function desiredParts(facts, p) {
 
   return {
     parts: sortParts(parts),
-    tui: parts.some((x) => x.part === "tui" && x.status === "ready") ? files.tuiCommand(spec) : null,
+    tui: tuiReady ? files.tuiCommand(spec) : null,
     desktop: desktopExec ? files.desktopCommand(desktopExec) : null,
     desktopExec,
   };
 }
 
-const PART_ORDER = ["shim", "tui", "desktop", "hook"];
+const PART_ORDER = ["shim", "tui", "desktop", "hook", "menu"];
+
+// The menu file is edited, not replaced: setup adds its block and keeps the
+// rest of the user's bytes. → { action, bytes, mode, disk, edit } with
+// action "write" | "current" | "modified", or { skip: reason }. `edit` is
+// what the state records to take the block out again.
+function menuEdit(p, state, blockText) {
+  const rec = (state?.files || []).find((f) => f.kind === "block" && f.path === p.menuFile);
+  let disk;
+  try { disk = readFileState(p.menuFile); } catch (e) { return { skip: e.message }; }
+  const text = disk ? disk.bytes.toString("utf8") : null;
+  if (disk && !Buffer.from(text).equals(disk.bytes)) return { skip: `${p.menuFile} is not UTF-8 text` };
+  if (rec) {
+    if (text === null || menu.findInserted(text, rec.inserted) === null) return { action: "modified", disk };
+    if (rec.block === blockText) return { action: "current", disk };
+    const replaced = menu.replaceBlock(text, rec, blockText);
+    const problem = menu.verifyEdit(menu.removeBlock(text, rec), replaced.text, blockText);
+    if (problem) return { skip: problem };
+    return { action: "write", disk, bytes: Buffer.from(replaced.text), mode: disk.mode, edit: { ...pickEdit(rec), inserted: replaced.inserted } };
+  }
+  if (text !== null && text.includes(menu.START.trim())) return { skip: `${p.menuFile} already holds an oats-omarchy block that setup has no record of: delete it, then run setup again` };
+  const parsed = text === null ? { ok: true } : menu.omarchyParse(text);
+  if (!parsed.ok) return { skip: `Omarchy cannot read ${p.menuFile} as it is (${parsed.reason}), so setup leaves it alone; fix it, then run setup again` };
+  const clash = text === null ? [] : menu.conflicts(text);
+  if (clash.length) return { skip: `${p.menuFile} has its own ${clash.join(", ")}, which the oats block would override` };
+  const ins = menu.insertBlock(text ?? "", blockText);
+  const problem = menu.verifyEdit(text ?? "", ins.text, blockText);
+  if (problem) return { skip: problem };
+  const prior = text === null ? { state: "absent" } : ins.created ? { state: "text", text } : null;
+  return { action: "write", disk, bytes: Buffer.from(ins.text), mode: disk ? disk.mode : 0o644, edit: { inserted: ins.inserted, comma: ins.comma, created: ins.created, prior } };
+}
+
+const pickEdit = ({ inserted, comma, created, prior }) => ({ inserted, comma, created, prior });
+
+// The file a block edit writes: through a symlink to its target, so a
+// dotfile manager's link stays a link.
+const editTarget = (path, disk) => (disk?.link ? realpathSync(path) : path);
 const sortParts = (parts) => [...parts].sort((a, b) => PART_ORDER.indexOf(a.part) - PART_ORDER.indexOf(b.part));
 
 // Compares each desired file with what is on disk and in the state.
@@ -163,6 +223,7 @@ function classify(parts, state) {
   const recorded = new Map((state?.files || []).map((f) => [f.path, f]));
   for (const part of parts) {
     for (const file of part.files) {
+      if (file.kind === "block") continue;
       const disk = readFileState(file.path);
       const rec = recorded.get(file.path);
       file.recorded = rec || null;
@@ -214,6 +275,7 @@ function found(facts) {
     libfuse2: facts.fuse,
     bindings: { format: facts.layout.kind, file: facts.layout.file, exists: facts.layout.exists, ...(facts.layout.both ? { note: "both bindings.lua and bindings.conf exist; Lua wins" } : {}) },
     keyCheck: facts.print.ok ? { ok: true } : { ok: false, reason: facts.print.reason },
+    menu: { defaults: facts.menuDefaults.path, defaultsFound: facts.menuDefaults.ok },
   };
 }
 
@@ -222,7 +284,7 @@ const publicParts = (parts) => parts.map(({ part, status, reason, files: fs }) =
 function planOrApply(env, args, p, state) {
   const facts = gather(env, args, p, state);
   const other = state && state.deployment !== facts.deployment.path ? state.deployment : null;
-  const desired = desiredParts(facts, p);
+  const desired = desiredParts(facts, p, state);
   classify(desired.parts, state);
   const keys = keysFor(facts, desired, desired.parts);
   const notes = [];
@@ -271,6 +333,15 @@ function applyFiles(toWrite, state, facts, desired, p) {
   try {
     makeDirs(backupDir, createdStateDirs);
     for (const file of toWrite) {
+      if (file.kind === "block") {
+        const target = editTarget(file.path, file.disk);
+        const before = file.disk;
+        makeDirs(dirname(target), createdDirs);
+        atomicWrite(target, file.bytes, file.mode);
+        done.push({ undo: () => (before ? atomicWrite(target, before.bytes, before.mode) : unlinkSync(target)) });
+        records.set(file.path, { path: file.path, role: file.role, kind: "block", block: file.block, ...file.edit });
+        continue;
+      }
       let prior = file.recorded?.prior;
       if (!prior) {
         prior = { state: "absent" };
@@ -358,6 +429,11 @@ function remove(env, p, state) {
   const ordered = [...state.files.filter((f) => f.role !== "shim").reverse(), ...state.files.filter((f) => f.role === "shim")];
   for (const file of ordered) {
     if (file.role === "shim" && left.length) { left.push({ ...file, why: "kept until everything else is restored" }); continue; }
+    if (file.kind === "block") {
+      if (removeEdit(file)) restored.push(file.path);
+      else left.push({ ...file, why: "changed since setup wrote it" });
+      continue;
+    }
     const disk = readFileState(file.path);
     if (disk && digest(disk.bytes) !== file.digest) { left.push({ ...file, why: "changed since setup wrote it" }); continue; }
     if (!disk && file.prior.state === "absent") { restored.push(file.path); continue; }
@@ -385,12 +461,33 @@ function remove(env, p, state) {
   return { mode: "remove", restored, warnings };
 }
 
+// Takes setup's block out of the menu file, leaving every other byte. A file
+// setup created goes when nothing else is left in it; a file the user has
+// since deleted has nothing of ours left. → false when the block was changed.
+function removeEdit(file) {
+  const disk = readFileState(file.path);
+  if (!disk) return true;
+  const out = menu.removeBlock(disk.bytes.toString("utf8"), file);
+  if (out === null) return false;
+  const target = editTarget(file.path, disk);
+  if (file.created && out === menu.SKELETON) {
+    if (file.prior?.state === "text") atomicWrite(target, Buffer.from(file.prior.text), disk.mode);
+    else unlinkSync(target);
+  } else atomicWrite(target, Buffer.from(out), disk.mode);
+  return true;
+}
+
 function check(env, p, state) {
   if (!state) return { mode: "check", applied: false, drift: [] };
   const drift = [];
   for (const file of state.files) {
     let disk;
     try { disk = readFileState(file.path); } catch (e) { drift.push(`${file.path}: ${e.message}`); continue; }
+    if (file.kind === "block") {
+      if (!disk) drift.push(`${file.path}, which holds the oats menu, is missing`);
+      else if (menu.findInserted(disk.bytes.toString("utf8"), file.inserted) === null) drift.push(`the oats block in ${file.path} changed since setup wrote it`);
+      continue;
+    }
     if (!disk) drift.push(`${file.path} is missing`);
     else if (digest(disk.bytes) !== file.digest) drift.push(`${file.path} changed since setup wrote it`);
   }
@@ -403,9 +500,14 @@ function check(env, p, state) {
   const program = state.desktop?.program;
   if (program && !(isAbsolute(program) ? existsSync(program) : which(program, launch.featurePath))) drift.push(`the Desktop program ${program}, which the launcher entry ${state.desktop.entry} runs, is gone`);
   const found = discover.features(launch);
-  const need = [...((state.parts || []).some((x) => x === "tui" || x === "desktop") ? discover.FEATURES.apps : []), ...((state.parts || []).includes("hook") ? discover.FEATURES.hook : [])];
+  const has = (part) => (state.parts || []).includes(part);
+  const need = [...(has("tui") || has("desktop") ? discover.FEATURES.apps : []), ...(has("hook") ? discover.FEATURES.hook : []), ...(has("menu") ? discover.FEATURES.menu : [])];
   const gone = discover.missing(found, need);
   if (gone.length) drift.push(`Omarchy no longer offers ${gone.join(", ")} (on ${launch.featureSource})`);
+  if (has("menu")) {
+    const defaults = discover.menuDefaults(launch);
+    if (!defaults.ok) drift.push(`Omarchy's menu definition ${defaults.path} is gone`);
+  }
   if (env.OATS_TEAM_SCOPE && env.OATS_TEAM_SCOPE !== state.deployment) drift.push(`setup is applied for the deployment ${state.deployment}, not ${env.OATS_TEAM_SCOPE}`);
   const soul = discover.soulName(env.OATS_SOUL_ID);
   if (soul && state.soul && soul !== state.soul) drift.push(`setup is applied for soul ${state.soul}, not ${soul}`);
@@ -477,6 +579,7 @@ function render(r) {
   lines.push(`  libfuse2    ${f.libfuse2.ok ? `found (${f.libfuse2.via})` : `missing (${f.libfuse2.via})`}`);
   lines.push(`  bindings    ${f.bindings.file} (${f.bindings.format === "lua" ? "Lua" : "hyprlang"}${f.bindings.exists ? "" : ", not there yet"})${f.bindings.note ? `; ${f.bindings.note}` : ""}`);
   lines.push(`  key check   ${f.keyCheck.ok ? "omarchy menu keybindings --print" : `could not run: ${f.keyCheck.reason}`}`);
+  lines.push(`  menu        ${f.menu.defaultsFound ? `Omarchy's menu definition ${f.menu.defaults}` : `no menu definition at ${f.menu.defaults}`}`);
   }
   const k = r.keys;
   lines.push("", `Keys (shown, never written)`);

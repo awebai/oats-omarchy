@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { sandbox, writeExecutable } from "./helpers/sandbox.mjs";
 import {
   appImages, deployment, desktop, desktopEntries, features, fuse, GET_DESKTOP, kernel, launchEnvironment,
-  layout, MINIMAL_PATH, missing, FEATURES, paths, printBindings, soulName,
+  layout, menuDefaults, MINIMAL_PATH, missing, FEATURES, NOTIFY, OMARCHY_PATH, paths, printBindings, soulName,
 } from "../oats-package/capabilities/oats-omarchy/lib/discover.mjs";
 
 const write = (path, text) => { mkdirSync(join(path, ".."), { recursive: true }); writeFileSync(path, text); };
@@ -64,6 +64,19 @@ test("launchEnvironment: a user session PATH is used for the launch and for feat
   assert.equal(l.featurePath, sessionPath);
 });
 
+test("menuDefaults: Omarchy's menu definition under OMARCHY_PATH, the session's first, else /usr/share/omarchy", (t) => {
+  const s = sandbox(t);
+  const minimal = launchEnvironment(s.env);
+  assert.equal(minimal.omarchyPath, s.env.OMARCHY_PATH);
+  assert.deepEqual(menuDefaults(minimal), { path: join(s.env.OMARCHY_PATH, "default/omarchy/omarchy-menu.jsonc"), ok: true });
+  assert.equal(launchEnvironment({ ...s.env, OMARCHY_PATH: "relative/omarchy" }).omarchyPath, OMARCHY_PATH);
+  assert.equal(menuDefaults({ omarchyPath: join(s.root, "nowhere") }).ok, false);
+  // A session that sets OMARCHY_PATH wins over this command's environment.
+  const session = sandbox(t, { session: "/usr/bin:/bin" });
+  writeExecutable(join(session.fakebin, "systemctl"), `#!/bin/sh\necho "PATH=/usr/bin:/bin"\necho "OMARCHY_PATH=${join(session.root, "omarchy")}"\n`);
+  assert.equal(launchEnvironment({ ...session.env, OMARCHY_PATH: "/elsewhere" }).omarchyPath, join(session.root, "omarchy"));
+});
+
 test("features and missing: command -v skips absent names, non-executable files and directories", (t) => {
   const s = sandbox(t, { launchers: false });
   const dir = join(s.root, "feature-bin");
@@ -85,7 +98,8 @@ test("features and missing: command -v skips absent names, non-executable files 
   assert.equal(features({ featurePath: `${dir}:${later}` })["uwsm-app"], join(later, "uwsm-app"));
   // The sandbox's own PATH has every launcher.
   const all = features(launchEnvironment(sandbox(t).env));
-  assert.deepEqual(missing(all, [...FEATURES.apps, ...FEATURES.hook]), []);
+  assert.deepEqual(missing(all, [...FEATURES.apps, ...FEATURES.hook, ...FEATURES.menu, NOTIFY]), []);
+  assert.deepEqual(FEATURES.menu, ["omarchy-menu-select", "omarchy-launch-floating-terminal-with-presentation"]);
 });
 
 test("kernel: ok, unset, relative, nonexistent, and a CLI that fails --version", (t) => {

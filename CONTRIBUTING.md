@@ -50,12 +50,31 @@ the files it wants, compares them with what is there, and only then writes:
 - `lib/files.mjs` renders each file (the shim, the launcher entries, the
   post-update hook); `lib/desktop-entry.mjs` reads and writes desktop
   entries.
+- `lib/menu.mjs` is the `oats` submenu: a delimited block in the user's
+  `~/.config/omarchy/extensions/omarchy-menu.jsonc`, the one file setup edits
+  rather than writes whole. Only the block's bytes, and a separating comma
+  when the user's last entry had none, are added and taken out; the rest of
+  the file is never rewritten. The block goes where Omarchy reads items (into
+  `items` when the file wraps them there). `omarchyParse` reads the file by
+  the rules of Omarchy's `MenuModel.js` (whole-line `//` comments and
+  trailing commas only): setup leaves a file Omarchy cannot read alone, and
+  after an edit checks that Omarchy reads the user's items unchanged and
+  every row of the block as written.
 - `lib/state.mjs` writes atomically and keeps the state file under
   `$XDG_STATE_HOME/oats-omarchy`: every file written, its digest, what was
-  there before (backed up beside it) and the directories setup created.
-  `--remove` restores from it and deletes only those directories, only when
-  empty.
+  there before (backed up beside it) and the directories setup created; for
+  the menu block, its exact bytes and whether setup added the comma or
+  created the file. `--remove` restores from it and deletes only those
+  directories, only when empty.
 - `lib/system.mjs` runs commands with a timeout and a given environment.
+
+`oats omarchy waiting` (`lib/waiting.mjs`) is the menu's "Waiting on you"
+row: it reads `oats status --json` for the deployment, shows the instances
+waiting on you in `omarchy-menu-select` (the count and the names, nothing
+else), and opens the chosen one's `oats session attach` in
+`omarchy-launch-floating-terminal-with-presentation`. With nothing to pick it
+does not open the selector, which refuses to open empty; it sends
+`omarchy-notification-send` instead, or writes to stderr without it.
 
 ### Quoting
 
@@ -66,6 +85,10 @@ hyprlang for the snippet), then by `omarchy-launch-or-focus`, which runs
 it before the eval. `lib/quote.mjs` has one function per layer, and a value
 is quoted for the eval first and for the outer reader second. A path with a
 single quote or a control character is refused (`E_UNSAFE_PATH`).
+
+Omarchy's menu runs an action with `bash -lc`, and its floating terminal
+joins its arguments and runs them with `bash -c`: the menu actions and the
+attach command are single-quoted shell words, with no eval layer.
 
 ## Commands
 
@@ -79,11 +102,16 @@ The `lint` job of CI runs all three on Node 22. There are no dependencies to
 install.
 
 Tests run on a temporary machine (`test/helpers/sandbox.mjs`): a temporary
-HOME and XDG directories, a PATH of fakes (the Omarchy launchers, `omarchy`,
-`systemctl`, `ldconfig`, `tmux`) before a private directory of basic tools,
-and a stand-in for the kernel that dispatches `oats omarchy` to the package
-with the environment the kernel gives a dispatched command. Nothing on the
-host's PATH leaks in, so a test sees only what it set up.
+HOME and XDG directories, a stand-in for Omarchy's menu definition
+(`OMARCHY_PATH`), a PATH of fakes (the Omarchy launchers, the menu's
+selector, notifier and floating terminal, `omarchy`, `systemctl`,
+`ldconfig`, `tmux`) before a private directory of basic tools, and a
+stand-in for the kernel that dispatches `oats omarchy` to the package with
+the environment the kernel gives a dispatched command, and answers
+`status --json` and `version --json` from files a test writes. Each fake
+models the real tool's refusals too (the selector never opens empty, the
+notifier needs a headline). Nothing on the host's PATH leaks in, so a test
+sees only what it set up.
 
 ## The Omarchy job
 
@@ -99,8 +127,12 @@ CI's `omarchy` job runs in a pinned `archlinux:base` container:
   Lua (`bindings.lua`, Omarchy 4) and hyprlang (`bindings.conf`).
 - `test/omarchy-container.test.mjs` (as `ci`, with `OATS_OMARCHY_CONTAINER=1`;
   it skips without it) runs setup against the real Omarchy: its launchers,
-  through `gio launch` and `sh -c`, its hook runner, and `--verify-config` on
-  the user's whole configuration with the printed snippet added.
+  through `gio launch` and `sh -c`, its hook runner, `--verify-config` on
+  the user's whole configuration with the printed snippet added, Omarchy's
+  own `MenuModel.js` reading the menu block (it is plain functions, so it
+  runs as a script in a `vm` context), and `oats omarchy waiting` opening a
+  session through the real floating terminal. Only the selector is a fake:
+  the real one needs a running Omarchy shell.
 
 Installing `omarchy` in a container works as it is: Limine's post-transaction
 hooks report that there is no FAT32 boot partition, which pacman treats as

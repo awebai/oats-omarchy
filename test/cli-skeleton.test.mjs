@@ -28,7 +28,7 @@ test("--help prints the usage and exits 0", () => {
   assert.match(r.stdout, /waiting/);
 });
 
-for (const args of [[], ["waiting"], ["--help", "extra"], ["bogus"]]) {
+for (const args of [[], ["--help", "extra"], ["bogus"]]) {
   test(`anything else exits 2: [${args.join(" ")}]`, () => {
     const r = run(...args);
     assert.equal(r.status, 2);
@@ -37,11 +37,13 @@ for (const args of [[], ["waiting"], ["--help", "extra"], ["bogus"]]) {
   });
 }
 
-test("setup is dispatched: --help prints its usage, a bad argument exits 2", () => {
-  const help = run("setup", "--help");
-  assert.equal(help.status, 0);
-  assert.match(help.stdout, /^usage: oats omarchy setup/);
-  const bad = run("setup", "--bogus");
-  assert.equal(bad.status, 2);
-  assert.match(bad.stderr, /unknown argument: --bogus\nusage: oats omarchy setup/);
-});
+for (const command of ["setup", "waiting"]) {
+  test(`${command} is dispatched: --help prints its usage, a bad argument exits 2`, () => {
+    const help = run(command, "--help");
+    assert.equal(help.status, 0);
+    assert.match(help.stdout, new RegExp(`^usage: oats omarchy ${command}`));
+    const bad = run(command, "--bogus");
+    assert.equal(bad.status, 2);
+    assert.match(bad.stderr, new RegExp(`unknown argument: --bogus\\nusage: oats omarchy ${command}`));
+  });
+}

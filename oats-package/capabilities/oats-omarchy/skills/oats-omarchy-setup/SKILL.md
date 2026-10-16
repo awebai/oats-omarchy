@@ -1,6 +1,6 @@
 ---
 name: oats-omarchy-setup
-description: Make the OATS TUI and OATS Desktop native Omarchy apps (launcher entries, icons, a suggested SUPER + O key) with `oats omarchy setup`. Use when someone on Omarchy wants OATS in their app launcher or on a key, asks to set up, check or undo the Omarchy integration, or after an Omarchy update reports OATS drift.
+description: Make the OATS TUI and OATS Desktop native Omarchy apps (launcher entries, icons, an OATS submenu in the Omarchy menu, a suggested SUPER + O key) with `oats omarchy setup`. Use when someone on Omarchy wants OATS in their app launcher or on a key, asks to set up, check or undo the Omarchy integration, or after an Omarchy update reports OATS drift.
 ---
 
 # OATS on Omarchy: setup
@@ -56,11 +56,21 @@ these steps and stop:
 4. **Desktop.** When the Desktop part is skipped, relay the plan's reason and
    how to get the Desktop. They can rerun with
    `--desktop <absolute path to the AppImage>` to choose one.
+5. **The menu.** The *menu* part adds an OATS submenu to the Omarchy menu:
+   open the TUI or the Desktop, *Waiting on you* (pick an agent that waits
+   on them and its session opens in a floating terminal) and *Status*. It
+   is the one part that edits a file of theirs,
+   `~/.config/omarchy/extensions/omarchy-menu.jsonc`: it adds a block between
+   `>>> oats-omarchy` and `<<< oats-omarchy` comment lines and touches
+   nothing else. When the part is skipped, relay the reason: for example,
+   Omarchy cannot read their file as it is, or it already has an item named
+   `oats`.
 
 ## Undo and check
 
 - `oats omarchy setup --remove` restores every file `--apply` wrote, exactly
-  as it was before (deleted when it was absent). A file they changed since is
+  as it was before (deleted when it was absent), and takes the block out of
+  their menu file. A file they changed since is
   left alone and named (`E_MODIFIED`). They decide what to do with it, then
   run `--remove` again. The pasted key snippet is theirs to delete from their
   bindings file.
@@ -82,6 +92,6 @@ these steps and stop:
 |---|---|
 | `E_NO_DEPLOYMENT` | not run through `oats` from an instance home or a deployment |
 | `E_OTHER_DEPLOYMENT` | applied for another deployment; remove it there first |
-| `E_MODIFIED` | a file setup wrote was changed since; it is left in place |
+| `E_MODIFIED` | a file setup wrote, or the menu block, was changed since; it is left in place |
 | `E_APPLY_FAILED` | a write failed; everything this run wrote was rolled back |
 | `E_BAD_ARGS` (exit 2) | the arguments; it prints its usage |

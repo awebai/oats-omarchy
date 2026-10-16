@@ -14,8 +14,18 @@ export const fixture = (...parts) => join(repo, "test", "fixtures", ...parts);
 
 const LAUNCHERS = [
   "omarchy-launch-or-focus-tui", "omarchy-launch-or-focus", "uwsm-app", "omarchy-hook",
-  "omarchy-menu-select", "omarchy-launch-floating-terminal-with-presentation",
+  "omarchy-menu-select", "omarchy-launch-floating-terminal-with-presentation", "omarchy-notification-send",
 ];
+
+// A small stand-in for Omarchy's menu definition: setup only needs it to be
+// there; the container test reads the real one.
+const MENU_DEFAULTS = `{
+  // Omarchy menu definition (a test stand-in).
+  "apps": {"icon":"a","label":"Apps","provider":"apps"},
+  "system": {"icon":"s","label":"System"},
+  "system.lock": {"icon":"l","label":"Lock","action":"omarchy-system-lock"},
+}
+`;
 // The only host programs on the sandbox's PATH: a shell and the few tools the
 // fakes and the hook use, linked into a private directory. /usr/bin itself is
 // not on the PATH, because on Omarchy it holds the real launchers.
@@ -35,8 +45,15 @@ export function writeExecutable(path, text) {
 //   tmux: true | false
 //   kernel: "ok" | "fail"               the fake CLI's --version
 //   deploymentName: string
+//   menu: true | false                  Omarchy's menu definition is there ($OMARCHY_PATH)
+// The kernel stand-in answers `status --json` from <root>/status.json (and
+// <root>/status.mode: "envelope", "stderr" or "hang" for a failure) and
+// `version --json` from <root>/version.json; files a test writes.
+// FAKE_SELECT picks in omarchy-menu-select: "cancel" (the default), "first",
+// or the text to return. FAKE_FLOATING_RUN=1 makes the floating terminal run
+// its command with bash -c, as the real one does.
 export function sandbox(t, options = {}) {
-  const o = { launchers: true, print: "fixture", session: false, fuse: true, tmux: true, kernel: "ok", deploymentName: "deployment", ...options };
+  const o = { launchers: true, print: "fixture", session: false, fuse: true, tmux: true, kernel: "ok", deploymentName: "deployment", menu: true, ...options };
   const root = realpathSync(mkdtempSync(join(tmpdir(), "oats-omarchy-test-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
@@ -51,6 +68,29 @@ export function sandbox(t, options = {}) {
 
   const launchers = o.launchers === true ? LAUNCHERS : o.launchers === false ? [] : o.launchers;
   for (const name of launchers) writeExecutable(join(fakebin, name), `#!/bin/sh\necho "${name} $*" >> "${join(root, "launched.log")}"\n`);
+  // The menu's commands, with the real ones' refusals: the selector needs a
+  // prompt and at least one option (it never opens empty), the notifier a
+  // headline. Each logs its arguments one per line, then "--".
+  const logArgs = (log) => `for a; do printf '%s\\n' "$a"; done >> "${join(root, log)}"; echo -- >> "${join(root, log)}"`;
+  if (launchers.includes("omarchy-menu-select")) writeExecutable(join(fakebin, "omarchy-menu-select"), `#!/bin/bash
+${logArgs("select.log")}
+if (( $# < 2 )); then echo "Usage: omarchy-menu-select <prompt> [option...] [-- menu args...]" >&2; exit 1; fi
+case "\${FAKE_SELECT:-cancel}" in
+  cancel) exit 1 ;;
+  first) printf '%s\\n' "$2" ;;
+  *) printf '%s\\n' "$FAKE_SELECT" ;;
+esac
+`);
+  if (launchers.includes("omarchy-notification-send")) writeExecutable(join(fakebin, "omarchy-notification-send"), `#!/bin/bash
+if (( $# < 1 )); then echo "Usage: omarchy-notification-send [options] <headline> [description]" >&2; exit 1; fi
+${logArgs("notify.log")}
+`);
+  if (launchers.includes("omarchy-launch-floating-terminal-with-presentation")) writeExecutable(join(fakebin, "omarchy-launch-floating-terminal-with-presentation"), `#!/bin/bash
+cmd="$*"
+printf '%s\\n' "$cmd" >> "${join(root, "floating.log")}"
+if [[ -n $FAKE_FLOATING_RUN ]]; then bash -c "$cmd"; fi
+exit 0
+`);
 
   const printText = o.print === "fixture" ? readFileSync(fixture("print", "omarchy-4.0.4.txt"), "utf8")
     : o.print === "no-hyprland" ? readFileSync(fixture("print", "no-hyprland.txt"), "utf8")
@@ -84,9 +124,18 @@ echo "	libfuse3.so.4 (libc6,x86-64) => /usr/lib/libfuse3.so.4"
   // an operator command). Anything else is logged and refused.
   const cli = join(root, "kernel", "oats.mjs");
   writeFileSync(cli, o.kernel === "ok" ? `import { spawnSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 const [cmd, ...rest] = process.argv.slice(2);
 if (cmd === "--version") { console.log("@awebai/oats 0.60.0 (desktop API v1)"); process.exit(0); }
+const fake = (name) => { try { return readFileSync(${JSON.stringify(root)} + "/" + name, "utf8"); } catch { return null; } };
+if (cmd === "status" && rest.join(" ") === "--json") {
+  const mode = (fake("status.mode") || "").trim();
+  if (mode === "hang") { setInterval(() => {}, 1000); await new Promise(() => {}); }
+  if (mode === "envelope") { console.log(JSON.stringify({ ok: false, error: { code: "E_LOCK", message: "oats-lock.json is unreadable: Unexpected end of JSON input" } })); process.exit(1); }
+  else if (mode === "stderr") { console.error("oats: no oats-local.yaml at or above " + process.cwd()); process.exit(1); }
+  else { process.stdout.write(fake("status.json") || JSON.stringify({ root: process.cwd(), agents: [] })); process.exit(0); }
+}
+if (cmd === "version" && rest.join(" ") === "--json") { process.stdout.write(fake("version.json") || JSON.stringify({ version: "0.60.0", features: ["session-attach-detach-key"] })); process.exit(0); }
 if (cmd === "omarchy") {
   const soul = rest.includes("--soul") ? rest[rest.indexOf("--soul") + 1] : null;
   if (process.env.FAKE_KERNEL_REFUSE_SOUL && soul === process.env.FAKE_KERNEL_REFUSE_SOUL) {
@@ -95,9 +144,14 @@ if (cmd === "omarchy") {
   const r = spawnSync(process.execPath, [${JSON.stringify(bin)}, ...rest], { stdio: "inherit", env: { ...process.env, OATS_TEAM_SCOPE: process.cwd(), OATS_CLI_BIN: process.argv[1], OATS_NODE_BIN: process.execPath } });
   process.exit(r.status ?? 1);
 }
-appendFileSync(${JSON.stringify(join(root, "kernel.log"))}, process.argv.slice(2).join(" ") + "\\n");
+appendFileSync(${JSON.stringify(join(root, "kernel.log"))}, JSON.stringify(process.argv.slice(2)) + "\\n");
 console.error("fake kernel: " + process.argv.slice(2).join(" ")); process.exit(1);
 ` : `console.error("Error: Cannot find module 'yaml'"); process.exit(1);\n`);
+
+  if (o.menu) {
+    mkdirSync(join(root, "omarchy", "default", "omarchy"), { recursive: true });
+    writeFileSync(join(root, "omarchy", "default", "omarchy", "omarchy-menu.jsonc"), MENU_DEFAULTS);
+  }
 
   const path = `${fakebin}:${hostbin}`;
   const env = {
@@ -111,6 +165,7 @@ console.error("fake kernel: " + process.argv.slice(2).join(" ")); process.exit(1
     OATS_CLI_BIN: cli,
     OATS_SOUL_ID: "github.com/acme/agents#builder",
     OATS_AGENT: "builder",
+    OMARCHY_PATH: join(root, "omarchy"),
   };
 
   const run = (args, extra = {}) => {

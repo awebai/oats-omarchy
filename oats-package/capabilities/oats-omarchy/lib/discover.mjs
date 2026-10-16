@@ -16,7 +16,12 @@ export const MINIMAL_PATH = "/usr/local/bin:/usr/bin:/bin";
 export const FEATURES = {
   apps: ["omarchy-launch-or-focus-tui", "omarchy-launch-or-focus", "uwsm-app"],
   hook: ["omarchy-hook"],
+  menu: ["omarchy-menu-select", "omarchy-launch-floating-terminal-with-presentation"],
 };
+// `oats omarchy waiting` notifies with it when there is nothing to pick, and
+// writes to stderr only without it: reported, not required.
+export const NOTIFY = "omarchy-notification-send";
+export const OMARCHY_PATH = "/usr/share/omarchy";
 
 const absolute = (value) => (typeof value === "string" && isAbsolute(value) ? value : null);
 
@@ -66,10 +71,14 @@ export function deployment(env) {
 export function launchEnvironment(env) {
   const session = sessionEnvironment(env.PATH, env);
   if (session.ok && session.env.PATH) {
-    return { source: "session", path: session.env.PATH, featurePath: session.env.PATH, featureSource: "the user session's PATH (systemctl --user show-environment)" };
+    return {
+      source: "session", path: session.env.PATH, featurePath: session.env.PATH, featureSource: "the user session's PATH (systemctl --user show-environment)",
+      omarchyPath: absolute(session.env.OMARCHY_PATH) || absolute(env.OMARCHY_PATH) || OMARCHY_PATH,
+    };
   }
   return {
     source: "minimal", path: MINIMAL_PATH, featurePath: env.PATH || MINIMAL_PATH,
+    omarchyPath: absolute(env.OMARCHY_PATH) || OMARCHY_PATH,
     featureSource: "this command's PATH (no user session environment: " + (session.reason || "no PATH in it") + ")",
     reason: session.reason,
   };
@@ -94,13 +103,20 @@ export function kernel(env, launch) {
 
 export function features(launch) {
   const found = {};
-  for (const name of [...FEATURES.apps, ...FEATURES.hook, "omarchy-menu-select", "omarchy-launch-floating-terminal-with-presentation"]) {
+  for (const name of [...FEATURES.apps, ...FEATURES.hook, ...FEATURES.menu, NOTIFY]) {
     found[name] = which(name, launch.featurePath);
   }
   return found;
 }
 
 export const missing = (found, names) => names.filter((name) => !found[name]);
+
+// Omarchy's own menu definition, which the user's extension file extends:
+// the menu feature is there only when it is.
+export function menuDefaults(launch) {
+  const path = join(launch.omarchyPath, "default", "omarchy", "omarchy-menu.jsonc");
+  return { path, ok: existsSync(path) };
+}
 
 // libfuse2, which an AppImage needs to mount itself.
 export function fuse(env) {
