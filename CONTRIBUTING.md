@@ -86,9 +86,11 @@ it before the eval. `lib/quote.mjs` has one function per layer, and a value
 is quoted for the eval first and for the outer reader second. A path with a
 single quote or a control character is refused (`E_UNSAFE_PATH`).
 
-Omarchy's menu runs an action with `bash -lc`, and its floating terminal
-joins its arguments and runs them with `bash -c`: the menu actions and the
-attach command are single-quoted shell words, with no eval layer.
+Omarchy's menu runs an action with `bash -lc`. Its TUI and Desktop actions
+are the same launch commands as the keys, so they go through
+`omarchy-launch-or-focus[-tui]` and its eval as above. The waiting and status
+actions, and the attach command (which the floating terminal joins and runs
+with `bash -c`), have no eval layer: they are single-quoted shell words.
 
 ## Commands
 

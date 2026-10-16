@@ -54,12 +54,28 @@ test("the user's last entry with and without a trailing comma, one line, empty o
   assert.equal(menu.insertBlock('{"mine":1}', BLOCK).text, `{"mine":1,\n${BLOCK}}`);
 });
 
-test("no file, or only whitespace: a minimal object holding the block", () => {
+test("no file, or only comments and whitespace: an object holding the block goes after the user's bytes", () => {
   const ins = menu.insertBlock("", BLOCK);
   assert.equal(ins.text, `{\n${BLOCK}}\n`);
   assert.equal(ins.created, true);
-  assert.equal(menu.removeBlock(ins.text, { ...ins, block: BLOCK }), menu.SKELETON);
-  assert.equal(menu.insertBlock(" \n", BLOCK).created, true);
+  assert.equal(menu.removeBlock(ins.text, { ...ins, block: BLOCK }), ins.skeleton);
+  const notes = "// My menu customization notes\n// Keep the work shortcuts here.\n";
+  for (const text of [notes, " \n", "// no newline at the end"]) {
+    const it = menu.insertBlock(text, BLOCK);
+    assert.ok(it.text.startsWith(text), "every byte the user had stays in place");
+    assert.deepEqual(Object.keys(menu.omarchyParse(it.text).items), OURS);
+    assert.equal(menu.removeBlock(it.text, { ...it, block: BLOCK }), it.skeleton);
+  }
+});
+
+test("a byte-order mark before a leading comment: Omarchy reads the file, and so does setup", () => {
+  const text = '\uFEFF// menu\n{\n  "mine": {"label":"Mine","action":"true"}\n}\n';
+  assert.deepEqual(Object.keys(menu.omarchyParse(text).items), ["mine"]);
+  const { out } = roundTrip(text);
+  assert.equal(out, text);
+  // A mark before the object itself is not JSON: Omarchy cannot read it, nor setup.
+  assert.equal(menu.omarchyParse('\uFEFF{"mine":1}').ok, false);
+  assert.equal(menu.insertBlock('\uFEFF{"mine":1}', BLOCK), null);
 });
 
 test("an `items` wrapper: the block goes inside items, where Omarchy reads", () => {
@@ -144,6 +160,23 @@ for (const [name, text] of [
     assert.deepEqual(snapshot(s.home), before);
   });
 }
+
+test("a comment-only menu file: --apply keeps the comments, and a row the user adds in our object survives --remove", (t) => {
+  const s = sandbox(t);
+  const notes = "// My menu customization notes\n// Keep the work shortcuts here.\n";
+  mkdirSync(join(MENU(s), ".."), { recursive: true });
+  writeFileSync(MENU(s), notes);
+  const before = snapshot(s.home);
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.ok(readFileSync(MENU(s), "utf8").startsWith(`${notes}{\n${menu.START}`));
+  assert.equal(s.run(["setup", "--remove"]).status, 0);
+  assert.deepEqual(snapshot(s.home), before, "nothing else was added: the file is as it was");
+
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  writeFileSync(MENU(s), readFileSync(MENU(s), "utf8").replace(`{\n${menu.START}`, `{\n  "mine": {"label":"Mine","action":"true"},\n${menu.START}`));
+  assert.equal(s.run(["setup", "--remove"]).status, 0);
+  assert.equal(readFileSync(MENU(s), "utf8"), `${notes}{\n  "mine": {"label":"Mine","action":"true"},\n}\n`);
+});
 
 test("a user edit inside the block: --check reports it, --apply and --remove leave the file alone (E_MODIFIED)", (t) => {
   const s = sandbox(t);

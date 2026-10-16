@@ -10,7 +10,8 @@ import { shellQuote, shellWord } from "./quote.mjs";
 
 export const START = "  // >>> oats-omarchy (managed by `oats omarchy setup`; remove with --remove) >>>\n";
 export const END = "  // <<< oats-omarchy <<<\n";
-// The file setup creates when the user has none, around the block.
+// The object setup adds around the block when the user's file has none (no
+// file, or only comments and whitespace): it goes after their bytes.
 export const SKELETON = "{\n}\n";
 export const IDS = ["oats", "oats.tui", "oats.desktop", "oats.waiting", "oats.status"];
 
@@ -67,14 +68,16 @@ export function omarchyParse(text) {
 
 // ---------------------------------------------------------------------------
 // Where the block goes. Only files that pass omarchyParse get here, so the
-// only comments are whole lines; strings are skipped as tokens.
+// only comments are whole lines; strings are skipped as tokens. Whitespace is
+// what stripJsonc's \s is (a byte-order mark included): anything else between
+// tokens would have failed JSON.parse.
 
 function tokens(text) {
   const out = [];
   let i = 0;
   while (i < text.length) {
     const c = text[i];
-    if (c === " " || c === "\t" || c === "\n" || c === "\r") { i++; continue; }
+    if (/\s/.test(c)) { i++; continue; }
     if (c === "/" && text[i + 1] === "/") { while (i < text.length && text[i] !== "\n") i++; continue; }
     if (c === '"') {
       let j = i + 1;
@@ -92,9 +95,11 @@ function tokens(text) {
   return out;
 }
 
-// The object the items live in: its closing brace, and the token before it.
+// The object the items live in: its closing brace, and the token before it;
+// null for a shape setup does not edit.
 function target(text, wrapped) {
   const t = tokens(text);
+  if (t[0]?.type !== "{") return null;
   const close = new Map();
   const stack = [];
   t.forEach((tok, k) => {
@@ -114,16 +119,25 @@ function target(text, wrapped) {
     }
   }
   const end = close.get(open);
+  if (end === undefined || !t[end - 1]) return null;
   return { closeAt: t[end].start, prev: t[end - 1] };
 }
 
-// → { text, inserted, comma } with the block added, or null when the file's
-// shape is not one setup can edit.
+// → { text, inserted, comma, created, skeleton } with the block added, or
+// null when the file's shape is not one setup can edit. A file with no
+// object (absent, or only comments and whitespace) keeps every byte: the
+// object goes after them, and `skeleton` is what is left once the block is
+// out again, so --remove can take the object out too.
 export function insertBlock(text, blockText) {
   const parsed = omarchyParse(text);
   if (!parsed.ok) return null;
-  if (parsed.empty) return { text: `{\n${blockText}}\n`, inserted: blockText, comma: false, created: true };
-  const { closeAt, prev } = target(text, parsed.wrapped);
+  if (parsed.empty) {
+    const prefix = text && !text.endsWith("\n") ? `${text}\n` : text;
+    return { text: `${prefix}{\n${blockText}}\n`, inserted: blockText, comma: false, created: true, skeleton: prefix + SKELETON };
+  }
+  const place = target(text, parsed.wrapped);
+  if (!place) return null;
+  const { closeAt, prev } = place;
   // At the start of the closing brace's line when it stands alone there,
   // else just before the brace, on a line of its own.
   const lineStart = text.lastIndexOf("\n", closeAt - 1) + 1;

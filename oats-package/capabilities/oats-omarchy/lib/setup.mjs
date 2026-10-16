@@ -203,13 +203,14 @@ function menuEdit(p, state, blockText) {
   const clash = text === null ? [] : menu.conflicts(text);
   if (clash.length) return { skip: `${p.menuFile} has its own ${clash.join(", ")}, which the oats block would override` };
   const ins = menu.insertBlock(text ?? "", blockText);
+  if (!ins) return { skip: `setup cannot place the oats block in ${p.menuFile} as it is written; it leaves the file alone` };
   const problem = menu.verifyEdit(text ?? "", ins.text, blockText);
   if (problem) return { skip: problem };
   const prior = text === null ? { state: "absent" } : ins.created ? { state: "text", text } : null;
-  return { action: "write", disk, bytes: Buffer.from(ins.text), mode: disk ? disk.mode : 0o644, edit: { inserted: ins.inserted, comma: ins.comma, created: ins.created, prior } };
+  return { action: "write", disk, bytes: Buffer.from(ins.text), mode: disk ? disk.mode : 0o644, edit: { inserted: ins.inserted, comma: ins.comma, created: ins.created, ...(ins.created ? { skeleton: ins.skeleton } : {}), prior } };
 }
 
-const pickEdit = ({ inserted, comma, created, prior }) => ({ inserted, comma, created, prior });
+const pickEdit = ({ inserted, comma, created, skeleton, prior }) => ({ inserted, comma, created, ...(skeleton !== undefined ? { skeleton } : {}), prior });
 
 // The file a block edit writes: through a symlink to its target, so a
 // dotfile manager's link stays a link.
@@ -461,16 +462,17 @@ function remove(env, p, state) {
   return { mode: "remove", restored, warnings };
 }
 
-// Takes setup's block out of the menu file, leaving every other byte. A file
-// setup created goes when nothing else is left in it; a file the user has
-// since deleted has nothing of ours left. → false when the block was changed.
+// Takes setup's block out of the menu file, leaving every other byte. The
+// object setup added around the block goes too when nothing else is left in
+// it (and the file, when setup created it); a file the user has since
+// deleted has nothing of ours left. → false when the block was changed.
 function removeEdit(file) {
   const disk = readFileState(file.path);
   if (!disk) return true;
   const out = menu.removeBlock(disk.bytes.toString("utf8"), file);
   if (out === null) return false;
   const target = editTarget(file.path, disk);
-  if (file.created && out === menu.SKELETON) {
+  if (file.created && out === (file.skeleton ?? menu.SKELETON)) {
     if (file.prior?.state === "text") atomicWrite(target, Buffer.from(file.prior.text), disk.mode);
     else unlinkSync(target);
   } else atomicWrite(target, Buffer.from(out), disk.mode);
