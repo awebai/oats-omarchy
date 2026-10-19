@@ -8,12 +8,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const BIN = { setup: join(repo, "bin", "setup.mjs"), waiting: join(repo, "bin", "waiting.mjs") };
+export const BIN = Object.fromEntries(["setup", "waiting", "agents", "spawn"].map((name) => [name, join(repo, "bin", `${name}.mjs`)]));
 export const fixture = (...parts) => join(repo, "test", "fixtures", ...parts);
 
 const LAUNCHERS = [
   "omarchy-launch-or-focus-tui", "omarchy-launch-or-focus", "uwsm-app", "omarchy-hook",
   "omarchy-menu-select", "omarchy-launch-floating-terminal-with-presentation", "omarchy-notification-send",
+  "omarchy-menu-input",
 ];
 
 // A small stand-in for Omarchy's menu definition: setup only needs it to be
@@ -59,6 +60,11 @@ export function writeExecutable(path, text) {
 //                                       (an editor saving meanwhile)
 //   deploymentName: string
 //   menu: true | false                  Omarchy's menu definition is there ($OMARCHY_PATH)
+//   shell: false | "ok" | "unknown"     `omarchy-shell` on PATH: none (no
+//                                       shell runs), or one that logs its
+//                                       arguments to <root>/shell.log and
+//                                       answers a summon with that word (the
+//                                       picker opened, or the plugin is off)
 // The kernel stand-in answers `status --json` from <root>/status.json (and
 // <root>/status.mode: "envelope", "stderr" or "hang" for a failure) and
 // `version --json` from <root>/version.json; files a test writes. With
@@ -69,11 +75,21 @@ export function writeExecutable(path, text) {
 // answers the kernel's envelope around <root>/deployments.json (a result a
 // test writes, else an empty list); <root>/deployments.mode "envelope" makes
 // it fail, and "hang" makes it never answer (its pids in deployments.pids). Without the feature, deployments is refused as an older CLI does.
+// The kernel stand-in also answers `souls --json --dir <d>` from
+// <d>/souls.json (the kernel's envelope; <d>/souls.mode "envelope" makes it
+// fail, else it lists no soul), and `spawn <soul> --dir <d> --task-file <f>
+// --json`: it logs {argv, cwd, task (the file's text), mode (the file's)}
+// to <root>/spawn.log, then answers <root>/spawn.json (else an instance
+// <soul>-1 under <d>) with exit <root>/spawn.status (else 0); spawn.mode
+// "hang" makes it never answer (its pid in spawn.pids). Anything else, as
+// `session attach`, is logged to <root>/kernel.log and refused.
 // FAKE_SELECT picks in omarchy-menu-select: "cancel" (the default), "first",
-// or the text to return. FAKE_FLOATING_RUN=1 makes the floating terminal run
+// or the text to return. omarchy-menu-input logs its arguments to
+// input.log and prints FAKE_INPUT; unset, it is cancelled (exit 1), as the
+// real one is for an empty answer. FAKE_FLOATING_RUN=1 makes the floating terminal run
 // its command with bash -c, as the real one does.
 export function sandbox(t, options = {}) {
-  const o = { launchers: true, print: "fixture", session: false, fuse: true, tmux: true, kernel: "ok", node: false, hyprland: true, deploymentName: "deployment", menu: true, ...options };
+  const o = { launchers: true, print: "fixture", session: false, fuse: true, tmux: true, kernel: "ok", node: false, hyprland: true, deploymentName: "deployment", menu: true, shell: false, ...options };
   const root = realpathSync(mkdtempSync(join(tmpdir(), "oats-omarchy-test-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
@@ -110,6 +126,17 @@ ${logArgs("notify.log")}
 cmd="$*"
 printf '%s\\n' "$cmd" >> "${join(root, "floating.log")}"
 if [[ -n $FAKE_FLOATING_RUN ]]; then bash -c "$cmd"; fi
+exit 0
+`);
+
+  if (launchers.includes("omarchy-menu-input")) writeExecutable(join(fakebin, "omarchy-menu-input"), `#!/bin/bash
+${logArgs("input.log")}
+[[ -v FAKE_INPUT ]] || exit 1
+printf '%s' "$FAKE_INPUT"
+`);
+  if (o.shell) writeExecutable(join(fakebin, "omarchy-shell"), `#!/bin/sh
+printf '%s\\n' "$*" >> "${join(root, "shell.log")}"
+[ "$2" = summon ] && echo ${o.shell}
 exit 0
 `);
 
@@ -198,6 +225,27 @@ if (cmd === "status" && (args.join(" ") === "--json" || (dir && args.length === 
   else { process.stdout.write(at("status.json") || JSON.stringify({ root: dir || process.cwd(), agents: [] })); process.exit(0); }
 }
 if (cmd === "version" && rest.join(" ") === "--json") { process.stdout.write(version); process.exit(0); }
+if (cmd === "souls" && dir && args.join(" ") === "--json") {
+  appendFileSync(${JSON.stringify(root)} + "/souls-dirs.log", dir + "\\n");
+  if ((at("souls.mode") || "").trim() === "envelope") { console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_WORKSPACE", message: "the workspace cannot be read" } })); process.exit(1); }
+  process.stdout.write(at("souls.json") || JSON.stringify({ schemaVersion: 1, ok: true, result: { soulsApi: 1, workspace: null, souls: [], problems: [] } }));
+  process.exit(0);
+}
+if (cmd === "spawn") {
+  const { statSync } = await import("node:fs");
+  const file = rest[rest.indexOf("--task-file") + 1];
+  let task = null, mode = null;
+  try { task = readFileSync(file, "utf8"); mode = statSync(file).mode & 0o777; } catch { /* no file */ }
+  appendFileSync(${JSON.stringify(root)} + "/spawn.log", JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), task, mode }) + "\\n");
+  if ((fake("spawn.mode") || "").trim() === "hang") {
+    appendFileSync(${JSON.stringify(root)} + "/spawn.pids", process.pid + "\\n");
+    setInterval(() => {}, 1000);
+    await new Promise(() => {});
+  }
+  console.error("spawning " + args[0] + " …");
+  process.stdout.write(fake("spawn.json") || JSON.stringify({ schemaVersion: 1, ok: true, result: { instance: args[0] + "-1", home: dir + "/agents/" + args[0] + "/instances/" + args[0] + "-1", launched: true } }));
+  process.exit(Number((fake("spawn.status") || "0").trim()));
+}
 appendFileSync(${JSON.stringify(join(root, "kernel.log"))}, JSON.stringify(process.argv.slice(2)) + "\\n");
 console.error("fake kernel: " + process.argv.slice(2).join(" ")); process.exit(1);
 `;
