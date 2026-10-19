@@ -57,8 +57,8 @@ when two things hold:
 - `oats version --json` lists the feature `deployments-list`;
 - the plugin you install has the list: after step 3,
   `~/.config/omarchy/plugins/ai.aweb.oats/setup --help` mentions
-  `oats deployments`. v0.2.0 does not, so with that pin, ask for the
-  deployment as below.
+  `oats deployments`. v0.2.0 and v0.2.1 do not, so with either pin, ask
+  for the deployment as below.
 
 With both, setup needs no deployment, and you pass no `--dir` in the steps
 below.
@@ -162,8 +162,9 @@ after the person has agreed in the chat. `setup --check` needs no `--yes`.
 It needs Node.js and the OATS CLI (`npm install -g @awebai/oats`, 0.53.0 or
 later) on your PATH. With an OATS CLI that keeps this computer's list of
 deployments (`oats version --json` lists `deployments-list`), this plugin
-after v0.2.0 needs nothing else, and you leave out `--dir` below; with an older one, setup is for one
-OATS deployment: the directory that holds `oats-local.yaml`. `oats` on your PATH must be the installed CLI, the
+later than v0.2.1 needs nothing else, and you leave out `--dir` below; with
+an older one, setup is for one OATS deployment: the directory that holds
+`oats-local.yaml`. `oats` on your PATH must be the installed CLI, the
 package's `bin/oats.mjs` or the npm or mise link to it, not a wrapper
 script: setup runs that script with node directly and records its path.
 
