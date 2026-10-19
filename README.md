@@ -5,7 +5,7 @@ An [Omarchy](https://omarchy.org) plugin that makes
 the terminal UI (`oats tui`) and OATS Desktop, become Omarchy apps with a
 launcher entry, an icon and a key. An `oats` submenu in the Omarchy menu
 opens either client and lists the agents waiting on you, and the OATS icon in
-the bar shows how many there are and opens them from a panel.
+the bar opens a panel that lists them, read when you open it.
 
 It is set up with one command, `setup --plan | --apply | --remove | --check`,
 run from the plugin's directory. Setup finds what it needs on the machine
@@ -151,21 +151,21 @@ omarchy plugin add https://github.com/awebai/oats-omarchy --enable
 - **`omarchy plugin add`** clones this repository's default branch into
   `~/.config/omarchy/plugins/ai.aweb.oats/` and puts the OATS icon in your
   bar. It takes no tag. Without a terminal it needs `--yes`.
-- **The OATS icon** shows beside it the number of agents waiting on you. An
-  agent counts when the kernel says it is waiting on you; for the others the
-  kernel makes no claim, so no number never means that nobody is waiting. It
-  shows `?` when the count could not be read. It refreshes every 60 seconds
-  (the widget's `refreshIntervalSec` setting, 15 to 3600) and whenever the
-  panel opens.
+- **The OATS icon** reads nothing in the background and shows no count:
+  nothing runs until you open its panel. A left click opens the panel, and
+  a right click opens the TUI.
 - **Before setup has run**, a click on the icon (its tooltip says "OATS:
   click to set up") runs the whole setup in a floating terminal: it asks for
   the deployment, shows the plan and asks before applying it.
-- **Its panel** (a click, once setup has run) lists those agents: a click on
-  one opens its session in a floating terminal, and Alt+O leaves that viewer
+- **Its panel** (a left click, once setup has run) reads the agents waiting
+  on you each time it opens, and says so while it reads. An agent is listed
+  when the kernel says it is waiting on you; for the others the kernel makes
+  no claim, so an empty list never means that nobody is waiting. When the
+  read fails, the panel says why. A click on an agent opens its session in a
+  floating terminal, and Alt+O leaves that viewer
   when your OATS CLI supports a detach key. It also has Open OATS TUI, Open
   OATS Desktop (when setup found one) and Set up keys and launchers, which
-  runs `setup --apply` in a floating terminal. A right click on the icon
-  opens the TUI.
+  runs `setup --apply` in a floating terminal.
 - **Finding the deployment.** Setup takes `--dir`, else the deployment
   around the working directory, else the one it is applied for. With none of
   those, in a terminal, it asks for the path of your deployment.

@@ -6,11 +6,11 @@ The repository is the plugin: Omarchy clones it whole, and nothing is built.
 
 ```
 manifest.json            the plugin's manifest: id ai.aweb.oats, one bar widget
-OatsBarWidget.qml        the bar widget: the OATS icon, the waiting count and its panel
+OatsBarWidget.qml        the bar widget: the OATS icon and its panel
 widget.mjs               everything the widget builds or reads, kept apart so a test can run it
 setup                    the command people run: a POSIX sh launcher
 bin/setup.mjs            setup's engine, which the launcher and the post-update hook run
-bin/waiting.mjs          the oats menu's "Waiting on you" row, and the widget's count (--json)
+bin/waiting.mjs          the oats menu's "Waiting on you" row, and the panel's read (--json)
 lib/                     their modules (below)
 assets/                  the icon both launcher entries use
 scripts/lint.mjs         lint
@@ -158,7 +158,7 @@ SIGHUP, so a stopped read leaves no kernel process behind.
 ### The bar widget
 
 `OatsBarWidget.qml` displays; `widget.mjs` decides. The QML reads
-`plugin.json` (Quickshell's `FileView`), runs the count read (`plugin.json`'s
+`plugin.json` (Quickshell's `FileView`), runs the panel's read (`plugin.json`'s
 `waiting` argv plus `--json`) as argv through one Quickshell `Process`, and
 hands every other command to the bar's `run`, which runs `bash -lc <line>`:
 `widget.mjs` builds those lines from `plugin.json`'s argv, every word
@@ -168,17 +168,19 @@ their argv. `test/widget-qml.test.mjs` loads the widget itself in Quickshell,
 offscreen, with Omarchy's own `Ui` and `Commons` and a stand-in only for the
 panel's layer-shell window (`KeyboardPanel`, which needs a compositor): the
 layout with more rows than fit, a `plugin.json` change, a destroy during a
-read, and a program that cannot start. It runs in CI's Omarchy container. The badge is the count when it is above 0, `?` when the read
-failed, and nothing otherwise.
+read, a program that cannot start, and that nothing is read before the panel
+opens. It runs in CI's Omarchy container. The icon shows no count.
 
-The read runs on a timer (the `refreshIntervalSec` setting, 60 s by default,
-15 to 3600) and when the panel opens, after `plugin.json` is read again: the
-widget takes the file's contents when its read completes (`onLoaded`), and
-a requested count read waits for that. `widget.mjs`'s read state keeps one
+Nothing is read in the background: there is no timer and no interval
+setting. The read runs only when the panel opens, fresh each time, after
+`plugin.json` is read again: the widget takes the file's contents when its
+read completes (`onLoaded`), and the read waits for that. Until the read
+answers, the panel lists nobody and says it is reading. `widget.mjs`'s read state keeps one
 read pending from its start to its output or its 30 s deadline, whether or
 not its program started (Quickshell reports nothing for a program that
-cannot start), so a refresh neither overlaps a read nor moves its deadline;
-at the deadline the read is stopped and shows `?`. The widget also stops it
+cannot start), so opening the panel again neither overlaps a read nor
+moves its deadline; at the deadline the read is stopped and the panel says
+why. The widget also stops it
 when it is destroyed (a hot reload or a disable). The panel's rows scroll in
 what the failed read's reason and the launchers leave of the panel, so the
 launchers stay in view however many rows there are. With a bar on each
@@ -186,7 +188,7 @@ monitor there is one widget per bar, and one of them reads for all: the
 first that the bar's `moduleWidgets` lists, which hands each result to the
 others (a widget the bar does not list reads for itself). A read costs about
 1.2 s of CPU on a real deployment (`oats status`), so it is once per
-interval, not once per bar.
+opening, not once per bar, and never in the background.
 
 ### Quoting
 

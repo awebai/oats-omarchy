@@ -108,6 +108,7 @@ for (const screen of [400, 900]) test(`a list taller than the panel scrolls; the
   const read = w.exe("rows.sh", `#!/bin/sh\ncat <<'E'\n${JSON.stringify({ ok: true, count: 50, rows })}\nE\n`);
   w.plugin({ tui: ["t"], desktop: ["d"], waiting: ["/bin/sh", read], attach: ["s", "--detach-key", "M-o", "--home"] });
   const [report] = w.play(scene(`
+  Timer { interval: 500; running: true; onTriggered: scene.w.open() }
   Timer { interval: 3000; running: true; onTriggered: {
     var items = scene.all(scene.w, [])
     var card = items.filter(function(x) { return x.objectName === "card" })[0]
@@ -121,17 +122,17 @@ for (const screen of [400, 900]) test(`a list taller than the panel scrolls; the
         texts[x.text] = p.y >= 0 && p.y + x.height <= card.height
       }
     }
-    scene.probe("layout", { badge: scene.w.badge, card: card.height, flick: flick, texts: texts })
+    scene.probe("layout", { reading: scene.w.reading, card: card.height, flick: flick, texts: texts })
   } }`, 4));
-  const { badge, card, flick, texts } = report.value;
-  assert.equal(badge, "50");
+  const { reading, card, flick, texts } = report.value;
+  assert.equal(reading, false, "the read answered");
   assert.ok(flick && flick.interactive && flick.height < flick.contentHeight && flick.height > 0, JSON.stringify(flick));
   for (const label of ["Alt+O leaves the viewer", "Open OATS TUI", "Open OATS Desktop", "Set up keys and launchers", "agent-0"]) {
     assert.equal(texts[label], true, `${label} is inside the ${card}px card`);
   }
   assert.equal(texts["agent-49"], false, "the last rows are scrolled out of view, not pushed out of the card");
-  // Beyond the instance names: the badge, the button labels and the hint.
-  const allowed = ["50", "OATS", "Alt+O leaves the viewer", "Open OATS TUI", "Open OATS Desktop", "Set up keys and launchers"];
+  // Beyond the instance names: the button labels and the hint.
+  const allowed = ["OATS", "Alt+O leaves the viewer", "Open OATS TUI", "Open OATS Desktop", "Set up keys and launchers"];
   for (const word of Object.keys(texts).filter((x) => !/^agent-\d+$/.test(x))) assert.ok(allowed.includes(word), word);
 });
 
@@ -165,19 +166,53 @@ test("destroying the widget during a read stops waiting and the kernel's read wi
   const ps = "ps -eo args | awk '/^sleep 30[01]$/ || /bin[/]waiting[.]mjs --dir/ { n++ } END { print n + 0 }'";
   const records = w.play(scene(`
   Process { id: ps; command: ["/bin/sh", "-c", ${JSON.stringify(ps)}]; stdout: StdioCollector { waitForEnd: true; onStreamFinished: scene.probe("ps", Number(text.trim())) } }
+  Timer { interval: 1000; running: true; onTriggered: scene.w.open() }
   Timer { interval: 2500; running: true; onTriggered: ps.running = true }
   Timer { interval: 3500; running: true; onTriggered: loader.active = false }
   Timer { interval: 5000; running: true; onTriggered: ps.running = true }`, 6));
   assert.deepEqual(records.map((r) => r.value), [3, 0], "waiting, the shim's sleep and its child; then none");
 });
 
-test("a read whose program cannot start shows ? at the deadline, at the shortest refresh interval", { skip }, (t) => {
+// What the panel shows: whether it is reading, the rows, and the failure.
+const panelState = `function state() { return { reading: scene.w.reading, rows: scene.w.rows.map(function(x) { return x.instance }), failed: scene.w.failed ? scene.w.waiting.reason : null } }`;
+
+test("a read whose program cannot start reads until the deadline, then says why in the panel", { skip }, (t) => {
   const w = world(t);
   w.plugin({ waiting: [join(w.root, "gone", "node"), "waiting.mjs"] });
   const records = w.play(scene(`
-  Timer { interval: 20000; running: true; onTriggered: scene.probe("at 20 s", scene.w.badge) }
-  Timer { interval: 33000; running: true; onTriggered: scene.probe("at 33 s", scene.w.badge) }`, 34, { settings: "({ refreshIntervalSec: 15 })" }));
-  assert.deepEqual(records.map((r) => [r.what, r.value]), [["at 20 s", ""], ["at 33 s", "?"]]);
+  ${panelState}
+  Timer { interval: 500; running: true; onTriggered: scene.w.open() }
+  Timer { interval: 20000; running: true; onTriggered: scene.probe("at 20 s", scene.state()) }
+  Timer { interval: 33000; running: true; onTriggered: scene.probe("at 33 s", scene.state()) }`, 34));
+  assert.deepEqual(records.map((r) => [r.what, r.value]), [
+    ["at 20 s", { reading: true, rows: [], failed: null }],
+    ["at 33 s", { reading: false, rows: [], failed: "waiting --json did not answer within 30 s" }],
+  ]);
+});
+
+test("nothing is read until the panel opens; each opening reads fresh and says so while it reads", { skip }, (t) => {
+  const w = world(t);
+  const log = join(w.root, "reads.log");
+  const read = w.exe("slow.sh", `#!/bin/sh\necho read >> '${log}'\nsleep 2\necho '{"ok":true,"count":1,"rows":[{"instance":"alpha","home":"/h/a"}]}'\n`);
+  w.plugin({ waiting: ["/bin/sh", read] });
+  const count = `n=$(cat '${log}' 2>/dev/null | wc -l); echo $n`;
+  const records = w.play(scene(`
+  ${panelState}
+  Process { id: reads; command: ["/bin/sh", "-c", ${JSON.stringify(count)}]; stdout: StdioCollector { waitForEnd: true; onStreamFinished: scene.probe("reads", Number(text.trim())) } }
+  Timer { interval: 4000; running: true; onTriggered: reads.running = true }
+  Timer { interval: 4500; running: true; onTriggered: scene.w.open() }
+  Timer { interval: 5500; running: true; onTriggered: scene.probe("reading", scene.state()) }
+  Timer { interval: 8000; running: true; onTriggered: { scene.probe("read", scene.state()); scene.w.close() } }
+  Timer { interval: 8500; running: true; onTriggered: scene.w.open() }
+  Timer { interval: 9000; running: true; onTriggered: scene.probe("again", scene.state()) }
+  Timer { interval: 12000; running: true; onTriggered: reads.running = true }`, 13));
+  assert.deepEqual(records.map((r) => [r.what, r.value]), [
+    ["reads", 0],
+    ["reading", { reading: true, rows: [], failed: null }],
+    ["read", { reading: false, rows: ["alpha"], failed: null }],
+    ["again", { reading: true, rows: [], failed: null }],
+    ["reads", 2],
+  ]);
 });
 
 // Presses the bar icon (the real BarIconButton's pressed signal) and logs
