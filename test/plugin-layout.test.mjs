@@ -120,11 +120,11 @@ test("--apply and --remove through ./setup write nothing inside the plugin direc
   const s = sandbox(t, { node: true });
   const before = snapshot(repo, { exclude: [".git", "node_modules"] });
   const sh = (args) => spawnSync("/bin/sh", [join(repo, "setup"), ...args], { env: s.env, cwd: s.deployment, encoding: "utf8", timeout: 60_000 });
-  const apply = sh(["--apply", "--json"]);
+  const apply = sh(["--apply", "--yes", "--json"]);
   assert.equal(apply.status, 0, apply.stdout + apply.stderr);
   assert.equal(JSON.parse(apply.stdout).result.parts.find((x) => x.part === "menu").status, "applied");
   assert.deepEqual(snapshot(repo, { exclude: [".git", "node_modules"] }), before, "after --apply");
-  const remove = sh(["--remove"]);
+  const remove = sh(["--remove", "--yes"]);
   assert.equal(remove.status, 0, remove.stderr);
   assert.deepEqual(snapshot(repo, { exclude: [".git", "node_modules"] }), before, "after --remove");
 });

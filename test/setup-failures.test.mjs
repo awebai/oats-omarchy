@@ -15,7 +15,7 @@ const HOOK = (s) => join(s.home, ".config/omarchy/hooks/post-update.d/oats-omarc
 // setup() in this process, so a replaced fs function applies to it.
 function direct(s, args) {
   let stdout = "";
-  const status = setup([...args, "--dir", s.deployment, "--json"], s.env, { write: (x) => { stdout += x; } }, { write() {} });
+  const status = setup([...args, "--dir", s.deployment, "--yes", "--json"], s.env, { write: (x) => { stdout += x; } }, { write() {} });
   return { status, json: JSON.parse(stdout) };
 }
 

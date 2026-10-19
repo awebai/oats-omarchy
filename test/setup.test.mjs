@@ -39,7 +39,7 @@ test("--plan writes nothing, not even Omarchy's keybindings cache", (t) => {
   assert.deepEqual(snapshot(s.home), before);
   const cache = readFileSync(join(s.root, "print-cache.log"), "utf8").trim();
   assert.ok(cache && !cache.startsWith(s.home) && !existsSync(cache), "--print ran with a temporary cache that is gone");
-  assert.deepEqual(r.json.result.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "will apply"], ["hook", "will apply"], ["menu", "will apply"]]);
+  assert.deepEqual(r.json.result.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "will apply"], ["hook", "will apply"], ["menu", "will apply"], ["keys", "skipped"]]);
   assert.equal(r.json.result.found.deployment.path, s.deployment);
   assert.deepEqual(r.json.result.found.deployment, { path: s.deployment, from: "the working directory" });
   assert.deepEqual(r.json.result.found.plugin, { dir: repo, inPlugins: false });
@@ -68,7 +68,7 @@ test("--apply writes exactly the parts, and a second --apply writes nothing", (t
   const r = s.run(["setup", "--apply", "--json"]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.json.result.written.sort(), [p.shim, p.tuiEntry, p.tuiIcon, p.desktopEntry, p.desktopIcon, p.hook, p.menu].sort());
-  assert.deepEqual(r.json.result.parts.map((x) => x.status), ["applied", "applied", "applied", "applied", "applied"]);
+  assert.deepEqual(r.json.result.parts.map((x) => x.status), ["applied", "applied", "applied", "applied", "applied", "skipped"]);
 
   assert.equal(readFileSync(p.shim, "utf8"), `#!/bin/sh\nexec '${process.execPath}' '${s.cli}' "$@"\n`);
   assert.equal(statSync(p.shim).mode & 0o777, 0o755);
@@ -95,7 +95,7 @@ test("--apply writes exactly the parts, and a second --apply writes nothing", (t
   const again = s.run(["setup", "--apply", "--json"]);
   assert.equal(again.status, 0, again.stderr);
   assert.deepEqual(again.json.result.written, []);
-  assert.deepEqual(again.json.result.parts.map((x) => x.status), ["already applied", "already applied", "already applied", "already applied", "already applied"]);
+  assert.deepEqual(again.json.result.parts.map((x) => x.status), ["already applied", "already applied", "already applied", "already applied", "already applied", "skipped"]);
   assert.deepEqual(snapshot(s.home), after, "the second --apply changed nothing");
   assert.match(s.run(["setup", "--apply"]).stdout, /already applied, nothing written/);
 });
@@ -291,7 +291,7 @@ test("the hook: silent when nothing drifted; one line when the node, the plugin 
   // Applied from a copy of the plugin, which then goes away.
   const plugin = join(s.root, "plugins", "oats-omarchy");
   cpSync(repo, plugin, { recursive: true, filter: (src) => !/[/\\](\.git|node_modules)$/.test(src) });
-  const apply = spawnSync(process.execPath, [join(plugin, "bin", "setup.mjs"), "--apply"], { env: s.env, cwd: s.deployment, encoding: "utf8" });
+  const apply = spawnSync(process.execPath, [join(plugin, "bin", "setup.mjs"), "--apply", "--yes"], { env: s.env, cwd: s.deployment, encoding: "utf8" });
   assert.equal(apply.status, 0, apply.stderr);
   const hook = () => spawnSync("bash", [p.hook], { env: s.env, cwd: s.home, encoding: "utf8" });
   assert.deepEqual([hook().status, hook().stdout], [0, ""]);
