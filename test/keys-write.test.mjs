@@ -60,7 +60,7 @@ test("--apply appends the block after a blank line, verified first on a temporar
   assert.equal(readFileSync(file, "utf8"), `${USER_BINDINGS}\n${rec.block}`);
   assert.equal(statSync(file).mode & 0o777, 0o640, "the file keeps its mode");
   assert.ok(rec.block.startsWith(bindings.START) && rec.block.endsWith(bindings.END));
-  for (const line of ['hl.unbind("SUPER + O")', 'o.bind("SUPER + O", "OATS", hl.dsp.submap("oats"))', 'hl.define_submap("oats", "reset", function()', 'o.bind("O", "Pop window out", "omarchy-hyprland-window-pop")', 'o.bind("SUPER + T", "OATS TUI",']) {
+  for (const line of ['hl.unbind("SUPER + O")', 'o.bind("SUPER + O", "OATS", hl.dsp.submap("oats"))', 'hl.define_submap("oats", "reset", function()', 'o.bind("O", "Pop window out", "omarchy-hyprland-window-pop")', 'o.bind("SUPER + T", "OATS TUI",', `o.bind("SPACE", "Open OATS", "omarchy-shell shell toggle ai.aweb.oats '{}'")`]) {
     assert.ok(rec.block.includes(line), line);
   }
   assert.deepEqual([rec.separator, rec.prior.state, rec.prior.mode], ["\n", "file", 0o640]);

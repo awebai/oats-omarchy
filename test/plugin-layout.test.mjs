@@ -38,13 +38,13 @@ test("no OATS capability is left: no manifests, no skill, no kernel environment,
 });
 
 test("the layout: setup, bin/, lib/ and assets/ at the root, no symlink anywhere (Omarchy's validator refuses them)", () => {
-  for (const path of ["setup", "bin/setup.mjs", "bin/waiting.mjs", "lib/setup.mjs", "assets/oats-256.png"]) assert.ok(existsSync(join(repo, path)), path);
+  for (const path of ["setup", "bin/setup.mjs", "bin/waiting.mjs", "bin/agents.mjs", "bin/spawn.mjs", "lib/setup.mjs", "assets/oats-256.png"]) assert.ok(existsSync(join(repo, path)), path);
   assert.match(readFileSync(join(repo, "setup"), "utf8"), /^#!\/bin\/sh\n/);
   assert.equal(lstatSync(join(repo, "setup")).mode & 0o111, 0o111, "setup is executable");
   assert.deepEqual(files(repo).filter((f) => lstatSync(f).isSymbolicLink()).map((f) => relative(repo, f)), []);
 });
 
-for (const [command, usage] of [["setup", /^usage: setup /], ["waiting", /^usage: waiting /]]) {
+for (const [command, usage] of [["setup", /^usage: setup /], ["waiting", /^usage: waiting /], ["agents", /^usage: agents /], ["spawn", /^usage: spawn /]]) {
   test(`bin/${command}.mjs: --help prints its usage, a bad argument exits 2`, () => {
     const help = spawnSync(process.execPath, [join(repo, "bin", `${command}.mjs`), "--help"], { encoding: "utf8" });
     assert.equal(help.status, 0);

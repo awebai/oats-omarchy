@@ -42,7 +42,9 @@ function isArgv(value) {
 
 // plugin.json's text → its commands, or null when it is absent or not what
 // setup writes (then the widget offers setup only). `deployment` is null
-// when setup uses this computer's list of deployments.
+// when setup uses this computer's list of deployments. `agents` and `spawn`
+// are the picker's, null in a file an older setup wrote (then the picker
+// offers setup only).
 export function parsePlugin(text) {
   var p
   try { p = JSON.parse(String(text)) } catch (e) { return null }
@@ -50,7 +52,8 @@ export function parsePlugin(text) {
   if (!isArgv(p.waiting) || !isArgv(p.attach) || !isArgv(p.setup)) return null
   if (p.tui !== null && !isArgv(p.tui)) return null
   if (p.desktop !== null && !isArgv(p.desktop)) return null
-  return { deployment: p.deployment, tui: p.tui, desktop: p.desktop, waiting: p.waiting, attach: p.attach, setup: p.setup }
+  var picker = isArgv(p.agents) && isArgv(p.spawn)
+  return { deployment: p.deployment, tui: p.tui, desktop: p.desktop, waiting: p.waiting, attach: p.attach, setup: p.setup, agents: picker ? p.agents : null, spawn: picker ? p.spawn : null }
 }
 
 // The read when the panel opens: `waiting --json`, run as argv (no shell).
@@ -90,7 +93,7 @@ export function parseWaiting(text) {
 }
 
 // The panel's rows by workspace, in the list's order: [{ title, rows:
-// [{ instance, home, label }], unknown: [text] }]. A group is a workspace,
+// [{ instance, home, label, waitingOnYou }], unknown: [text] }]. A group is a workspace,
 // or, for a deployment that could not be read (it has no workspace), that
 // deployment alone, by its path; its title is the workspace key or the
 // deployment's name. One deployment (or a read of one deployment, `listed`
@@ -98,7 +101,7 @@ export function parseWaiting(text) {
 // its deployment when its group has more than one, and its path when even
 // that would not tell two rows apart.
 export function groups(rows, listed) {
-  if (!listed) return rows.length ? [{ title: "", rows: rows.map(function(x) { return { instance: x.instance, home: x.home, label: x.instance } }), unknown: [] }] : []
+  if (!listed) return rows.length ? [{ title: "", rows: rows.map(function(x) { return { instance: x.instance, home: x.home, label: x.instance, waitingOnYou: claim(x.waitingOnYou) } }), unknown: [] }] : []
   var out = []
   var keyOf = function(d) { return d.ok && d.workspace ? "workspace " + d.workspace : "deployment " + d.path }
   var find = function(key) { for (var i = 0; i < out.length; i++) if (out[i].key === key) return out[i]; return null }
@@ -112,7 +115,7 @@ export function groups(rows, listed) {
   rows.forEach(function(x) {
     var d = listed.filter(function(y) { return y.path === x.deployment })[0]
     var g = d ? find(keyOf(d)) : null
-    if (g) g.rows.push({ instance: x.instance, home: x.home, name: d.name, path: d.path })
+    if (g) g.rows.push({ instance: x.instance, home: x.home, name: d.name, path: d.path, waitingOnYou: claim(x.waitingOnYou) })
   })
   var shown = out.filter(function(g) { return g.rows.length || g.unknown.length })
   return shown.map(function(g) {
@@ -121,7 +124,7 @@ export function groups(rows, listed) {
       title: shown.length > 1 ? g.title : "",
       rows: g.rows.map(function(x, i) {
         var clash = first.indexOf(first[i]) !== first.lastIndexOf(first[i])
-        return { instance: x.instance, home: x.home, label: clash ? x.instance + " (" + x.path + ")" : first[i] }
+        return { instance: x.instance, home: x.home, label: clash ? x.instance + " (" + x.path + ")" : first[i], waitingOnYou: x.waitingOnYou }
       }),
       unknown: g.unknown,
     }
@@ -149,18 +152,25 @@ export function beginRead(state) {
 // The output of read `attempt` → what to show, or null when that read is
 // no longer the pending one (it was stopped at its deadline).
 export function finishRead(state, attempt, text) {
-  if (!state.pending || attempt !== state.attempt) return null
+  return settleRead(state, attempt) ? parseWaiting(text) : null
+}
+
+// Read `attempt` answered: → true when it was the pending one, which it
+// settles (the picker parses its own answer), false when it was not.
+export function settleRead(state, attempt) {
+  if (!state.pending || attempt !== state.attempt) return false
   state.pending = false
-  return parseWaiting(text)
+  return true
 }
 
 // Read `attempt`'s deadline (`ms`, READ_TIMEOUT_MS by default) → what to
-// show (it failed), or null when it had already finished.
-export function expireRead(state, attempt, ms) {
+// show (it failed), or null when it had already finished. `what` names the
+// read ("waiting --json" by default).
+export function expireRead(state, attempt, ms, what) {
   if (!state.pending || attempt !== state.attempt) return null
   state.pending = false
   var limit = ms || READ_TIMEOUT_MS
-  return { known: false, reason: limit === READ_TIMEOUT_MS ? READ_TIMEOUT_REASON : "waiting --json did not answer within " + Math.round(limit / 1000) + " s" }
+  return { known: false, reason: limit === READ_TIMEOUT_MS && !what ? READ_TIMEOUT_REASON : (what || "waiting --json") + " did not answer within " + Math.round(limit / 1000) + " s" }
 }
 
 // One reader for all the widget's bars: the first of the peers the bar
@@ -168,6 +178,38 @@ export function expireRead(state, attempt, ms) {
 export function isReader(peers, self) {
   if (!peers || !peers.length || peers.indexOf(self) < 0) return true
   return peers[0] === self
+}
+
+// A `waitingOnYou` as the kernel gave it ({ since, producer, reason,
+// message }, each a string or null), or null.
+export function claim(w) {
+  if (!w || typeof w !== "object") return null
+  var field = function(v) { return typeof v === "string" ? v : null }
+  return { since: field(w.since), producer: field(w.producer), reason: field(w.reason), message: field(w.message) }
+}
+
+// How long ago `since` was, at `now` (ms): "<1 min", "3 min", "2 h", "4 d";
+// "" when `since` is not a time. It is worked out once, when the read
+// answers: nothing ticks.
+export function age(since, now) {
+  var at = Date.parse(String(since || ""))
+  if (isNaN(at)) return ""
+  var min = Math.floor(Math.max(0, now - at) / 60000)
+  if (min < 1) return "<1 min"
+  if (min < 60) return min + " min"
+  if (min < 48 * 60) return Math.floor(min / 60) + " h"
+  return Math.floor(min / (24 * 60)) + " d"
+}
+
+// One card per agent waiting on you, the same in the panel and the picker:
+// its name (the label that tells it apart), the kernel's message as given
+// when it has one, then its reason, its producer and how long it has
+// waited, each as given, and the exact `since` (the panel's tooltip). The
+// plugin words nothing of its own.
+export function card(label, w, now) {
+  var c = claim(w) || { since: null, producer: null, reason: null, message: null }
+  var meta = [c.reason, c.producer, age(c.since, now)].filter(function(x) { return !!x }).join(" \u00b7 ")
+  return { title: label, message: c.message || "", meta: meta, since: c.since || "" }
 }
 
 // The panel's commands, each a line for the bar's `run`.
@@ -189,12 +231,37 @@ export function detachKey(plugin) {
   return !!plugin && plugin.attach.indexOf("--detach-key") >= 0
 }
 
+// The OATS picker (the plugin's overlay), through the running shell.
+export var PLUGIN_ID = "ai.aweb.oats"
+export function pickerCommand() {
+  return "exec omarchy-shell shell summon " + PLUGIN_ID + " " + shellQuote("{}")
+}
+
+// The picker's commands, each an argv it runs with no shell (Omarchy's
+// Util.execArgv): an agent's session in the floating terminal, and the spawn
+// from a soul, for the deployment that listed it.
+export function attachArgv(plugin, home) {
+  return ["omarchy-launch-floating-terminal-with-presentation", commandLine(plugin.attach.concat([home]))]
+}
+
+export function spawnArgv(plugin, deployment, soul) {
+  return plugin.spawn.concat(["--dir", deployment, soul])
+}
+
 // setup --apply in the floating terminal: it shows the plan and asks. For
 // the deployment setup is applied for, else (setup has not run) it asks for
 // the deployment first.
 export function setupCommand(plugin, setupPath) {
-  if (plugin) return inTerminal(commandLine(plugin.setup.concat(["--apply"])))
-  return inTerminal(shellQuote(setupPath) + " --apply")
+  return inTerminal(setupLine(plugin, setupPath))
+}
+
+function setupLine(plugin, setupPath) {
+  return plugin ? commandLine(plugin.setup.concat(["--apply"])) : shellQuote(setupPath) + " --apply"
+}
+
+// The same as the picker's argv.
+export function setupArgv(plugin, setupPath) {
+  return ["omarchy-launch-floating-terminal-with-presentation", setupLine(plugin, setupPath)]
 }
 
 // The icon's right click: the TUI, else setup.

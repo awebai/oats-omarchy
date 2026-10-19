@@ -228,6 +228,53 @@ test("keys taken, a user submap named oats: the next free key, and it passes --v
   assert.equal(v.status, 0, v.stdout + v.stderr);
 });
 
+// The picker's commands as Omarchy's Util.execArgv runs them: bash -lc 'exec "$@"'.
+const execArgv = (s, argv, extra = {}) => spawnSync("bash", ["-lc", 'exec "$@"', "bash", ...argv], { env: { ...s.env, ...extra }, cwd: s.root, encoding: "utf8", timeout: 30_000 });
+
+test("the picker's agent row opens its session through the real floating terminal, as argv", { skip }, (t) => {
+  const s = omarchySandbox(t, { deploymentName: "my agents" });
+  const home = join(s.deployment, "agents", "x", "instances", "it's $(here)");
+  mkdirSync(home, { recursive: true });
+  writeExecutable(join(s.fakebin, "uwsm-app"), '#!/bin/bash\n[[ $1 == -- ]] && shift\nif [[ $1 == xdg-terminal-exec ]]; then while [[ $1 != -e ]]; do shift; done; shift; fi\nexec "$@"\n');
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  const plugin = widget.parsePlugin(readFileSync(join(s.home, ".local/state/oats-omarchy/plugin.json"), "utf8"));
+  assert.ok(plugin && plugin.agents && plugin.spawn, "setup wrote the picker's commands");
+  const r = execArgv(s, widget.attachArgv(plugin, home));
+  assert.equal(r.status, 0, r.stderr);
+  const log = join(s.root, "kernel.log");
+  waitFor(log, 1);
+  assert.deepEqual(JSON.parse(readFileSync(log, "utf8").trim()), ["session", "attach", "--detach-key", "M-o", "--home", home]);
+});
+
+test("the picker's soul row: the task as typed reaches the kernel through the real floating terminal, and the new instance's session opens", { skip }, (t) => {
+  const s = omarchySandbox(t, { deploymentName: "my agents" });
+  writeExecutable(join(s.fakebin, "uwsm-app"), '#!/bin/bash\n[[ $1 == -- ]] && shift\nif [[ $1 == xdg-terminal-exec ]]; then while [[ $1 != -e ]]; do shift; done; shift; fi\nexec "$@"\n');
+  // Omarchy's input needs its running shell: a stand-in that answers.
+  writeExecutable(join(s.fakebin, "omarchy-menu-input"), '#!/bin/sh\nprintf \'%s\' "$FAKE_INPUT"\n');
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  const plugin = widget.parsePlugin(readFileSync(join(s.home, ".local/state/oats-omarchy/plugin.json"), "utf8"));
+  const task = `'; touch "${join(s.root, "pwned")}" #\n$(touch pwned)`;
+  const r = execArgv(s, widget.spawnArgv(plugin, s.deployment, "writer"), { FAKE_INPUT: task });
+  assert.equal(r.status, 0, r.stderr);
+  const kernel = join(s.root, "kernel.log");
+  waitFor(kernel, 1);
+  const spawned = JSON.parse(readFileSync(join(s.root, "spawn.log"), "utf8").trim());
+  assert.deepEqual(spawned.argv.filter((a, i) => i !== 5), ["spawn", "writer", "--dir", s.deployment, "--task-file", "--json"]);
+  assert.deepEqual([spawned.task, spawned.mode, spawned.cwd], [task, 0o600, s.deployment]);
+  assert.deepEqual(JSON.parse(readFileSync(kernel, "utf8").trim()), ["session", "attach", "--detach-key", "M-o", "--home", join(s.deployment, "agents", "writer", "instances", "writer-1")]);
+  assert.equal(existsSync(join(s.root, "pwned")), false);
+  assert.equal(existsSync(join(spawned.argv[5], "..")), false, "the task's directory is gone");
+});
+
+test("the key block's Space opens the picker, and the whole block verifies with the real Hyprland", { skip }, (t) => {
+  const s = omarchySandbox(t, { print: readFileSync(fixture("print", "omarchy-4.0.4.txt"), "utf8") });
+  userHypr(s, { layout: "lua" });
+  const p = plan(s);
+  assert.match(p.keys.snippet, /o\.bind\("SPACE", "Open OATS", "omarchy-shell shell toggle ai\.aweb\.oats '\{\}'"\)/);
+  const v = verifySnippet(s, p.keys);
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+});
+
 test("the real launchers run what setup wrote, with a deployment path that has a space", { skip }, (t) => {
   const s = omarchySandbox(t, { deploymentName: "my agents & co" });
   mkdirSync(join(s.home, "Applications"));
@@ -280,10 +327,10 @@ function waitFor(file, lines) {
 function menuModel() {
   const src = readFileSync(join(OMARCHY, "shell", "plugins", "menu", "MenuModel.js"), "utf8").replace(/^\s*\.(pragma|import)\b.*$/gm, "");
   const context = {};
-  vm.runInNewContext(`${src}\nthis.parseMenuJsonc = parseMenuJsonc; this.mergeMenuSources = mergeMenuSources;`, context);
+  vm.runInNewContext(`${src}\nthis.parseMenuJsonc = parseMenuJsonc; this.mergeMenuSources = mergeMenuSources; this.matchesQuery = matchesQuery;`, context);
   // Plain objects of this realm, for deepEqual.
   const plain = (x) => JSON.parse(JSON.stringify(x));
-  return { parse: (text) => plain(context.parseMenuJsonc(text)), merge: (a, b) => plain(context.mergeMenuSources(a, b)) };
+  return { parse: (text) => plain(context.parseMenuJsonc(text)), merge: (a, b) => plain(context.mergeMenuSources(a, b)), matches: (entry, query) => context.matchesQuery(entry, query, true) };
 }
 
 for (const [name, text] of [
@@ -306,9 +353,16 @@ for (const [name, text] of [
     const byId = Object.fromEntries(user.map((item) => [item.id, item]));
     for (const item of userBefore) assert.deepEqual(byId[item.id], item, `${item.id} reads the same`);
     const merged = model.merge(defaults, user);
-    const oats = ["oats", "oats.tui", "oats.waiting", "oats.status"].map((id) => merged.items[id]);
-    assert.deepEqual(oats.map((x) => [x.id, x.parent, x.kind]), [["oats", "root", "menu"], ["oats.tui", "oats", "action"], ["oats.waiting", "oats", "action"], ["oats.status", "oats", "action"]]);
-    assert.equal(merged.items["oats.waiting"].label, "Waiting on you");
+    const ids = ["oats", "oats.open", "oats.waiting", "oats.agents", "oats.souls", "oats.tui", "oats.status"];
+    const oats = ids.map((id) => merged.items[id]);
+    assert.deepEqual(oats.map((x) => [x.id, x.parent, x.kind]), [["oats", "root", "menu"], ...ids.slice(1).map((id) => [id, "oats", "action"])]);
+    assert.deepEqual(oats.map((x) => x.label), ["OATS", "Open OATS", "Waiting on you", "Agents", "Souls", "Open OATS TUI", "Status"]);
+    // Omarchy's own search finds them by these words.
+    for (const word of ["oats", "agents", "instances", "souls", "waiting"]) {
+      assert.ok(oats.some((x) => model.matches(x, word)), `"${word}" finds an oats row`);
+    }
+    assert.ok(model.matches(merged.items["oats.agents"], "instances"));
+    assert.ok(model.matches(merged.items["oats.waiting"], "waiting"));
     assert.equal(merged.items["oats.desktop"], undefined, "no Desktop here");
     for (const item of defaults) if (!byId[item.id]) assert.ok(merged.items[item.id], `Omarchy's ${item.id} is still there`);
 
