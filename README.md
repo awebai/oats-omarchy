@@ -23,8 +23,7 @@ there before.
 
 This section is written to you, the coding agent asked to install this
 plugin. Follow the steps in order. Every command here is checked against
-v0.2.1, except this computer's list of deployments (step 2), which needs a
-release of the plugin later than v0.2.1.
+v0.3.0.
 
 > **Never pass `--yes` to `setup --apply` or `setup --remove` until the
 > person has said yes in the chat to what you showed them.** You have no
@@ -57,8 +56,8 @@ when two things hold:
 - `oats version --json` lists the feature `deployments-list`;
 - the plugin you install has the list: after step 3,
   `~/.config/omarchy/plugins/ai.aweb.oats/setup --help` mentions
-  `oats deployments`. v0.2.0 and v0.2.1 do not, so with either pin, ask
-  for the deployment as below.
+  `oats deployments` (from v0.3.0). An older pin does not, so with one,
+  ask for the deployment as below.
 
 With both, setup needs no deployment, and you pass no `--dir` in the steps
 below.
@@ -92,13 +91,13 @@ icon into the Omarchy shell at once; it runs no setup. `--yes` is needed
 because you have no terminal, and the person's request to install the plugin
 is their consent to it.
 
-To install the released v0.2.1 rather than the tip of the default branch,
+To install the released v0.3.0 rather than the tip of the default branch,
 pin it before the shell loads it. Add the plugin without `--enable`, check
 out the tag, then enable it:
 
 ```bash
 omarchy plugin add https://github.com/awebai/oats-omarchy --yes
-git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.2.1
+git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.3.0
 omarchy plugin enable ai.aweb.oats
 ```
 
@@ -150,7 +149,7 @@ themselves.
 - **Update:** `omarchy plugin update ai.aweb.oats`, then `setup --check`.
   Updating moves a pinned checkout to the tip of the default branch.
 - **Pin a release:** `git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout <tag>`, for
-  example `v0.2.1`. Pin again after any `omarchy plugin update`.
+  example `v0.3.0`. Pin again after any `omarchy plugin update`.
 - **Remove:** `setup --remove` first, then `omarchy plugin remove ai.aweb.oats`.
   The other order leaves the launchers, the menu and the hook behind.
 
@@ -162,7 +161,7 @@ after the person has agreed in the chat. `setup --check` needs no `--yes`.
 It needs Node.js and the OATS CLI (`npm install -g @awebai/oats`, 0.53.0 or
 later) on your PATH. With an OATS CLI that keeps this computer's list of
 deployments (`oats version --json` lists `deployments-list`), this plugin
-later than v0.2.1 needs nothing else, and you leave out `--dir` below; with
+(v0.3.0 or later) needs nothing else, and you leave out `--dir` below; with
 an older one, setup is for one OATS deployment: the directory that holds
 `oats-local.yaml`. `oats` on your PATH must be the installed CLI, the
 package's `bin/oats.mjs` or the npm or mise link to it, not a wrapper
@@ -237,8 +236,8 @@ then point at that clone, and the plan says so.
 The plan and its progress are tracked in
 [awebai/oats#1311](https://github.com/awebai/oats/issues/1311).
 
-Status: v0.2.1 is released. `omarchy plugin add` installs the tip of the
-default branch; to stay on v0.2.1, pin it as described under "Pinning a
+Status: v0.3.0 is released. `omarchy plugin add` installs the tip of the
+default branch; to stay on v0.3.0, pin it as described under "Pinning a
 release".
 
 Developing it: [CONTRIBUTING.md](CONTRIBUTING.md).
