@@ -1,5 +1,0 @@
-{
-  "capability": "fixture.stray",
-  "version": "0.0.1",
-  "description": "A capability manifest at the repository root, outside the payload."
-}

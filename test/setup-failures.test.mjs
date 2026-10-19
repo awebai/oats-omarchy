@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
-import { setup } from "../oats-package/capabilities/oats-omarchy/lib/setup.mjs";
+import { setup } from "../lib/setup.mjs";
 import { sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
 const HOOK = (s) => join(s.home, ".config/omarchy/hooks/post-update.d/oats-omarchy.hook");
@@ -15,7 +15,7 @@ const HOOK = (s) => join(s.home, ".config/omarchy/hooks/post-update.d/oats-omarc
 // setup() in this process, so a replaced fs function applies to it.
 function direct(s, args) {
   let stdout = "";
-  const status = setup([...args, "--json"], s.env, { write: (x) => { stdout += x; } }, { write() {} });
+  const status = setup([...args, "--dir", s.deployment, "--json"], s.env, { write: (x) => { stdout += x; } }, { write() {} });
   return { status, json: JSON.parse(stdout) };
 }
 

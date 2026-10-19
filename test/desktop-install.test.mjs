@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import * as menu from "../oats-package/capabilities/oats-omarchy/lib/menu.mjs";
+import * as menu from "../lib/menu.mjs";
 import { sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
 const FLAG = "--appimage-extract-and-run";

@@ -6,8 +6,8 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import * as menu from "../oats-package/capabilities/oats-omarchy/lib/menu.mjs";
-import { sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
+import * as menu from "../lib/menu.mjs";
+import { repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
 const BLOCK = menu.block({ tui: "launch-tui", desktop: null, waiting: "wait-cmd", status: "status-cmd" });
 const OURS = ["oats", "oats.tui", "oats.waiting", "oats.status"];
@@ -26,7 +26,7 @@ function roundTrip(text) {
 
 test("the block: a delimited set of rows, one per line, each with a trailing comma", () => {
   const lines = BLOCK.split("\n");
-  assert.equal(lines[0], "  // >>> oats-omarchy (managed by `oats omarchy setup`; remove with --remove) >>>");
+  assert.equal(lines[0], "  // >>> oats-omarchy (managed by setup; remove with setup --remove) >>>");
   assert.equal(lines.at(-2), "  // <<< oats-omarchy <<<");
   assert.deepEqual(lines.slice(1, -2).map((l) => JSON.parse(`{${l.trim().replace(/,$/, "")}}`)).map((o) => Object.keys(o)[0]), OURS);
   assert.deepEqual(menu.omarchyParse(`{\n${BLOCK}}\n`).items["oats.waiting"], { icon: "\u{F009A}", label: "Waiting on you", action: "wait-cmd" });
@@ -133,7 +133,7 @@ test("--apply with no menu file creates it with the block; --remove deletes it a
   assert.ok(text.startsWith(`{\n${menu.START}`));
   const items = menu.omarchyParse(text).items;
   assert.deepEqual(Object.keys(items), ["oats", "oats.tui", "oats.waiting", "oats.status"]);
-  assert.equal(items["oats.waiting"].action, `cd '${s.deployment}' && '${join(s.home, ".local/share/oats-omarchy/oats")}' omarchy waiting --soul 'github.com/acme/agents/builder'`);
+  assert.equal(items["oats.waiting"].action, `'${process.execPath}' '${repo}/bin/waiting.mjs' --dir '${s.deployment}'`);
   assert.equal(items["oats.status"].action, `omarchy-launch-floating-terminal-with-presentation "cd '${s.deployment}' && '${join(s.home, ".local/share/oats-omarchy/oats")}' status"`);
   assert.equal(part(s.run(["setup", "--apply", "--json"]), "menu").status, "already applied");
   assert.equal(s.run(["setup", "--remove"]).status, 0);

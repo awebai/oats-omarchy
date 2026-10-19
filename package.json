@@ -1,13 +1,12 @@
 {
   "name": "@awebai/oats-omarchy",
   "version": "0.1.0",
-  "description": "Repository tooling for the oats.omarchy package; the package payload is oats-package/.",
+  "description": "An Omarchy plugin that makes the OATS TUI and OATS Desktop Omarchy apps; this file holds its repository tooling and version.",
   "license": "MIT",
   "type": "module",
   "private": true,
   "scripts": {
     "lint": "node scripts/lint.mjs",
-    "validate": "node scripts/validate-manifests.mjs",
     "test": "node --test 'test/**/*.test.mjs'"
   },
   "repository": {

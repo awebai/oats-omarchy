@@ -3,9 +3,9 @@
 // Arch + Omarchy container (OATS_OMARCHY_CONTAINER=1), as an unprivileged
 // user, every case with a temporary HOME and XDG directories.
 //
-// The kernel is the sandbox's stand-in (test/helpers/sandbox.mjs), which
-// dispatches `oats omarchy` to this package with the environment the kernel
-// gives a dispatched command; the real dispatch runs in the rehearsal.
+// Setup runs as a person runs it, through the plugin's `./setup` launcher
+// with the container's node on PATH. `oats` on PATH is the sandbox's
+// stand-in for the CLI (test/helpers/sandbox.mjs).
 // Without a running Hyprland, `omarchy menu keybindings --print` answers with
 // its static bindings only, so the "keys taken" cases serve the captured
 // --print through a PATH fake of `omarchy`.
@@ -15,8 +15,8 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import vm from "node:vm";
-import { parseDesktopExec } from "../oats-package/capabilities/oats-omarchy/lib/quote.mjs";
-import { readDesktopEntry } from "../oats-package/capabilities/oats-omarchy/lib/desktop-entry.mjs";
+import { parseDesktopExec } from "../lib/quote.mjs";
+import { readDesktopEntry } from "../lib/desktop-entry.mjs";
 import { fixture, repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
 const enabled = process.env.OATS_OMARCHY_CONTAINER === "1";
@@ -35,6 +35,14 @@ function omarchySandbox(t, options = {}) {
   }
   s.env.PATH = `${s.fakebin}:${OMARCHY}/bin:/usr/bin:/bin`;
   s.env.OMARCHY_PATH = OMARCHY;
+  const run = s.run;
+  s.run = ([command, ...args], extra = {}) => {
+    if (command !== "setup") return run([command, ...args], extra);
+    const r = spawnSync("/bin/sh", [join(repo, "setup"), ...args], { env: { ...s.env, ...extra }, cwd: s.deployment, encoding: "utf8", timeout: 60_000 });
+    let json = null;
+    if (args.includes("--json")) { try { json = JSON.parse(r.stdout); } catch { /* left null; the test says so */ } }
+    return { status: r.status, stdout: r.stdout, stderr: r.stderr, json };
+  };
   return s;
 }
 
@@ -259,7 +267,7 @@ test("waiting opens the chosen session through Omarchy's real floating terminal:
   // The end of Omarchy's chain: uwsm-app runs the terminal's -e command.
   writeExecutable(join(s.fakebin, "uwsm-app"), '#!/bin/bash\n[[ $1 == -- ]] && shift\nif [[ $1 == xdg-terminal-exec ]]; then while [[ $1 != -e ]]; do shift; done; shift; fi\nexec "$@"\n');
   assert.equal(s.run(["setup", "--apply"]).status, 0);
-  const r = s.run(["waiting", "--soul", "github.com/acme/agents/builder"], { FAKE_SELECT: "first" });
+  const r = s.run(["waiting", "--dir", s.deployment], { FAKE_SELECT: "first" });
   assert.equal(r.status, 0, r.stderr);
   const log = join(s.root, "kernel.log");
   waitFor(log, 1);

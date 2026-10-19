@@ -1,0 +1,21 @@
+#!/bin/sh
+# oats-omarchy setup: makes the OATS TUI and OATS Desktop Omarchy apps, with
+# a key and an oats menu. Run it from the plugin (or a clone):
+#   ./setup --plan --dir <deployment>    then    ./setup --apply --dir <deployment>
+# It runs bin/setup.mjs with node from PATH, else with the node the last
+# --apply recorded (the menu and the hook use that one too).
+set -u
+dir=$(cd -- "$(dirname -- "$0")" && pwd -P) || exit 1
+node=$(command -v node 2>/dev/null) || node=
+if [ -z "$node" ]; then
+  case ${XDG_STATE_HOME:-} in
+    /*) state=$XDG_STATE_HOME ;;
+    *) state=${HOME:-}/.local/state ;;
+  esac
+  if [ -r "$state/oats-omarchy/node" ]; then IFS= read -r node < "$state/oats-omarchy/node" || node=; fi
+fi
+if [ -z "$node" ] || [ ! -x "$node" ]; then
+  echo "setup: Node.js is needed: install it so that node is on your PATH, then run setup again" >&2
+  exit 1
+fi
+exec "$node" "$dir/bin/setup.mjs" "$@"

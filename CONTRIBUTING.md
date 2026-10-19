@@ -2,19 +2,15 @@
 
 ## Layout
 
-The repository separates the package from the tooling that checks it:
+The repository is the plugin: Omarchy clones it whole, and nothing is built.
 
 ```
-oats-package/            the payload: everything the kernel copies, nothing else
-  oats-package.json      the package manifest (one capability)
-  capabilities/oats-omarchy/
-    oats.json            capability oats.omarchy, command namespace `omarchy`
-    bin/oats-omarchy.mjs the one executable: `oats omarchy <command>` runs it
-    lib/                 its modules (below)
-    assets/              the icon both launcher entries use
-    skills/              the skills a soul with the capability receives
-schemas/                 kernel schemas the manifests are validated against
-scripts/                 lint and manifest validation
+setup                    the command people run: a POSIX sh launcher
+bin/setup.mjs            setup's engine, which the launcher and the post-update hook run
+bin/waiting.mjs          the oats menu's "Waiting on you" row
+lib/                     their modules (below)
+assets/                  the icon both launcher entries use
+scripts/lint.mjs         lint
 test/                    node:test suites; test/fixtures holds their inputs,
                          test/helpers/sandbox.mjs the temporary machine they run on
 ci/                      the Arch Linux + Omarchy container bootstrap and checks
@@ -23,11 +19,12 @@ ci/                      the Arch Linux + Omarchy container bootstrap and checks
 
 Rules the checks hold:
 
-- **Only `oats-package/` ships.** Every path a manifest names resolves, after
-  symlinks, inside it, and a capability's paths inside its own directory. An
-  `oats.json` or `oats-package.json` anywhere else is refused.
-- **Runtime code uses Node built-ins only** and never hardcodes the payload
-  directory's name.
+- **No symlinks anywhere.** `omarchy plugin validate` refuses a plugin that
+  has one.
+- **Setup writes nothing inside its own directory.** Omarchy reloads plugin
+  code when a file under `~/.config/omarchy/plugins/` changes, and the
+  directory is a git checkout that updates fast-forward.
+- **Runtime code uses Node built-ins only.** The launcher is POSIX sh.
 - **No file names a terminal emulator.** Terminal windows open through
   Omarchy's launchers (`omarchy-launch-tui`, `omarchy-launch-or-focus-tui`,
   `omarchy-launch-floating-terminal-with-presentation`), which run the user's
@@ -36,11 +33,26 @@ Rules the checks hold:
 
 ## How setup is built
 
-`oats omarchy setup` (`lib/setup.mjs`) gathers what the machine has, works out
-the files it wants, compares them with what is there, and only then writes:
+`setup` runs `bin/setup.mjs` with `node` from PATH, else with the node the
+last `--apply` recorded (`$XDG_STATE_HOME/oats-omarchy/node`). Setup
+(`lib/setup.mjs`) gathers what the machine has, works out the files it wants,
+compares them with what is there, and only then writes:
 
-- `lib/discover.mjs` finds things instead of assuming them: the deployment
-  and soul from the kernel's environment, the Omarchy launchers on the
+- `lib/discover.mjs` finds things instead of assuming them:
+  - the deployment: `--dir`, else the nearest `oats-local.yaml` at or above
+    the working directory, else the one setup's state records;
+  - the OATS CLI: `oats` on PATH resolved to the CLI's script (a mise shim
+    through `mise which oats`), refused when it is an instance home's
+    `.oats/bin` shim, and proven by `version --json`, 0.53.0 or later;
+  - the node: the kernel's rule for a path that outlives the process,
+    vendored in `lib/stable-node.mjs`;
+  - the plugin's own directory, resolved.
+
+  Everything setup writes runs by those recorded absolute paths, never by
+  PATH: the shim (node and CLI), the menu's "Waiting on you" row (node and
+  `bin/waiting.mjs`) and the post-update hook (node and `bin/setup.mjs
+  --check`). `--check` reports any of them gone or moved. It also finds the
+  Omarchy launchers on the
   session's PATH (`systemctl --user show-environment`, else the process
   PATH), the Hyprland layout, the Desktop (a flag, an existing launcher
   entry, then an AppImage; its standard install is
@@ -78,8 +90,9 @@ the files it wants, compares them with what is there, and only then writes:
   (`managedPaths`, `backupPath` and `refusal` in `lib/setup.mjs`).
 - `lib/system.mjs` runs commands with a timeout and a given environment.
 
-`oats omarchy waiting` (`lib/waiting.mjs`) is the menu's "Waiting on you"
-row: it reads `oats status --json` for the deployment, shows the instances
+`bin/waiting.mjs --dir <deployment>` (`lib/waiting.mjs`) is the menu's
+"Waiting on you" row. Through setup's shim, it reads `oats status --json` for
+the deployment, shows the instances
 waiting on you in `omarchy-menu-select` (the count and the names, nothing
 else), and opens the chosen one's `oats session attach` in
 `omarchy-launch-floating-terminal-with-presentation`. With nothing to pick it
@@ -105,22 +118,21 @@ with `bash -c`), have no eval layer: they are single-quoted shell words.
 ## Commands
 
 ```bash
-npm run lint       # node --check, bash -n (and shellcheck when installed), JSON parse
-npm run validate   # manifests against schemas/, containment, no stray manifests
+npm run lint       # node --check, sh -n/bash -n (and shellcheck when installed), JSON parse
 npm test           # every test/**/*.test.mjs
 ```
 
-The `lint` job of CI runs all three on Node 22. There are no dependencies to
+The `lint` job of CI runs both on Node 22. There are no dependencies to
 install.
 
 Tests run on a temporary machine (`test/helpers/sandbox.mjs`): a temporary
 HOME and XDG directories, a stand-in for Omarchy's menu definition
 (`OMARCHY_PATH`), a PATH of fakes (the Omarchy launchers, the menu's
 selector, notifier and floating terminal, `omarchy`, `systemctl`,
-`ldconfig`, `tmux`) before a private directory of basic tools, and a
-stand-in for the kernel that dispatches `oats omarchy` to the package with
-the environment the kernel gives a dispatched command, and answers
-`status --json` and `version --json` from files a test writes. Each fake
+`ldconfig`, `tmux`) before a private directory of basic tools, and `oats`
+on PATH: a stand-in for the CLI that answers `status --json` and
+`version --json` from files a test writes. It can also be one that fails, an
+instance home's shim, or a mise shim that `mise which oats` resolves. Each fake
 models the real tool's refusals too (the selector never opens empty, the
 notifier needs a headline). Nothing on the host's PATH leaks in, so a test
 sees only what it set up.
@@ -138,11 +150,12 @@ CI's `omarchy` job runs in a pinned `archlinux:base` container:
   `test/fixtures/hypr/` holds known-good and known-bad submaps in both layouts:
   Lua (`bindings.lua`, Omarchy 4) and hyprlang (`bindings.conf`).
 - `test/omarchy-container.test.mjs` (as `ci`, with `OATS_OMARCHY_CONTAINER=1`;
-  it skips without it) runs setup against the real Omarchy: its launchers,
+  it skips without it) runs setup through `./setup`, with the container's
+  node and the CLI stand-in on PATH, against the real Omarchy: its launchers,
   through `gio launch` and `sh -c`, its hook runner, `--verify-config` on
   the user's whole configuration with the printed snippet added, Omarchy's
   own `MenuModel.js` reading the menu block (it is plain functions, so it
-  runs as a script in a `vm` context), and `oats omarchy waiting` opening a
+  runs as a script in a `vm` context), and `bin/waiting.mjs` opening a
   session through the real floating terminal. Only the selector is a fake:
   the real one needs a running Omarchy shell.
 

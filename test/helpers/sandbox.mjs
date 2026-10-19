@@ -1,5 +1,5 @@
 // A temporary HOME, XDG directories, deployment and PATH of fakes, for
-// running `oats omarchy setup` without touching the machine. Each fake models
+// running the plugin's setup and waiting without touching the machine. Each fake models
 // the real tool's output and its refusals, not only its success.
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, symlinkSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -8,8 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const capRoot = join(repo, "oats-package", "capabilities", "oats-omarchy");
-export const bin = join(capRoot, "bin", "oats-omarchy.mjs");
+export const BIN = { setup: join(repo, "bin", "setup.mjs"), waiting: join(repo, "bin", "waiting.mjs") };
 export const fixture = (...parts) => join(repo, "test", "fixtures", ...parts);
 
 const LAUNCHERS = [
@@ -29,7 +28,7 @@ const MENU_DEFAULTS = `{
 // The only host programs on the sandbox's PATH: a shell and the few tools the
 // fakes and the hook use, linked into a private directory. /usr/bin itself is
 // not on the PATH, because on Omarchy it holds the real launchers.
-const HOST_TOOLS = ["sh", "bash", "cat", "echo", "printf", "mkdir", "head", "env", "rm", "ls"];
+const HOST_TOOLS = ["sh", "bash", "cat", "echo", "printf", "mkdir", "head", "env", "rm", "ls", "dirname"];
 
 export function writeExecutable(path, text) {
   mkdirSync(dirname(path), { recursive: true });
@@ -43,7 +42,13 @@ export function writeExecutable(path, text) {
 //   session: false | <PATH string>      systemctl --user show-environment
 //   fuse: true | false                  ldconfig -p lists libfuse.so.2
 //   tmux: true | false
-//   kernel: "ok" | "fail"               the fake CLI's --version
+//   kernel: "ok" | "fail" | "none" | "home-shim" | "mise" | "mise-fail"
+//                                       `oats` on PATH: the fake CLI linked
+//                                       there; one that fails; none; the CLI
+//                                       inside an instance home's .oats/bin;
+//                                       a mise shim that `mise which oats`
+//                                       resolves to the CLI, or does not
+//   node: true | false                  `node` on PATH (a link to this node)
 //   deploymentName: string
 //   menu: true | false                  Omarchy's menu definition is there ($OMARCHY_PATH)
 // The kernel stand-in answers `status --json` from <root>/status.json (and
@@ -53,7 +58,7 @@ export function writeExecutable(path, text) {
 // or the text to return. FAKE_FLOATING_RUN=1 makes the floating terminal run
 // its command with bash -c, as the real one does.
 export function sandbox(t, options = {}) {
-  const o = { launchers: true, print: "fixture", session: false, fuse: true, tmux: true, kernel: "ok", deploymentName: "deployment", menu: true, ...options };
+  const o = { launchers: true, print: "fixture", session: false, fuse: true, tmux: true, kernel: "ok", node: false, deploymentName: "deployment", menu: true, ...options };
   const root = realpathSync(mkdtempSync(join(tmpdir(), "oats-omarchy-test-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
@@ -61,6 +66,7 @@ export function sandbox(t, options = {}) {
   const deployment = join(root, o.deploymentName);
   const hostbin = join(root, "hostbin");
   for (const d of [home, fakebin, hostbin, deployment, join(root, "kernel")]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(deployment, "oats-local.yaml"), "# a test deployment\n");
   for (const tool of HOST_TOOLS) {
     const found = ["/usr/bin", "/bin"].map((d) => join(d, tool)).find((f) => existsSync(f));
     if (found) symlinkSync(found, join(hostbin, tool));
@@ -118,15 +124,12 @@ echo "	libfuse3.so.4 (libc6,x86-64) => /usr/lib/libfuse3.so.4"
 `);
   if (o.tmux) writeExecutable(join(fakebin, "tmux"), "#!/bin/sh\nexit 0\n");
 
-  // A stand-in for the kernel's CLI: --version, and `omarchy <command>`
-  // dispatched to this package's bin with the environment the kernel gives a
-  // dispatched command (OATS_TEAM_SCOPE is the directory it runs from, as for
-  // an operator command). Anything else is logged and refused.
-  const cli = join(root, "kernel", "oats.mjs");
-  writeFileSync(cli, o.kernel === "ok" ? `import { spawnSync } from "node:child_process";
+  // A stand-in for the kernel's CLI, run as `oats` from PATH and by the shim
+  // setup writes: `version --json` (from <root>/version.json) and
+  // `status --json`. Anything else is logged and refused.
+  const cliText = o.kernel === "fail" ? `#!/usr/bin/env node\nconsole.error("Error: Cannot find module 'yaml'"); process.exit(1);\n` : `#!/usr/bin/env node
 import { appendFileSync, readFileSync } from "node:fs";
 const [cmd, ...rest] = process.argv.slice(2);
-if (cmd === "--version") { console.log("@awebai/oats 0.60.0 (desktop API v1)"); process.exit(0); }
 const fake = (name) => { try { return readFileSync(${JSON.stringify(root)} + "/" + name, "utf8"); } catch { return null; } };
 if (cmd === "status" && rest.join(" ") === "--json") {
   const mode = (fake("status.mode") || "").trim();
@@ -136,17 +139,21 @@ if (cmd === "status" && rest.join(" ") === "--json") {
   else { process.stdout.write(fake("status.json") || JSON.stringify({ root: process.cwd(), agents: [] })); process.exit(0); }
 }
 if (cmd === "version" && rest.join(" ") === "--json") { process.stdout.write(fake("version.json") || JSON.stringify({ version: "0.60.0", features: ["session-attach-detach-key"] })); process.exit(0); }
-if (cmd === "omarchy") {
-  const soul = rest.includes("--soul") ? rest[rest.indexOf("--soul") + 1] : null;
-  if (process.env.FAKE_KERNEL_REFUSE_SOUL && soul === process.env.FAKE_KERNEL_REFUSE_SOUL) {
-    console.error("oats omarchy: no soul of this deployment provides the omarchy namespace; pass --soul <name>"); process.exit(1);
-  }
-  const r = spawnSync(process.execPath, [${JSON.stringify(bin)}, ...rest], { stdio: "inherit", env: { ...process.env, OATS_TEAM_SCOPE: process.cwd(), OATS_CLI_BIN: process.argv[1], OATS_NODE_BIN: process.execPath } });
-  process.exit(r.status ?? 1);
-}
 appendFileSync(${JSON.stringify(join(root, "kernel.log"))}, JSON.stringify(process.argv.slice(2)) + "\\n");
 console.error("fake kernel: " + process.argv.slice(2).join(" ")); process.exit(1);
-` : `console.error("Error: Cannot find module 'yaml'"); process.exit(1);\n`);
+`;
+  const cli = o.kernel === "home-shim"
+    ? join(deployment, "agents", "a", "instances", "a-1", ".oats", "bin", "oats")
+    : join(root, "kernel", "lib", "node_modules", "@awebai", "oats", "bin", "oats.mjs");
+  writeExecutable(cli, cliText);
+  if (o.kernel === "mise" || o.kernel === "mise-fail") {
+    const mise = join(root, "mise", "bin", "mise");
+    writeExecutable(mise, o.kernel === "mise"
+      ? `#!/bin/sh\nif [ "$1 $2" = "which oats" ]; then echo '${cli}'; exit 0; fi\necho "mise: unknown $*" >&2; exit 1\n`
+      : `#!/bin/sh\necho "mise ERROR oats is not a mise bin" >&2\nexit 1\n`);
+    symlinkSync(mise, join(fakebin, "oats"));
+  } else if (o.kernel !== "none") symlinkSync(cli, join(fakebin, "oats"));
+  if (o.node) symlinkSync(process.execPath, join(hostbin, "node"));
 
   if (o.menu) {
     mkdirSync(join(root, "omarchy", "default", "omarchy"), { recursive: true });
@@ -160,16 +167,12 @@ console.error("fake kernel: " + process.argv.slice(2).join(" ")); process.exit(1
     XDG_STATE_HOME: join(home, ".local", "state"),
     XDG_CONFIG_HOME: join(home, ".config"),
     XDG_DATA_DIRS: join(root, "system-share"),
-    OATS_TEAM_SCOPE: deployment,
-    OATS_NODE_BIN: process.execPath,
-    OATS_CLI_BIN: cli,
-    OATS_SOUL_ID: "github.com/acme/agents#builder",
-    OATS_AGENT: "builder",
     OMARCHY_PATH: join(root, "omarchy"),
   };
 
-  const run = (args, extra = {}) => {
-    const r = spawnSync(process.execPath, [bin, ...args], { env: { ...env, ...extra }, cwd: deployment, encoding: "utf8", timeout: 60_000 });
+  // run(["setup" | "waiting", ...args]): that command, from the deployment.
+  const run = ([command, ...args], extra = {}, { cwd = deployment } = {}) => {
+    const r = spawnSync(process.execPath, [BIN[command], ...args], { env: { ...env, ...extra }, cwd, encoding: "utf8", timeout: 60_000 });
     let json = null;
     if (args.includes("--json")) { try { json = JSON.parse(r.stdout); } catch { /* left null; the test says so */ } }
     return { status: r.status, stdout: r.stdout, stderr: r.stderr, json };

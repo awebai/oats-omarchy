@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { digest } from "../oats-package/capabilities/oats-omarchy/lib/state.mjs";
+import { digest } from "../lib/state.mjs";
 import { sandbox } from "./helpers/sandbox.mjs";
 
 const paths = (s) => ({
