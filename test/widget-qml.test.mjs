@@ -17,7 +17,7 @@ import { repo } from "./helpers/sandbox.mjs";
 const SHELL = "/usr/share/omarchy/shell";
 const skip = process.env.OATS_OMARCHY_CONTAINER === "1" ? false : "set OATS_OMARCHY_CONTAINER=1 (CI's Omarchy container)";
 
-const PANEL_STAND_IN = `import QtQuick
+const panelStandIn = (screen) => `import QtQuick
 Item {
   id: root
   property Item anchorItem: null
@@ -27,7 +27,7 @@ Item {
   property Item focusTarget: null
   property int contentWidth: 300
   property int contentHeight: 200
-  property real availableCardHeight: 400
+  property real availableCardHeight: ${screen}
   property real verticalContentInset: 20
   default property alias content: card.data
   function fittedContentWidth(w, cap) { return Math.round(Number(w)) }
@@ -67,14 +67,14 @@ ${body}
 }
 ` });
 
-function world(t) {
+function world(t, { screen = 400 } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "oats-widget-qml-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const cfg = join(root, "cfg");
   const ui = join(cfg, "Ui");
   mkdirSync(ui, { recursive: true });
   for (const name of readdirSync(join(SHELL, "Ui"))) if (name !== "KeyboardPanel.qml") symlinkSync(join(SHELL, "Ui", name), join(ui, name));
-  writeFileSync(join(ui, "KeyboardPanel.qml"), PANEL_STAND_IN);
+  writeFileSync(join(ui, "KeyboardPanel.qml"), panelStandIn(screen));
   symlinkSync(join(SHELL, "Commons"), join(cfg, "Commons"));
   mkdirSync(join(cfg, "plugin"));
   for (const name of ["OatsBarWidget.qml", "widget.mjs", "assets"]) cpSync(join(repo, name), join(cfg, "plugin", name), { recursive: true });
@@ -101,8 +101,9 @@ function world(t) {
   return { root, home, state, plugin, exe, play };
 }
 
-test("a list taller than the panel scrolls; the launchers stay in view; no wording but labels, names and the hint", { skip }, (t) => {
-  const w = world(t);
+// A short screen limits the card; on a tall one the 480 px cap does.
+for (const screen of [400, 900]) test(`a list taller than the panel scrolls; the launchers stay in view; no wording but labels, names and the hint (a ${screen} px screen)`, { skip }, (t) => {
+  const w = world(t, { screen });
   const rows = Array.from({ length: 50 }, (_, i) => ({ instance: `agent-${i}`, home: `/h/${i}` }));
   const read = w.exe("rows.sh", `#!/bin/sh\ncat <<'E'\n${JSON.stringify({ ok: true, count: 50, rows })}\nE\n`);
   w.plugin({ tui: ["t"], desktop: ["d"], waiting: ["/bin/sh", read], attach: ["s", "--detach-key", "M-o", "--home"] });

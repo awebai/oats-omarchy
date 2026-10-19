@@ -249,6 +249,15 @@ test("--json: a kernel that never answers is stopped at the timeout, with every 
   assert.ok(gone(child), "and its child");
 });
 
+test("--json: a kernel that prints more than the bound is stopped, and the read fails", async (t) => {
+  const s = sandbox(t);
+  writeFileSync(join(s.root, "status.json"), JSON.stringify({ agents: [], pad: "x".repeat(5000) }));
+  const r = await json(s, [], { statusOutputLimit: 1000 });
+  assert.equal(r.status, 1);
+  assert.equal(r.result.reason, "oats status printed more than 1000 bytes");
+  assert.equal((await json(s)).result.ok, true, "within the default bound it reads");
+});
+
 test("--json stopped by a signal (the bar widget's deadline, a reload, a disable) stops the kernel's read with it", async (t) => {
   const s = sandbox(t);
   writeShim(s);

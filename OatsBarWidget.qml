@@ -206,7 +206,8 @@ Panel {
 
     // The rows scroll in what the launchers and the read's reason leave of
     // the panel, so those always stay in view however many rows there are.
-    readonly property real bodyHeight: Math.min(Style.space(480), panel.availableCardHeight > 0 ? panel.availableCardHeight - panel.verticalContentInset : Style.space(480))
+    // The card is capped at 480 or the screen, whichever is less; its body is that less the inset.
+    readonly property real bodyHeight: Math.min(Style.space(480), panel.availableCardHeight > 0 ? panel.availableCardHeight : Style.space(480)) - panel.verticalContentInset
     readonly property real rowsCap: Math.max(Style.space(64), bodyHeight - above.implicitHeight - below.implicitHeight - column.spacing * 2)
 
     PanelKeyCatcher {
