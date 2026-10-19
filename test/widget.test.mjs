@@ -150,6 +150,20 @@ test("setup from the panel: --apply for the recorded deployment, or the plugin's
   assert.deepEqual(w.run(W.setupCommand(null, join(w.odd, "setup"))), ["setup", "--apply"]);
 });
 
+test("the icon's clicks and tooltip: before setup either click runs the whole setup; after, left toggles the panel and right opens the TUI", (t) => {
+  const w = world(t);
+  const setup = join(w.odd, "setup");
+  for (const right of [false, true]) {
+    const action = W.clickAction(null, setup, right);
+    assert.deepEqual(Object.keys(action), ["line"]);
+    assert.deepEqual(w.run(action.line), ["setup", "--apply"], right ? "right" : "left");
+  }
+  assert.equal(W.tooltip(null), "OATS: click to set up");
+  assert.deepEqual(W.clickAction(w.plugin, setup, false), { toggle: true });
+  assert.deepEqual(w.run(W.clickAction(w.plugin, setup, true).line), w.plugin.tui);
+  assert.equal(W.tooltip(w.plugin), "OATS");
+});
+
 test("the icon's right click: the TUI, else setup", (t) => {
   const w = world(t);
   assert.deepEqual(w.run(W.quickCommand(w.plugin, join(w.odd, "setup"))), w.plugin.tui);

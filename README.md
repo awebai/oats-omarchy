@@ -157,14 +157,15 @@ omarchy plugin add https://github.com/awebai/oats-omarchy --enable
   shows `?` when the count could not be read. It refreshes every 60 seconds
   (the widget's `refreshIntervalSec` setting, 15 to 3600) and whenever the
   panel opens.
-- **Its panel** (a click) lists those agents: a click on one opens its
-  session in a floating terminal, and Alt+O leaves that viewer when your OATS
-  CLI supports a detach key. It also has Open OATS TUI, Open OATS Desktop
-  (when setup found one) and Set up keys and launchers, which runs `setup
-  --apply` in a floating terminal. A right click on the icon opens the TUI.
-  Before setup has run, the panel offers setup only, and a right click runs
-  the whole setup in a floating terminal: it asks for the deployment, shows
-  the plan and asks before applying it.
+- **Before setup has run**, a click on the icon (its tooltip says "OATS:
+  click to set up") runs the whole setup in a floating terminal: it asks for
+  the deployment, shows the plan and asks before applying it.
+- **Its panel** (a click, once setup has run) lists those agents: a click on
+  one opens its session in a floating terminal, and Alt+O leaves that viewer
+  when your OATS CLI supports a detach key. It also has Open OATS TUI, Open
+  OATS Desktop (when setup found one) and Set up keys and launchers, which
+  runs `setup --apply` in a floating terminal. A right click on the icon
+  opens the TUI.
 - **Finding the deployment.** Setup takes `--dir`, else the deployment
   around the working directory, else the one it is applied for. With none of
   those, in a terminal, it asks for the path of your deployment.

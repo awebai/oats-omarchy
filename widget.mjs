@@ -160,3 +160,15 @@ export function setupCommand(plugin, setupPath) {
 export function quickCommand(plugin, setupPath) {
   return tuiCommand(plugin) || setupCommand(plugin, setupPath)
 }
+
+// What a click on the icon does: { toggle: true } (the panel) or { line }.
+// Before setup has run (no plugin.json) either click runs the whole setup;
+// after, a left click toggles the panel and a right click opens the TUI.
+export function clickAction(plugin, setupPath, right) {
+  if (!plugin) return { line: setupCommand(null, setupPath) }
+  return right ? { line: quickCommand(plugin, setupPath) } : { toggle: true }
+}
+
+export function tooltip(plugin) {
+  return plugin ? "OATS" : "OATS: click to set up"
+}

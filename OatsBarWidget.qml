@@ -11,8 +11,9 @@ import "widget.mjs" as Widget
 // it, and a panel: those agents (a click opens the session), the TUI, the
 // Desktop, and setup. Everything it runs or reads is built by widget.mjs from
 // setup's plugin.json; this file only displays it, runs commands through the
-// bar, and writes nothing. Without plugin.json, setup has not run, and the
-// panel offers setup only.
+// bar, and writes nothing. Without plugin.json, setup has not run: a click
+// on the icon runs the whole setup in a floating terminal instead
+// (widget.mjs clickAction), and the tooltip says so.
 //
 // The count is `waiting --json` (bin/waiting.mjs), read on a timer and when
 // the panel opens, after plugin.json is read again. One widget reads for
@@ -154,7 +155,7 @@ Panel {
     BarIconButton {
       id: button
       bar: root.bar
-      tooltipText: "OATS"
+      tooltipText: Widget.tooltip(root.plugin)
       iconComponent: Component {
         Item {
           Image {
@@ -177,8 +178,9 @@ Panel {
         }
       }
       onPressed: function(buttonCode) {
-        if (buttonCode === Qt.RightButton) root.runLine(Widget.quickCommand(root.plugin, root.setupPath))
-        else root.toggle()
+        var action = Widget.clickAction(root.plugin, root.setupPath, buttonCode === Qt.RightButton)
+        if (action.toggle) root.toggle()
+        else root.runLine(action.line)
       }
     }
 

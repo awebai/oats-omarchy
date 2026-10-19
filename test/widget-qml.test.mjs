@@ -179,3 +179,40 @@ test("a read whose program cannot start shows ? at the deadline, at the shortest
   Timer { interval: 33000; running: true; onTriggered: scene.probe("at 33 s", scene.w.badge) }`, 34, { settings: "({ refreshIntervalSec: 15 })" }));
   assert.deepEqual(records.map((r) => [r.what, r.value]), [["at 20 s", ""], ["at 33 s", "?"]]);
 });
+
+// Presses the bar icon (the real BarIconButton's pressed signal) and logs
+// what the bar ran, whether the panel is open, and the tooltip.
+const clicks = scene(`
+  function icon() { return scene.all(scene.w, []).filter(function(x) { return x.tooltipText !== undefined && x.iconComponent !== undefined })[0] }
+  Timer { interval: 1500; running: true; onTriggered: {
+    var b = scene.icon()
+    scene.probe("tooltip", b.tooltipText)
+    b.pressed(Qt.LeftButton)
+    scene.probe("left", { opened: scene.w.opened })
+    if (scene.w.opened) scene.w.close()
+    b.pressed(Qt.RightButton)
+    scene.probe("right", { opened: scene.w.opened })
+  } }`, 3);
+
+test("before setup, a left or right click on the icon runs the whole setup; the tooltip says so", { skip }, (t) => {
+  const w = world(t);
+  const records = w.play(clicks).map((r) => [r.what, r.value]);
+  const setup = `exec omarchy-launch-floating-terminal-with-presentation ''\\''${join(w.root, "cfg", "plugin", "setup")}'\\'' --apply'`;
+  assert.deepEqual(records, [
+    ["tooltip", "OATS: click to set up"],
+    ["run", setup], ["left", { opened: false }],
+    ["run", setup], ["right", { opened: false }],
+  ]);
+});
+
+test("after setup, a left click toggles the panel and a right click opens the TUI; the tooltip is OATS", { skip }, (t) => {
+  const w = world(t);
+  const read = w.exe("none.sh", `#!/bin/sh\necho '{"ok":true,"count":0,"rows":[]}'\n`);
+  w.plugin({ tui: ["omarchy-launch-or-focus-tui", "tui"], waiting: ["/bin/sh", read] });
+  const records = w.play(clicks).map((r) => [r.what, r.value]);
+  assert.deepEqual(records, [
+    ["tooltip", "OATS"],
+    ["left", { opened: true }],
+    ["run", "exec 'omarchy-launch-or-focus-tui' 'tui'"], ["right", { opened: false }],
+  ]);
+});
