@@ -38,6 +38,10 @@ omarchy plugin add https://github.com/awebai/oats-omarchy --enable
   `--apply` shows the plan again and asks before writing (`--yes` skips the
   question; without a terminal it is required). When the plan says the key is
   not written, paste the snippet it prints into your Hyprland bindings.
+- **Checking the key.** Before writing the key, `--plan` and `--apply` run
+  `Hyprland --verify-config` on a temporary copy of your Hyprland config with
+  the block added. That runs your config's own commands (its `io.popen`
+  calls), on the copy.
 - **`setup --check`** reports drift. Omarchy also runs it after each update.
 
 **Pinning a release.** The plugin is a plain git checkout:
