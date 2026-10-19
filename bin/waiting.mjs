@@ -7,4 +7,4 @@ if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
   process.stdout.write(USAGE);
   process.exit(0);
 }
-process.exit(waiting(args));
+Promise.resolve(waiting(args)).then((code) => process.exit(code));

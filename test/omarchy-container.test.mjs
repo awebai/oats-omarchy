@@ -18,6 +18,7 @@ import vm from "node:vm";
 import { parseDesktopExec } from "../lib/quote.mjs";
 import { readDesktopEntry } from "../lib/desktop-entry.mjs";
 import { fixture, repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
+import * as widget from "../widget.mjs";
 
 const enabled = process.env.OATS_OMARCHY_CONTAINER === "1";
 const OMARCHY = process.env.OMARCHY_PATH || "/usr/share/omarchy";
@@ -328,5 +329,21 @@ test("waiting opens the chosen session through Omarchy's real floating terminal:
   assert.equal(r.status, 0, r.stderr);
   const log = join(s.root, "kernel.log");
   waitFor(log, 1);
-  assert.deepEqual(JSON.parse(readFileSync(log, "utf8").trim()), ["session", "attach", "--home", home, "--detach-key", "C-\\"]);
+  assert.deepEqual(JSON.parse(readFileSync(log, "utf8").trim()), ["session", "attach", "--detach-key", "M-o", "--home", home]);
+});
+
+test("the bar panel's row opens the same session through the real floating terminal, from the plugin.json setup wrote", { skip }, (t) => {
+  const s = omarchySandbox(t, { deploymentName: "my agents" });
+  const home = join(s.deployment, "agents", "x", "instances", "it's here");
+  mkdirSync(home, { recursive: true });
+  writeExecutable(join(s.fakebin, "uwsm-app"), '#!/bin/bash\n[[ $1 == -- ]] && shift\nif [[ $1 == xdg-terminal-exec ]]; then while [[ $1 != -e ]]; do shift; done; shift; fi\nexec "$@"\n');
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  const plugin = widget.parsePlugin(readFileSync(join(s.home, ".local/state/oats-omarchy/plugin.json"), "utf8"));
+  assert.ok(plugin, "setup wrote what the widget reads");
+  // The bar's run: bash -lc <line>.
+  const r = spawnSync("bash", ["-lc", widget.attachCommand(plugin, home)], { env: s.env, cwd: s.root, encoding: "utf8", timeout: 30_000 });
+  assert.equal(r.status, 0, r.stderr);
+  const log = join(s.root, "kernel.log");
+  waitFor(log, 1);
+  assert.deepEqual(JSON.parse(readFileSync(log, "utf8").trim()), ["session", "attach", "--detach-key", "M-o", "--home", home]);
 });
