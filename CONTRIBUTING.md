@@ -61,8 +61,28 @@ compares them with what is there, and only then writes:
   PATH, is treated as one, so without FUSE the key and the menu extract and
   run it), FUSE, and the bindings
   `omarchy menu keybindings --print` reports.
-- `lib/keys.mjs` turns that report into the suggested key and its snippet.
-  Setup never writes key bindings.
+- `lib/keys.mjs` turns that report into the key and its snippet.
+- `lib/bindings.mjs` is the key block: the Lua snippet between marker
+  comments, appended to the end of `~/.config/hypr/bindings.lua` after a
+  blank line. Setup writes it only for the Lua layout, and only when the
+  effective SUPER + O (from `--print`) is Omarchy's stock pop-out, the
+  user's `bindings.lua` does not bind SUPER + O, and no user submap is named
+  `oats`. Otherwise the part is skipped with the reason, and the snippet is
+  printed. The file is backed up whole. `--remove` restores the backup only
+  when the file is byte-identical to what `--apply` wrote; otherwise it
+  takes out the block's bytes alone, leaving the separator and everything
+  else.
+- `lib/verify.mjs` checks the change before it goes live, because Hyprland
+  reloads as soon as `bindings.lua` changes. It copies `~/.config/hypr` and
+  the state Lua the shipped config loads (the theme's modules, the Hyprland
+  toggles, the saved workspace layouts) into a private temporary HOME,
+  bounded at 50 MB, and runs `Hyprland --verify-config` there. It checks the
+  unchanged copy first, then the copy with the block. Omarchy's
+  `bootstrap.lua` builds `package.path` from `$HOME`, so the copy is only
+  read when HOME points at it.
+- `--apply` and `--remove` change files in the person's home. In a terminal
+  they show what they will do and ask; otherwise they refuse with
+  `E_CONFIRM` unless `--yes` is given, as `omarchy plugin add` does.
 - `lib/files.mjs` renders each file (the shim, the launcher entries, the
   post-update hook); `lib/desktop-entry.mjs` reads and writes desktop
   entries.
@@ -129,7 +149,9 @@ Tests run on a temporary machine (`test/helpers/sandbox.mjs`): a temporary
 HOME and XDG directories, a stand-in for Omarchy's menu definition
 (`OMARCHY_PATH`), a PATH of fakes (the Omarchy launchers, the menu's
 selector, notifier and floating terminal, `omarchy`, `systemctl`,
-`ldconfig`, `tmux`) before a private directory of basic tools, and `oats`
+`ldconfig`, `tmux`, and a `Hyprland` whose `--verify-config` logs the
+environment it got and refuses on cue) before a private directory of basic
+tools, and `oats`
 on PATH: a stand-in for the CLI that answers `status --json` and
 `version --json` from files a test writes. It can also be one that fails, an
 instance home's shim, or a mise shim that `mise which oats` resolves. Each fake
@@ -153,7 +175,8 @@ CI's `omarchy` job runs in a pinned `archlinux:base` container:
   it skips without it) runs setup through `./setup`, with the container's
   node and the CLI stand-in on PATH, against the real Omarchy: its launchers,
   through `gio launch` and `sh -c`, its hook runner, `--verify-config` on
-  the user's whole configuration with the printed snippet added, Omarchy's
+  the user's whole configuration with the printed snippet added, the key
+  block written, refused and removed with the real Hyprland, Omarchy's
   own `MenuModel.js` reading the menu block (it is plain functions, so it
   runs as a script in a `vm` context), and `bin/waiting.mjs` opening a
   session through the real floating terminal. Only the selector is a fake:

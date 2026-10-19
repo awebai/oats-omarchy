@@ -24,11 +24,11 @@ const OMARCHY = process.env.OMARCHY_PATH || "/usr/share/omarchy";
 const verify = join(repo, "ci", "verify-hypr-config.sh");
 const skip = enabled ? false : "set OATS_OMARCHY_CONTAINER=1 (CI's Omarchy container)";
 
-// A sandbox whose PATH has the real Omarchy commands after the fakes. Only
-// systemctl stays real too: in the container it has no user bus, which is
-// the "no session" path.
+// A sandbox whose PATH has the real Omarchy commands, and the real Hyprland,
+// after the fakes. Only systemctl stays real too: in the container it has no
+// user bus, which is the "no session" path.
 function omarchySandbox(t, options = {}) {
-  const s = sandbox(t, { launchers: false, print: "fail", fuse: true, ...options });
+  const s = sandbox(t, { launchers: false, print: "fail", fuse: true, ...options, hyprland: false });
   for (const fake of ["systemctl", "ldconfig", "omarchy"]) spawnSync("rm", ["-f", join(s.fakebin, fake)]);
   if (options.print && options.print !== "fail") {
     writeExecutable(join(s.fakebin, "omarchy"), `#!/bin/sh\n[ "$1 $2 $3" = "menu keybindings --print" ] && cat "${join(s.root, "print.txt")}" && exit 0\nexec ${OMARCHY}/bin/omarchy "$@"\n`);
@@ -38,7 +38,8 @@ function omarchySandbox(t, options = {}) {
   const run = s.run;
   s.run = ([command, ...args], extra = {}) => {
     if (command !== "setup") return run([command, ...args], extra);
-    const r = spawnSync("/bin/sh", [join(repo, "setup"), ...args], { env: { ...s.env, ...extra }, cwd: s.deployment, encoding: "utf8", timeout: 60_000 });
+    const yes = (args.includes("--apply") || args.includes("--remove")) && !args.includes("--yes") ? ["--yes"] : [];
+    const r = spawnSync("/bin/sh", [join(repo, "setup"), ...args, ...yes], { env: { ...s.env, ...extra }, cwd: s.deployment, encoding: "utf8", timeout: 60_000 });
     let json = null;
     if (args.includes("--json")) { try { json = JSON.parse(r.stdout); } catch { /* left null; the test says so */ } }
     return { status: r.status, stdout: r.stdout, stderr: r.stderr, json };
@@ -89,7 +90,7 @@ test("Lua layout, no Desktop: plan, apply, the real post-update hook, check, rem
   const before = snapshot(s.home);
   const p = plan(s);
   assert.equal(p.found.launchPath.source, "minimal", "no user bus in the container");
-  assert.deepEqual(p.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "skipped"], ["hook", "will apply"], ["menu", "will apply"]]);
+  assert.deepEqual(p.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "skipped"], ["hook", "will apply"], ["menu", "will apply"], ["keys", "skipped"]]);
   assert.equal(p.found.menu.defaults, join(OMARCHY, "default", "omarchy", "omarchy-menu.jsonc"));
   assert.equal(p.keys.status, "unchecked", "--print without Hyprland");
   assert.match(p.keys.notes[0], /no running Hyprland answered/);
@@ -110,6 +111,62 @@ test("Lua layout, no Desktop: plan, apply, the real post-update hook, check, rem
   const removed = s.run(["setup", "--remove"]);
   assert.equal(removed.status, 0, removed.stdout + removed.stderr);
   assert.deepEqual(snapshot(s.home), before);
+});
+
+// Setup writes the key block into the user's bindings.lua, checked by the
+// real Hyprland on a copy first. The effective bindings are Omarchy's
+// defaults (the captured --print), so SUPER + O is the stock pop-out.
+test("the key block: apply verifies and writes it, a second apply changes nothing, remove restores byte for byte", { skip }, (t) => {
+  const s = omarchySandbox(t, { print: "fixture" });
+  userHypr(s, { layout: "lua" });
+  const file = join(s.home, ".config", "hypr", "bindings.lua");
+  const before = snapshot(s.home);
+  const apply = s.run(["setup", "--apply", "--json"]);
+  assert.equal(apply.status, 0, apply.stdout + apply.stderr);
+  const keys = apply.json.result.parts.find((x) => x.part === "keys");
+  assert.equal(keys.status, "applied", keys.reason);
+  assert.equal(existsSync(join(s.root, "hyprland.log")), false, "the real Hyprland verified it, not the sandbox's fake");
+  assert.match(readFileSync(file, "utf8"), /-- >>> oats-omarchy \(managed by setup; remove with setup --remove\) >>>\n[^]*-- <<< oats-omarchy <<<\n$/);
+  // The live config, block included, as Hyprland reads it.
+  const v = spawnSync("bash", [verify, "--expect", "ok", join(s.home, ".config", "hypr", "hyprland.lua"), s.home], { encoding: "utf8" });
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+
+  const written = readFileSync(file);
+  const again = s.run(["setup", "--apply", "--json"]);
+  assert.equal(again.json.result.parts.find((x) => x.part === "keys").status, "already applied");
+  assert.ok(readFileSync(file).equals(written));
+  assert.equal(s.run(["setup", "--remove"]).status, 0);
+  assert.deepEqual(snapshot(s.home), before);
+});
+
+test("the key block: SUPER + O bound in the user's bindings.lua is refused, nothing written", { skip }, (t) => {
+  const s = omarchySandbox(t, { print: "fixture" });
+  userHypr(s, { layout: "lua" });
+  const file = join(s.home, ".config", "hypr", "bindings.lua");
+  writeFileSync(file, `${readFileSync(file, "utf8")}o.bind("SUPER + O", "Mine", "true")\n`);
+  const mine = readFileSync(file);
+  const p = plan(s);
+  const keys = p.parts.find((x) => x.part === "keys");
+  assert.equal(keys.status, "skipped");
+  assert.match(keys.reason, /your bindings\.lua binds SUPER \+ O itself/);
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.ok(readFileSync(file).equals(mine));
+});
+
+test("the key block: a block Hyprland refuses is not written, and Hyprland's lines are reported", { skip }, (t) => {
+  const s = omarchySandbox(t, { print: "fixture" });
+  userHypr(s, { layout: "lua" });
+  const file = join(s.home, ".config", "hypr", "bindings.lua");
+  // Valid on its own (Omarchy's own SUPER + O is bound before this file
+  // runs); the block's o.bind("SUPER + O", ...) then fails.
+  writeFileSync(file, `${readFileSync(file, "utf8")}local bind = o.bind\no.bind = function(keys, ...)\n  if keys == "SUPER + O" then error("SUPER + O is not for setup here") end\n  return bind(keys, ...)\nend\n`);
+  const mine = readFileSync(file);
+  const p = plan(s);
+  const keys = p.parts.find((x) => x.part === "keys");
+  assert.equal(keys.status, "skipped");
+  assert.match(keys.reason, /^Hyprland --verify-config refuses your config with the key block added, so setup writes nothing:\n/);
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.ok(readFileSync(file).equals(mine));
 });
 
 test("the .conf layout: the hyprlang snippet passes --verify-config", { skip }, (t) => {

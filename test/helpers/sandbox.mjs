@@ -28,7 +28,7 @@ const MENU_DEFAULTS = `{
 // The only host programs on the sandbox's PATH: a shell and the few tools the
 // fakes and the hook use, linked into a private directory. /usr/bin itself is
 // not on the PATH, because on Omarchy it holds the real launchers.
-const HOST_TOOLS = ["sh", "bash", "cat", "echo", "printf", "mkdir", "head", "env", "rm", "ls", "dirname"];
+const HOST_TOOLS = ["sh", "bash", "cat", "echo", "printf", "mkdir", "head", "env", "rm", "ls", "dirname", "cp", "grep"];
 
 export function writeExecutable(path, text) {
   mkdirSync(dirname(path), { recursive: true });
@@ -49,6 +49,11 @@ export function writeExecutable(path, text) {
 //                                       a mise shim that `mise which oats`
 //                                       resolves to the CLI, or does not
 //   node: true | false                  `node` on PATH (a link to this node)
+//   hyprland: true | false              `Hyprland` on PATH: a fake --verify-config
+//                                       that logs its environment to
+//                                       <root>/hyprland.log and refuses a
+//                                       bindings.lua holding BREAKS_VERIFY, or
+//                                       setup's block when FAKE_HYPR_REFUSE_BLOCK=1
 //   deploymentName: string
 //   menu: true | false                  Omarchy's menu definition is there ($OMARCHY_PATH)
 // The kernel stand-in answers `status --json` from <root>/status.json (and
@@ -58,7 +63,7 @@ export function writeExecutable(path, text) {
 // or the text to return. FAKE_FLOATING_RUN=1 makes the floating terminal run
 // its command with bash -c, as the real one does.
 export function sandbox(t, options = {}) {
-  const o = { launchers: true, print: "fixture", session: false, fuse: true, tmux: true, kernel: "ok", node: false, deploymentName: "deployment", menu: true, ...options };
+  const o = { launchers: true, print: "fixture", session: false, fuse: true, tmux: true, kernel: "ok", node: false, hyprland: true, deploymentName: "deployment", menu: true, ...options };
   const root = realpathSync(mkdtempSync(join(tmpdir(), "oats-omarchy-test-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
@@ -123,6 +128,20 @@ ${o.fuse ? 'echo "	libfuse.so.2 (libc6,x86-64) => /usr/lib/libfuse.so.2"' : ""}
 echo "	libfuse3.so.4 (libc6,x86-64) => /usr/lib/libfuse3.so.4"
 `);
   if (o.tmux) writeExecutable(join(fakebin, "tmux"), "#!/bin/sh\nexit 0\n");
+  if (o.hyprland) writeExecutable(join(fakebin, "Hyprland"), `#!/bin/bash
+[[ $1 == --verify-config && $2 == -c && -n $3 ]] || { echo "fake Hyprland: $*" >&2; exit 2; }
+printf '%s\\n' "config=$3" "HOME=$HOME" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" "WAYLAND_DISPLAY=\${WAYLAND_DISPLAY-unset}" "HYPRLAND_INSTANCE_SIGNATURE=\${HYPRLAND_INSTANCE_SIGNATURE-unset}" "--" >> "${join(root, "hyprland.log")}"
+bindings="$(dirname "$3")/bindings.lua"
+cp "$bindings" "${join(root, "hyprland-saw.lua")}" 2>/dev/null
+echo "Hyprland 0.56.2 (fake)"
+if grep -q BREAKS_VERIFY "$bindings" 2>/dev/null || { [[ -n $FAKE_HYPR_REFUSE_BLOCK ]] && grep -q '>>> oats-omarchy' "$bindings"; }; then
+  echo "======== Config parsing result:"
+  echo "config error in $bindings:3: attempt to call a nil value (field 'define_submap')"
+  exit 1
+fi
+echo "======== Config parsing result:"
+echo "config ok"
+`);
 
   // A stand-in for the kernel's CLI, run as `oats` from PATH and by the shim
   // setup writes: `version --json` (from <root>/version.json) and
@@ -171,8 +190,11 @@ console.error("fake kernel: " + process.argv.slice(2).join(" ")); process.exit(1
   };
 
   // run(["setup" | "waiting", ...args]): that command, from the deployment.
-  const run = ([command, ...args], extra = {}, { cwd = deployment } = {}) => {
-    const r = spawnSync(process.execPath, [BIN[command], ...args], { env: { ...env, ...extra }, cwd, encoding: "utf8", timeout: 60_000 });
+  // setup's --apply and --remove get --yes unless `yes: false` (no terminal
+  // here to confirm in).
+  const run = ([command, ...args], extra = {}, { cwd = deployment, yes = true } = {}) => {
+    const confirm = command === "setup" && yes && !args.includes("--yes") && (args.includes("--apply") || args.includes("--remove"));
+    const r = spawnSync(process.execPath, [BIN[command], ...args, ...(confirm ? ["--yes"] : [])], { env: { ...env, ...extra }, cwd, encoding: "utf8", timeout: 60_000 });
     let json = null;
     if (args.includes("--json")) { try { json = JSON.parse(r.stdout); } catch { /* left null; the test says so */ } }
     return { status: r.status, stdout: r.stdout, stderr: r.stderr, json };

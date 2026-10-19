@@ -9,8 +9,11 @@ opens either client and lists the agents waiting on you.
 It is set up with one command, `setup --plan | --apply | --remove | --check`,
 run from the plugin's directory. Setup finds what it needs on the machine
 instead of assuming paths, and applies each part only where Omarchy offers
-it. It shows the suggested key binding rather than writing it into your
-configuration, and `--remove` restores exactly what was there before.
+it. On Omarchy's Lua layout it writes the key, SUPER + O, into your
+`bindings.lua` as a marked block, but only over Omarchy's stock binding and
+only after Hyprland has checked a copy of your config with it. Otherwise it
+prints the snippet for you to add. `--remove` restores exactly what was
+there before.
 
 ## Use it from a clone
 
@@ -25,7 +28,9 @@ cd oats-omarchy
 ```
 
 The plan says what `--apply` would write and what it found. Then run
-`./setup --apply --dir <deployment>`, and paste the key snippet the plan
+`./setup --apply --dir <deployment>`, which shows the plan again and asks
+before writing (`--yes` skips the question; without a terminal it is
+required). When the plan says the key is not written, paste the snippet it
 prints into your Hyprland bindings. The menu and the hook setup writes point
 at this clone, so keep it where it is. `./setup --check` reports drift, and
 `./setup --remove` undoes it all.
