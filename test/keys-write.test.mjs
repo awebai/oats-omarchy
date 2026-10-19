@@ -124,11 +124,96 @@ test("an edited block: --check says so, --apply and --remove leave the file alon
   assert.ok(s.run(["setup", "--check", "--json"]).json.result.drift.includes(`${file}, which holds the oats key block, is missing`));
 });
 
+// A Desktop AppImage to pass with --desktop: the block's D binding changes,
+// so a re-apply rewrites the block.
+function appImage(s) {
+  const path = join(s.root, "OATS-Desktop.AppImage");
+  writeExecutable(path, "#!/bin/sh\nexit 0\n");
+  return path;
+}
+
+test("a re-apply that rewrites the block keeps the user's edits, and --remove then takes out the block alone", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  writeFileSync(file, `${readFileSync(file, "utf8")}-- user edit\n`);
+  const again = s.run(["setup", "--apply", "--desktop", appImage(s), "--json"]);
+  assert.equal(part(again, "keys").status, "applied", again.stdout);
+  const rec = record(s);
+  assert.equal(rec.restorable, false);
+  const updated = readFileSync(file, "utf8");
+  assert.ok(updated.includes("-- user edit\n") && updated.includes(rec.block));
+  assert.equal(s.run(["setup", "--remove"]).status, 0);
+  assert.equal(readFileSync(file, "utf8"), updated.replace(rec.block, ""));
+  assert.equal(readFileSync(file, "utf8"), `${USER_BINDINGS}\n-- user edit\n`);
+
+  // Without the user's edit the rewritten file is still restorable whole.
+  const clean = sandbox(t);
+  const cleanFile = hypr(clean, USER_BINDINGS, 0o600);
+  assert.equal(clean.run(["setup", "--apply"]).status, 0);
+  assert.equal(part(clean.run(["setup", "--apply", "--desktop", appImage(clean), "--json"]), "keys").status, "applied");
+  assert.equal(record(clean).restorable, true);
+  assert.equal(clean.run(["setup", "--remove"]).status, 0);
+  assert.equal(readFileSync(cleanFile, "utf8"), USER_BINDINGS);
+  assert.equal(statSync(cleanFile).mode & 0o777, 0o600);
+});
+
+const updateRefusals = [
+  ["a user SUPER + O added outside the block", (s, file) => {
+    writeFileSync(file, `o.bind("SUPER + O", "Mine", "true")\n${readFileSync(file, "utf8")}`);
+    writeFileSync(join(s.root, "print.txt"), readFileSync(fixture("print", "omarchy-4.0.4.txt"), "utf8").replace("→ Pop window out (float & pin)", "→ OATS"));
+  }, /your bindings\.lua binds SUPER \+ O itself \(o\.bind\("SUPER \+ O"/],
+  ["another effective SUPER + O action beside the block's", (s) => {
+    writeFileSync(join(s.root, "print.txt"), `${readFileSync(fixture("print", "omarchy-4.0.4.txt"), "utf8").replace("→ Pop window out (float & pin)", "→ OATS")}SUPER + O                           → Mine\n`);
+  }, /SUPER \+ O runs "Mine", not Omarchy's stock/],
+  ["a user submap named oats added since", (s) => writeFileSync(join(s.home, ".config/hypr/extra.lua"), 'hl.define_submap("oats", function() end)\n'), /defines a submap named oats \(in .*extra\.lua\)/],
+];
+
+for (const [name, arrange, reason] of updateRefusals) {
+  test(`a re-apply that would rewrite the block is skipped and writes nothing: ${name}`, (t) => {
+    const s = sandbox(t);
+    const file = hypr(s);
+    assert.equal(s.run(["setup", "--apply"]).status, 0);
+    arrange(s, file);
+    const before = readFileSync(file, "utf8");
+    const again = s.run(["setup", "--apply", "--desktop", appImage(s), "--json"]);
+    assert.equal(again.status, 0, again.stdout);
+    assert.equal(part(again, "keys").status, "skipped");
+    assert.match(part(again, "keys").reason, reason);
+    assert.equal(readFileSync(file, "utf8"), before);
+  });
+}
+
+test("a save while Hyprland verifies the block: --apply writes nothing and rolls back", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  s.env.FAKE_HYPR_SAVE_TO = file;
+  const r = s.run(["setup", "--apply", "--json"]);
+  assert.equal(r.json.error.code, "E_APPLY_FAILED");
+  assert.match(r.json.error.message, /bindings\.lua changed while setup checked it, so setup leaves it alone: run setup --apply again/);
+  assert.equal(readFileSync(file, "utf8"), `${USER_BINDINGS}-- concurrent save\n`);
+  assert.equal(existsSync(join(s.home, ".local/state/oats-omarchy/state.json")), false);
+});
+
+test("--remove keeps bytes outside the block that are not UTF-8, and --check still finds the block", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  const latin1 = Buffer.from("-- caf\xe9\n", "latin1");
+  writeFileSync(file, Buffer.concat([readFileSync(file), latin1]));
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift.filter((d) => d.includes("bindings.lua")), []);
+  assert.equal(s.run(["setup", "--remove"]).status, 0);
+  assert.deepEqual(readFileSync(file), Buffer.concat([Buffer.from(`${USER_BINDINGS}\n`), latin1]));
+});
+
 const refusals = [
   ["SUPER + O rebound in the effective bindings", (s) => {
     const print = readFileSync(fixture("print", "omarchy-4.0.4.txt"), "utf8").replace("→ Pop window out (float & pin)", "→ My own thing");
     writeFileSync(join(s.root, "print.txt"), print);
   }, /SUPER \+ O runs "My own thing", not Omarchy's stock "Pop window out \(float & pin\)" \(omarchy-hyprland-window-pop\)/],
+  ["SUPER + O bound to another action beside the stock one", (s) => {
+    writeFileSync(join(s.root, "print.txt"), `${readFileSync(fixture("print", "omarchy-4.0.4.txt"), "utf8")}SUPER + O                           → Mine\n`);
+  }, /SUPER \+ O runs "Mine" as well as Omarchy's stock "Pop window out \(float & pin\)"/],
   ["SUPER + O bound in the user's bindings.lua", (s) => hypr(s, `${USER_BINDINGS}o.bind("super+o", "Mine", "true")\n`), /your bindings\.lua binds SUPER \+ O itself \(o\.bind\("super\+o"/],
   ["a user submap named oats", (s) => writeFileSync(join(s.home, ".config/hypr/extra.lua"), 'hl.define_submap("oats", function() end)\n'), /defines a submap named oats \(in .*extra\.lua\)/],
   ["no key check", (s) => writeFileSync(join(s.root, "print.txt"), ""), /setup could not read what SUPER \+ O does now/],

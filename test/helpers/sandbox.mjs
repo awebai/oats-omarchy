@@ -53,7 +53,10 @@ export function writeExecutable(path, text) {
 //                                       that logs its environment to
 //                                       <root>/hyprland.log and refuses a
 //                                       bindings.lua holding BREAKS_VERIFY, or
-//                                       setup's block when FAKE_HYPR_REFUSE_BLOCK=1
+//                                       setup's block when FAKE_HYPR_REFUSE_BLOCK=1;
+//                                       with FAKE_HYPR_SAVE_TO=<file>, checking
+//                                       setup's block appends a line to <file>
+//                                       (an editor saving meanwhile)
 //   deploymentName: string
 //   menu: true | false                  Omarchy's menu definition is there ($OMARCHY_PATH)
 // The kernel stand-in answers `status --json` from <root>/status.json (and
@@ -133,6 +136,7 @@ echo "	libfuse3.so.4 (libc6,x86-64) => /usr/lib/libfuse3.so.4"
 printf '%s\\n' "config=$3" "HOME=$HOME" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" "WAYLAND_DISPLAY=\${WAYLAND_DISPLAY-unset}" "HYPRLAND_INSTANCE_SIGNATURE=\${HYPRLAND_INSTANCE_SIGNATURE-unset}" "--" >> "${join(root, "hyprland.log")}"
 bindings="$(dirname "$3")/bindings.lua"
 cp "$bindings" "${join(root, "hyprland-saw.lua")}" 2>/dev/null
+if [[ -n $FAKE_HYPR_SAVE_TO ]] && grep -q '>>> oats-omarchy' "$bindings"; then printf -- '-- concurrent save\n' >> "$FAKE_HYPR_SAVE_TO"; fi
 echo "Hyprland 0.56.2 (fake)"
 if grep -q BREAKS_VERIFY "$bindings" 2>/dev/null || { [[ -n $FAKE_HYPR_REFUSE_BLOCK ]] && grep -q '>>> oats-omarchy' "$bindings"; }; then
   echo "======== Config parsing result:"

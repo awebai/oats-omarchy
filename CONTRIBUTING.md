@@ -66,14 +66,19 @@ compares them with what is there, and only then writes:
 - `lib/keys.mjs` turns that report into the key and its snippet.
 - `lib/bindings.mjs` is the key block: the Lua snippet between marker
   comments, appended to the end of `~/.config/hypr/bindings.lua` after a
-  blank line. Setup writes it only for the Lua layout, and only when the
-  effective SUPER + O (from `--print`) is Omarchy's stock pop-out, the
-  user's `bindings.lua` does not bind SUPER + O, and no user submap is named
-  `oats`. Otherwise the part is skipped with the reason, and the snippet is
+  blank line. Setup writes it only for the Lua layout, and only when every
+  effective SUPER + O action (from `--print`) is Omarchy's stock pop-out,
+  the user's `bindings.lua` does not bind SUPER + O, and no user submap is
+  named `oats`. A re-apply that changes the block checks the same things
+  outside it, allowing only the OATS entry the block itself binds.
+  Otherwise the part is skipped with the reason, and the snippet is
   printed. The file is backed up whole. `--remove` restores the backup only
-  when the file is byte-identical to what `--apply` wrote; otherwise it
-  takes out the block's bytes alone, leaving the separator and everything
-  else.
+  when the file is byte-identical to what `--apply` wrote and the user had
+  not edited it before a re-apply rewrote the block (the record's
+  `restorable`); otherwise it takes out the block's bytes alone, leaving the
+  separator and every other byte, UTF-8 or not. A file edited while setup
+  verifies the block is left alone: apply writes a block only into the
+  bytes it planned and verified.
 - `lib/verify.mjs` checks the change before it goes live, because Hyprland
   reloads as soon as `bindings.lua` changes. It copies `~/.config/hypr` and
   the state Lua the shipped config loads (the theme's modules, the Hyprland
