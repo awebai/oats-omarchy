@@ -309,3 +309,34 @@ test("--apply and --remove ask in a terminal and refuse without one unless --yes
   assert.deepEqual(snapshot(s.home), before);
   assert.equal(direct(["--remove"], "n").asked, 0, "nothing to remove: no question");
 });
+
+test("an interactive --apply verifies once, after the answer: a change made while it asked is caught", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  let out = "";
+  let callsWhenAsked = null;
+  const direct = (sb, ask) => setup(["--apply", "--dir", sb.deployment], sb.env, { write: (x) => { out += x; } }, { write: (x) => { out += x; } }, { interactive: true, ask });
+  assert.equal(direct(s, () => { callsWhenAsked = hyprCalls(s).length; return "y"; }), 0);
+  assert.equal(callsWhenAsked, 0, "the plan shown before the question runs no Hyprland");
+  assert.match(out, /Once you confirm, and before it writes the key block, setup runs Hyprland --verify-config/);
+  assert.equal(hyprCalls(s).length, 2, "the current copy and the candidate, checked once, after the answer");
+  assert.ok(readFileSync(file, "utf8").includes(bindings.START));
+
+  // Something the config depends on changes while setup waits for the answer:
+  // the check after the answer sees it, and the key is not written.
+  const s2 = sandbox(t);
+  const file2 = hypr(s2);
+  assert.equal(direct(s2, () => { s2.env.FAKE_HYPR_REFUSE_BLOCK = "1"; return "y"; }), 0);
+  assert.equal(readFileSync(file2, "utf8"), USER_BINDINGS, "the key block was not written");
+  assert.ok(existsSync(join(s2.home, ".local/share/applications/org.oats.tui.desktop")), "the rest was applied");
+});
+
+test("the plan says the verify runs the config's own commands, on a copy", (t) => {
+  const s = sandbox(t);
+  hypr(s);
+  const r = s.run(["setup", "--plan", "--json"]);
+  assert.ok(r.json.result.notes.some((n) => /runs the config's own commands \(its io\.popen calls\), on the copy/.test(n)), r.json.result.notes.join("\n"));
+  const none = sandbox(t, { hyprland: false });
+  hypr(none);
+  assert.ok(!none.run(["setup", "--plan", "--json"]).json.result.notes.some((n) => /io\.popen/.test(n)), "no verify, no note");
+});

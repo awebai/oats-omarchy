@@ -36,6 +36,12 @@ jobs:
         run: ci/omarchy-bootstrap.sh
       - name: Installed versions
         run: pacman -Q omarchy hyprland
+      - name: The repository is a plugin Omarchy's validator accepts
+        run: |
+          plugin=$(mktemp -d)
+          tar --exclude=.git -cf - . | tar -xf - -C "$plugin"
+          chown -R ci "$plugin"
+          runuser -u ci -- /usr/share/omarchy/bin/omarchy-plugin-validate "$plugin"
       - name: A known-good submap passes Hyprland --verify-config
         run: |
           runuser -u ci -- ci/verify-hypr-config.sh --expect ok test/fixtures/hypr/submap-good.lua
