@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "ai.aweb.oats",
   "name": "OATS",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "OATS Framework",
   "license": "MIT",
   "description": "OATS on Omarchy: an OATS icon in the bar with the agents waiting on you and a panel to open them, the TUI and the Desktop, and a setup script for launchers, keys and an oats menu.",
