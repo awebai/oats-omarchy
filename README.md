@@ -19,7 +19,9 @@ there before.
 
 It needs Node.js and the OATS CLI (`npm install -g @awebai/oats`, 0.53.0 or
 later) on your PATH, and an OATS deployment: the directory that holds
-`oats-local.yaml`.
+`oats-local.yaml`. `oats` on your PATH must be the installed CLI, the
+package's `bin/oats.mjs` or the npm or mise link to it, not a wrapper
+script: setup runs that script with node directly and records its path.
 
 ```bash
 git clone https://github.com/awebai/oats-omarchy

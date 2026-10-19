@@ -45,7 +45,9 @@ compares them with what is there, and only then writes:
     through `mise which oats`), refused when it is an instance home's
     `.oats/bin` shim, and proven by `version --json`, 0.53.0 or later;
   - the node: the kernel's rule for a path that outlives the process,
-    vendored in `lib/stable-node.mjs`;
+    vendored unchanged in `lib/stable-node.mjs` from awebai/oats v0.60.0
+    (`test/stable-node-vendored.test.mjs` pins it by digest and says how to
+    re-vendor);
   - the plugin's own directory, resolved.
 
   Everything setup writes runs by those recorded absolute paths, never by
