@@ -85,6 +85,15 @@ test("the launcher runs bin/setup.mjs with node from PATH, from a copy anywhere"
   assert.match(r.stdout, /^usage: setup /);
 });
 
+test("an exported CDPATH does not change where it finds itself, run by a relative path", (t) => {
+  const b = launcherBox(t);
+  const r = spawnSync(join(b.root, "bin", "sh"), [join("my plugins", "oats-omarchy", "setup"), "--help"], {
+    env: { HOME: b.home, PATH: `${join(b.root, "node-bin")}:${join(b.root, "bin")}`, CDPATH: b.root }, cwd: b.root, encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^usage: setup /);
+});
+
 test("without node on PATH it runs the node the last --apply recorded, else says node is needed", (t) => {
   const b = launcherBox(t);
   const none = b.run(["--help"]);

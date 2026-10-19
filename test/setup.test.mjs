@@ -214,6 +214,27 @@ test("another deployment recorded in the state: --plan names it, --apply refuses
   assert.deepEqual(snapshot(s.home), before);
 });
 
+test("--remove takes the deployment as --plan does: another one, or a bad --dir, is refused and nothing is removed", (t) => {
+  const s = sandbox(t);
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  const other = join(s.root, "other");
+  mkdirSync(other);
+  writeFileSync(join(other, "oats-local.yaml"), "");
+  const before = snapshot(s.home);
+  for (const [extra, opts, code] of [[["--dir", other], {}, "E_OTHER_DEPLOYMENT"], [[], { cwd: other }, "E_OTHER_DEPLOYMENT"], [["--dir", join(s.root, "nope")], {}, "E_NO_DEPLOYMENT"]]) {
+    const r = s.run(["setup", "--remove", "--json", ...extra], {}, opts);
+    assert.equal(r.status, 1, JSON.stringify(extra));
+    assert.equal(r.json.error.code, code);
+    assert.deepEqual(snapshot(s.home), before, "nothing was removed");
+  }
+  assert.match(s.run(["setup", "--remove", "--json", "--dir", other]).json.error.message, new RegExp(`applied for the deployment ${s.deployment}, not ${other} \\(from --dir\\); nothing was removed`));
+  // The recorded deployment gone: --remove from outside any deployment still cleans up.
+  rmSync(s.deployment, { recursive: true });
+  const r = s.run(["setup", "--remove"], {}, { cwd: s.root });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(existsSync(join(s.home, ".local/state/oats-omarchy/state.json")), false);
+});
+
 test("a deployment path with a space: the hook and the shim run it, through bash and the kernel", (t) => {
   const s = sandbox(t, { deploymentName: "my agents & co" });
   const p = paths(s);
@@ -280,10 +301,13 @@ test("the hook: silent when nothing drifted; one line when the node, the plugin 
   assert.deepEqual([hook().status, hook().stdout], [0, `oats-omarchy: the plugin at ${plugin} was removed; its launchers, menu and keys remain. Add the plugin again and run setup --remove to clean them up.\n`]);
   assert.ok(s.run(["setup", "--check", "--json"]).json.result.drift.includes(`the plugin directory setup recorded, ${plugin}, is gone: run setup --apply again`));
 
-  // The node, then the deployment, in a hook as setup writes it.
-  const text = readFileSync(p.hook, "utf8").replaceAll(plugin, repo);
+  // The node (also when the plugin is gone too), then the deployment.
+  const gone = `oats-omarchy: the node setup recorded, ${join(s.root, "gone", "node")}, is gone: run setup --apply again from the plugin.\n`;
+  writeFileSync(p.hook, readFileSync(p.hook, "utf8").replaceAll(process.execPath, join(s.root, "gone", "node")));
+  assert.deepEqual([hook().status, hook().stdout], [0, gone], "node and plugin both gone: the node first");
+  const text = readFileSync(p.hook, "utf8").replaceAll(plugin, repo).replaceAll(join(s.root, "gone", "node"), process.execPath);
   writeFileSync(p.hook, text.replaceAll(process.execPath, join(s.root, "gone", "node")));
-  assert.deepEqual([hook().status, hook().stdout], [0, `oats-omarchy: the node setup recorded, ${join(s.root, "gone", "node")}, is gone: run setup --apply again from the plugin.\n`]);
+  assert.deepEqual([hook().status, hook().stdout], [0, gone]);
   writeFileSync(p.hook, text);
   rmSync(s.deployment, { recursive: true });
   assert.deepEqual([hook().status, hook().stdout], [0, `oats-omarchy: the OATS deployment ${s.deployment} is gone, so its Omarchy setup cannot be checked\n`]);

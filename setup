@@ -5,6 +5,7 @@
 # It runs bin/setup.mjs with node from PATH, else with the node the last
 # --apply recorded (the menu and the hook use that one too).
 set -u
+unset CDPATH
 dir=$(cd -- "$(dirname -- "$0")" && pwd -P) || exit 1
 node=$(command -v node 2>/dev/null) || node=
 if [ -z "$node" ]; then
