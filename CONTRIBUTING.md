@@ -5,6 +5,9 @@
 The repository is the plugin: Omarchy clones it whole, and nothing is built.
 
 ```
+manifest.json            the plugin's manifest: id ai.aweb.oats, one bar widget
+OatsBarWidget.qml        the bar widget: the OATS icon; a click opens the TUI
+widget.mjs               the click's command line, kept apart so a test can run it
 setup                    the command people run: a POSIX sh launcher
 bin/setup.mjs            setup's engine, which the launcher and the post-update hook run
 bin/waiting.mjs          the oats menu's "Waiting on you" row

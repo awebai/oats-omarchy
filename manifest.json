@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "ai.aweb.oats",
+  "name": "OATS",
+  "version": "0.1.0",
+  "author": "OATS Framework",
+  "license": "MIT",
+  "description": "OATS on Omarchy: an OATS icon in the bar that opens the OATS TUI, and a setup script for launchers, keys and an oats menu.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "OatsBarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "OATS",
+    "description": "Opens the OATS TUI. Before setup has run, it opens setup's plan in a floating terminal.",
+    "category": "AI",
+    "aliases": [
+      "oats"
+    ],
+    "allowMultiple": false
+  }
+}
