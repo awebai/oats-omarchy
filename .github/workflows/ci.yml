@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - run: npm run lint && npm run validate && npm test
+      - run: npm run lint && npm test
 
   # Omarchy's real packages, from Omarchy's own repository with signature
   # checking (ci/omarchy-bootstrap.sh says how the key is trusted).

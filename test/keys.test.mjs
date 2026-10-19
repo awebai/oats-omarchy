@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { currentPop, definesSubmap, nextFreeKey, normalizeCombo, onlyStatic, parsePrint, planKeys, POP } from "../oats-package/capabilities/oats-omarchy/lib/keys.mjs";
+import { currentPop, definesSubmap, nextFreeKey, normalizeCombo, onlyStatic, parsePrint, planKeys, POP } from "../lib/keys.mjs";
 import { fixture } from "./helpers/sandbox.mjs";
 
 const captured = readFileSync(fixture("print", "omarchy-4.0.4.txt"), "utf8");

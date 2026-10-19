@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
-import { setup } from "../oats-package/capabilities/oats-omarchy/lib/setup.mjs";
+import { setup } from "../lib/setup.mjs";
 import { sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
 const HOOK = (s) => join(s.home, ".config/omarchy/hooks/post-update.d/oats-omarchy.hook");
@@ -15,7 +15,7 @@ const HOOK = (s) => join(s.home, ".config/omarchy/hooks/post-update.d/oats-omarc
 // setup() in this process, so a replaced fs function applies to it.
 function direct(s, args) {
   let stdout = "";
-  const status = setup([...args, "--json"], s.env, { write: (x) => { stdout += x; } }, { write() {} });
+  const status = setup([...args, "--dir", s.deployment, "--json"], s.env, { write: (x) => { stdout += x; } }, { write() {} });
   return { status, json: JSON.parse(stdout) };
 }
 
@@ -96,19 +96,24 @@ test("short writes still write every byte: --remove restores the whole original"
   assert.equal(fs.readFileSync(file, "utf8"), original);
 });
 
-test("--check reports the program behind a found Desktop entry when it is gone", (t) => {
-  const s = sandbox(t);
-  const image = join(s.home, "Applications/OATS-Desktop.AppImage");
-  writeExecutable(image, "#!/bin/sh\nexit 0\n");
-  const entry = join(s.home, ".local/share/applications/existing.desktop");
-  fs.mkdirSync(join(entry, ".."), { recursive: true });
-  fs.writeFileSync(entry, `[Desktop Entry]\nType=Application\nName=OATS Desktop\nStartupWMClass=awebai-oats-desktop\nExec=env FOO=1 ${image}\n`);
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
-  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
-  fs.unlinkSync(image);
-  const r = s.run(["setup", "--check", "--json"]);
-  assert.equal(r.status, 0);
-  assert.deepEqual(r.json.result.drift, [`the Desktop program ${image}, which the launcher entry ${entry} runs, is gone`]);
+test("--check reports what a found Desktop entry runs when it is gone: its program, or its AppImage like any other", (t) => {
+  for (const [program, drift] of [
+    ["bin/oats-desktop-launcher", (path, entry) => `the Desktop program ${path}, which the launcher entry ${entry} runs, is gone`],
+    ["Applications/OATS-Desktop.AppImage", (path) => `the Desktop AppImage ${path} is gone`],
+  ]) {
+    const s = sandbox(t);
+    const path = join(s.home, program);
+    writeExecutable(path, "#!/bin/sh\nexit 0\n");
+    const entry = join(s.home, ".local/share/applications/existing.desktop");
+    fs.mkdirSync(join(entry, ".."), { recursive: true });
+    fs.writeFileSync(entry, `[Desktop Entry]\nType=Application\nName=OATS Desktop\nStartupWMClass=awebai-oats-desktop\nExec=env FOO=1 ${path}\n`);
+    assert.equal(s.run(["setup", "--apply"]).status, 0);
+    assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
+    fs.unlinkSync(path);
+    const r = s.run(["setup", "--check", "--json"]);
+    assert.equal(r.status, 0);
+    assert.deepEqual(r.json.result.drift, [drift(path, entry)]);
+  }
 });
 
 test("a partial --remove keeps every backup until everything is restored, then deletes only those", (t) => {

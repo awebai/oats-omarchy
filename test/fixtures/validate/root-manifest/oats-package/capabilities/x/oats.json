@@ -1,9 +1,0 @@
-{
-  "capability": "fixture.x",
-  "command": "x",
-  "version": "0.0.1",
-  "compatibility": { "oats": ">=0.53.0" },
-  "description": "A valid capability; the stray manifest is beside the payload.",
-  "skills": ["skills"],
-  "commands": { "run": "bin/x.mjs run" }
-}

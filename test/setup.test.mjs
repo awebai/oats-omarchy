@@ -1,13 +1,13 @@
-// `oats omarchy setup` end to end against a temporary HOME, XDG directories
+// The plugin's setup end to end against a temporary HOME, XDG directories
 // and PATH fakes: plan, apply, remove and check, and what each refuses.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseDesktopExec } from "../oats-package/capabilities/oats-omarchy/lib/quote.mjs";
-import { readDesktopEntry } from "../oats-package/capabilities/oats-omarchy/lib/desktop-entry.mjs";
-import { sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
+import { parseDesktopExec } from "../lib/quote.mjs";
+import { readDesktopEntry } from "../lib/desktop-entry.mjs";
+import { repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
 const paths = (s) => ({
   shim: join(s.home, ".local/share/oats-omarchy/oats"),
@@ -17,6 +17,7 @@ const paths = (s) => ({
   desktopIcon: join(s.home, ".local/share/icons/hicolor/256x256/apps/awebai-oats-desktop.png"),
   hook: join(s.home, ".config/omarchy/hooks/post-update.d/oats-omarchy.hook"),
   state: join(s.home, ".local/state/oats-omarchy/state.json"),
+  menu: join(s.home, ".config/omarchy/extensions/omarchy-menu.jsonc"),
 });
 
 function appImage(s, name = "OATS-Desktop.AppImage", dir = join(s.home, "Applications")) {
@@ -38,9 +39,12 @@ test("--plan writes nothing, not even Omarchy's keybindings cache", (t) => {
   assert.deepEqual(snapshot(s.home), before);
   const cache = readFileSync(join(s.root, "print-cache.log"), "utf8").trim();
   assert.ok(cache && !cache.startsWith(s.home) && !existsSync(cache), "--print ran with a temporary cache that is gone");
-  assert.deepEqual(r.json.result.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "will apply"], ["hook", "will apply"]]);
+  assert.deepEqual(r.json.result.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "will apply"], ["hook", "will apply"], ["menu", "will apply"]]);
   assert.equal(r.json.result.found.deployment.path, s.deployment);
-  assert.equal(r.json.result.found.soul.name, "github.com/acme/agents/builder");
+  assert.deepEqual(r.json.result.found.deployment, { path: s.deployment, from: "the working directory" });
+  assert.deepEqual(r.json.result.found.plugin, { dir: repo, inPlugins: false });
+  assert.equal(r.json.result.found.node.path, process.execPath);
+  assert.equal(r.json.result.found.kernel.cli, s.cli);
   assert.equal(r.json.result.found.launchPath.source, "minimal");
   assert.equal(r.json.result.keys.entry, "SUPER + O");
 });
@@ -49,8 +53,9 @@ test("plan is the default mode, and the text says what it found and where", (t) 
   const s = sandbox(t);
   const r = s.run(["setup"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^oats omarchy setup --plan \(nothing was written\)$/m);
-  assert.match(r.stdout, /deployment {2}.* \(from OATS_TEAM_SCOPE\)/);
+  assert.match(r.stdout, /^setup --plan \(nothing was written\)$/m);
+  assert.match(r.stdout, /deployment {2}.* \(from the working directory\)/);
+  assert.match(r.stdout, /Setup runs from .*, not from ~\/\.config\/omarchy\/plugins\/: the menu and the hook it writes point at this clone/);
   assert.match(r.stdout, /desktop  skipped: no OATS Desktop found/);
   assert.match(r.stdout, /Get OATS Desktop from https:\/\/github\.com\/awebai\/oats\/releases/);
   assert.match(r.stdout, /Paste this at the end of .*\/\.config\/hypr\/bindings\.lua/);
@@ -62,8 +67,8 @@ test("--apply writes exactly the parts, and a second --apply writes nothing", (t
   const p = paths(s);
   const r = s.run(["setup", "--apply", "--json"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.json.result.written.sort(), [p.shim, p.tuiEntry, p.tuiIcon, p.desktopEntry, p.desktopIcon, p.hook].sort());
-  assert.deepEqual(r.json.result.parts.map((x) => x.status), ["applied", "applied", "applied", "applied"]);
+  assert.deepEqual(r.json.result.written.sort(), [p.shim, p.tuiEntry, p.tuiIcon, p.desktopEntry, p.desktopIcon, p.hook, p.menu].sort());
+  assert.deepEqual(r.json.result.parts.map((x) => x.status), ["applied", "applied", "applied", "applied", "applied"]);
 
   assert.equal(readFileSync(p.shim, "utf8"), `#!/bin/sh\nexec '${process.execPath}' '${s.cli}' "$@"\n`);
   assert.equal(statSync(p.shim).mode & 0o777, 0o755);
@@ -79,15 +84,18 @@ test("--apply writes exactly the parts, and a second --apply writes nothing", (t
   assert.equal(statSync(p.hook).mode & 0o777, 0o755);
   const state = JSON.parse(readFileSync(p.state, "utf8"));
   assert.equal(state.deployment, s.deployment);
-  assert.equal(state.soul, "github.com/acme/agents/builder");
+  assert.deepEqual([state.node, state.cli, state.pluginDir], [process.execPath, s.cli, repo]);
+  assert.equal(readFileSync(join(s.home, ".local/state/oats-omarchy/node"), "utf8"), `${process.execPath}\n`, "for the launcher");
   assert.equal(state.desktop.source, "appimage");
-  assert.ok(state.files.every((f) => f.prior.state === "absent" && f.digest.startsWith("sha256:")));
+  assert.ok(state.files.filter((f) => f.kind !== "block").every((f) => f.prior.state === "absent" && f.digest.startsWith("sha256:")));
+  const block = state.files.find((f) => f.kind === "block");
+  assert.deepEqual({ path: block.path, created: block.created, comma: block.comma, prior: block.prior }, { path: p.menu, created: true, comma: false, prior: { state: "absent" } });
 
   const after = snapshot(s.home);
   const again = s.run(["setup", "--apply", "--json"]);
   assert.equal(again.status, 0, again.stderr);
   assert.deepEqual(again.json.result.written, []);
-  assert.deepEqual(again.json.result.parts.map((x) => x.status), ["already applied", "already applied", "already applied", "already applied"]);
+  assert.deepEqual(again.json.result.parts.map((x) => x.status), ["already applied", "already applied", "already applied", "already applied", "already applied"]);
   assert.deepEqual(snapshot(s.home), after, "the second --apply changed nothing");
   assert.match(s.run(["setup", "--apply"]).stdout, /already applied, nothing written/);
 });
@@ -100,7 +108,7 @@ test("--apply then --remove restores the whole tree byte for byte, with no user 
   assert.notDeepEqual(snapshot(s.home), before);
   const r = s.run(["setup", "--remove", "--json"]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.equal(r.json.result.restored.length, 6);
+  assert.equal(r.json.result.restored.length, 7);
   assert.deepEqual(snapshot(s.home), before);
   const again = s.run(["setup", "--remove"]);
   assert.equal(again.status, 0);
@@ -195,14 +203,36 @@ test("another deployment recorded in the state: --plan names it, --apply refuses
   assert.equal(s.run(["setup", "--apply"]).status, 0);
   const other = join(s.root, "other deployment");
   mkdirSync(other);
-  const plan = s.run(["setup", "--plan", "--json"], { OATS_TEAM_SCOPE: other });
+  writeFileSync(join(other, "oats-local.yaml"), "");
+  const plan = s.run(["setup", "--plan", "--json", "--dir", other]);
   assert.equal(plan.status, 0);
   assert.ok(plan.json.result.notes.some((n) => n.includes(`another deployment, ${s.deployment}`) && n.includes("--remove")));
   const before = snapshot(s.home);
-  const apply = s.run(["setup", "--apply", "--json"], { OATS_TEAM_SCOPE: other });
+  const apply = s.run(["setup", "--apply", "--json"], {}, { cwd: other });
   assert.equal(apply.status, 1);
   assert.equal(apply.json.error.code, "E_OTHER_DEPLOYMENT");
   assert.deepEqual(snapshot(s.home), before);
+});
+
+test("--remove takes the deployment as --plan does: another one, or a bad --dir, is refused and nothing is removed", (t) => {
+  const s = sandbox(t);
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  const other = join(s.root, "other");
+  mkdirSync(other);
+  writeFileSync(join(other, "oats-local.yaml"), "");
+  const before = snapshot(s.home);
+  for (const [extra, opts, code] of [[["--dir", other], {}, "E_OTHER_DEPLOYMENT"], [[], { cwd: other }, "E_OTHER_DEPLOYMENT"], [["--dir", join(s.root, "nope")], {}, "E_NO_DEPLOYMENT"]]) {
+    const r = s.run(["setup", "--remove", "--json", ...extra], {}, opts);
+    assert.equal(r.status, 1, JSON.stringify(extra));
+    assert.equal(r.json.error.code, code);
+    assert.deepEqual(snapshot(s.home), before, "nothing was removed");
+  }
+  assert.match(s.run(["setup", "--remove", "--json", "--dir", other]).json.error.message, new RegExp(`applied for the deployment ${s.deployment}, not ${other} \\(from --dir\\); nothing was removed`));
+  // The recorded deployment gone: --remove from outside any deployment still cleans up.
+  rmSync(s.deployment, { recursive: true });
+  const r = s.run(["setup", "--remove"], {}, { cwd: s.root });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(existsSync(join(s.home, ".local/state/oats-omarchy/state.json")), false);
 });
 
 test("a deployment path with a space: the hook and the shim run it, through bash and the kernel", (t) => {
@@ -232,28 +262,55 @@ test("--check after a file was deleted reports it; the hook prints it and exits 
   assert.equal(hook.stdout, `oats-omarchy: ${p.tuiEntry} changed since setup wrote it\noats-omarchy: ${p.tuiIcon} is missing\n`);
 });
 
-test("--check reports a feature gone, the kernel gone, and another soul; the hook reports a refused soul and a missing deployment", (t) => {
+test("--check reports a feature gone, the CLI gone or too old, the node gone and another deployment", (t) => {
   const s = sandbox(t);
   const p = paths(s);
   assert.equal(s.run(["setup", "--apply"]).status, 0);
   rmSync(join(s.fakebin, "omarchy-launch-or-focus-tui"));
-  const r = s.run(["setup", "--check", "--json"], { OATS_SOUL_ID: "github.com/acme/agents#other" });
+  const other = join(s.root, "other");
+  mkdirSync(other);
+  writeFileSync(join(other, "oats-local.yaml"), "");
+  const r = s.run(["setup", "--check", "--json", "--dir", other]);
   assert.equal(r.status, 0);
   assert.ok(r.json.result.drift.some((d) => /no longer offers omarchy-launch-or-focus-tui/.test(d)), r.stdout);
-  assert.ok(r.json.result.drift.includes("setup is applied for soul github.com/acme/agents/builder, not github.com/acme/agents/other"));
+  assert.ok(r.json.result.drift.includes(`setup is applied for the deployment ${s.deployment}, not ${other}`));
 
-  const refused = spawnSync("bash", [p.hook], { env: { ...s.env, FAKE_KERNEL_REFUSE_SOUL: "github.com/acme/agents/builder" }, cwd: s.home, encoding: "utf8" });
-  assert.equal(refused.status, 0);
-  assert.match(refused.stdout, /^oats-omarchy: `oats omarchy` no longer runs for soul github\.com\/acme\/agents\/builder:\noats omarchy: no soul of this deployment provides the omarchy namespace/);
-
+  writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.52.0", features: [] }));
+  assert.ok(s.run(["setup", "--check", "--json"]).json.result.drift.includes("the OATS CLI is 0.52.0; setup needs 0.53.0 or later (`oats tui --dir`): run setup --apply again"));
   rmSync(s.cli);
-  const gone = s.run(["setup", "--check", "--json"]);
-  assert.ok(gone.json.result.drift.includes(`the OATS CLI ${s.cli} is gone`));
+  assert.ok(s.run(["setup", "--check", "--json"]).json.result.drift.includes(`the OATS CLI setup recorded, ${s.cli}, is gone: run setup --apply again`));
 
+  const state = JSON.parse(readFileSync(p.state, "utf8"));
+  writeFileSync(p.state, JSON.stringify({ ...state, node: join(s.root, "gone", "node") }));
+  assert.ok(s.run(["setup", "--check", "--json"]).json.result.drift.includes(`the node setup recorded, ${join(s.root, "gone", "node")}, is gone: run setup --apply again`));
+});
+
+test("the hook: silent when nothing drifted; one line when the node, the plugin or the deployment is gone; always exit 0", (t) => {
+  const s = sandbox(t);
+  const p = paths(s);
+  // Applied from a copy of the plugin, which then goes away.
+  const plugin = join(s.root, "plugins", "oats-omarchy");
+  cpSync(repo, plugin, { recursive: true, filter: (src) => !/[/\\](\.git|node_modules)$/.test(src) });
+  const apply = spawnSync(process.execPath, [join(plugin, "bin", "setup.mjs"), "--apply"], { env: s.env, cwd: s.deployment, encoding: "utf8" });
+  assert.equal(apply.status, 0, apply.stderr);
+  const hook = () => spawnSync("bash", [p.hook], { env: s.env, cwd: s.home, encoding: "utf8" });
+  assert.deepEqual([hook().status, hook().stdout], [0, ""]);
+  assert.ok(s.run(["setup", "--check", "--json"]).json.result.drift.includes(`setup is applied from the plugin directory ${plugin}, and this setup runs from ${repo}: run setup --apply again`), "moved");
+
+  rmSync(plugin, { recursive: true });
+  assert.deepEqual([hook().status, hook().stdout], [0, `oats-omarchy: the plugin at ${plugin} was removed; its launchers, menu and keys remain. Add the plugin again and run setup --remove to clean them up.\n`]);
+  assert.ok(s.run(["setup", "--check", "--json"]).json.result.drift.includes(`the plugin directory setup recorded, ${plugin}, is gone: run setup --apply again`));
+
+  // The node (also when the plugin is gone too), then the deployment.
+  const gone = `oats-omarchy: the node setup recorded, ${join(s.root, "gone", "node")}, is gone: run setup --apply again from the plugin.\n`;
+  writeFileSync(p.hook, readFileSync(p.hook, "utf8").replaceAll(process.execPath, join(s.root, "gone", "node")));
+  assert.deepEqual([hook().status, hook().stdout], [0, gone], "node and plugin both gone: the node first");
+  const text = readFileSync(p.hook, "utf8").replaceAll(plugin, repo).replaceAll(join(s.root, "gone", "node"), process.execPath);
+  writeFileSync(p.hook, text.replaceAll(process.execPath, join(s.root, "gone", "node")));
+  assert.deepEqual([hook().status, hook().stdout], [0, gone]);
+  writeFileSync(p.hook, text);
   rmSync(s.deployment, { recursive: true });
-  const hook = spawnSync("bash", [p.hook], { env: s.env, cwd: s.home, encoding: "utf8" });
-  assert.equal(hook.status, 0);
-  assert.equal(hook.stdout, `oats-omarchy: the OATS deployment ${s.deployment} is gone, so its Omarchy setup cannot be checked\n`);
+  assert.deepEqual([hook().status, hook().stdout], [0, `oats-omarchy: the OATS deployment ${s.deployment} is gone, so its Omarchy setup cannot be checked\n`]);
 });
 
 test("a failed write rolls back what the run wrote and reports nothing as written", (t) => {
@@ -308,7 +365,8 @@ test("missing launchers, hook runner or kernel skip their parts with the reason"
 
   const badKernel = sandbox(t, { kernel: "fail" });
   const k = badKernel.run(["setup", "--plan", "--json"]).json.result;
-  for (const name of ["shim", "tui", "hook"]) assert.match(part(k, name).reason, /the kernel does not run from a launcher: .*--version` failed with the minimal PATH/, name);
+  for (const name of ["shim", "tui", "hook", "menu"]) assert.match(part(k, name).reason, /the OATS CLI cannot be used: .*version --json` did not answer as the OATS CLI does, with the minimal PATH/, name);
+  assert.ok(k.fixes.some((f) => /npm install -g @awebai\/oats/.test(f.fix)), "the fix names the global install");
   assert.equal(badKernel.run(["setup", "--apply"]).status, 0, "nothing to apply is not a failure");
 });
 
@@ -331,13 +389,27 @@ test("bad arguments exit 2; no deployment exits 1 with E_NO_DEPLOYMENT; remove a
     assert.equal(r.status, 2, args.join(" "));
     assert.equal(r.json.error.code, "E_BAD_ARGS");
   }
-  assert.match(s.run(["setup", "--bogus"]).stderr, /unknown argument: --bogus\nusage: oats omarchy setup/);
-  const noDep = s.run(["setup", "--plan", "--json"], { OATS_TEAM_SCOPE: "" });
+  assert.match(s.run(["setup", "--bogus"]).stderr, /unknown argument: --bogus\nusage: setup /);
+  const noDep = s.run(["setup", "--plan", "--json"], {}, { cwd: s.root });
   assert.equal(noDep.status, 1);
   assert.equal(noDep.json.error.code, "E_NO_DEPLOYMENT");
+  assert.match(noDep.json.error.message, /no OATS deployment: no oats-local\.yaml at or above .*; pass --dir <deployment>/);
+  assert.match(s.run(["setup", "--plan", "--json", "--dir", join(s.root, "nope")]).json.error.message, /--dir .*nope does not exist/);
+  assert.match(s.run(["setup", "--plan", "--json", "--dir", s.root]).json.error.message, /holds no oats-local\.yaml/);
   const check = s.run(["setup", "--check"]);
   assert.deepEqual([check.status, check.stdout], [0, ""]);
   const desktopFlag = s.run(["setup", "--plan", "--desktop", "/nonexistent/OATS.AppImage", "--json"]);
   assert.match(part(desktopFlag.json.result, "desktop").reason, /--desktop \/nonexistent\/OATS\.AppImage is not an existing executable file/);
-  assert.equal(s.run(["setup", "--plan", "--soul", "github.com/acme/agents/builder"]).status, 0, "the kernel passes --soul through");
+});
+
+test("the deployment, in order: --dir, the working directory and above, then the one setup is applied for", (t) => {
+  const s = sandbox(t);
+  const inside = join(s.deployment, "agents", "x", "instances", "x-1", "work");
+  mkdirSync(inside, { recursive: true });
+  assert.deepEqual(s.run(["setup", "--plan", "--json"], {}, { cwd: inside }).json.result.found.deployment, { path: s.deployment, from: "the working directory" });
+  assert.deepEqual(s.run(["setup", "--plan", "--json", "--dir", "."], {}, { cwd: s.deployment }).json.result.found.deployment, { path: s.deployment, from: "--dir" });
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.deepEqual(s.run(["setup", "--plan", "--json"], {}, { cwd: s.root }).json.result.found.deployment, { path: s.deployment, from: "setup's state" });
+  assert.deepEqual(s.run(["setup", "--check", "--json"], {}, { cwd: s.root }).json.result.drift, []);
+  assert.equal(s.run(["setup", "--remove"], {}, { cwd: s.root }).status, 0);
 });

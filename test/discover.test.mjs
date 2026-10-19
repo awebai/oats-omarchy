@@ -2,14 +2,15 @@
 // directories and PATH of fakes (never the real ones).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sandbox, writeExecutable } from "./helpers/sandbox.mjs";
 import {
-  appImages, deployment, desktop, desktopEntries, features, fuse, GET_DESKTOP, kernel, launchEnvironment,
-  layout, MINIMAL_PATH, missing, FEATURES, paths, printBindings, soulName,
-} from "../oats-package/capabilities/oats-omarchy/lib/discover.mjs";
+  appImages, deployment, desktop, desktopEntries, extractAndRun, features, fuse, GET_DESKTOP, kernel, launchEnvironment,
+  layout, menuDefaults, MINIMAL_PATH, missing, FEATURES, NOTIFY, node, OMARCHY_PATH, paths, pluginDir, printBindings,
+} from "../lib/discover.mjs";
 
 const write = (path, text) => { mkdirSync(join(path, ".."), { recursive: true }); writeFileSync(path, text); };
 const entry = (lines) => `[Desktop Entry]\nType=Application\nName=OATS Desktop\n${lines.join("\n")}\n`;
@@ -18,29 +19,39 @@ const entry = (lines) => `[Desktop Entry]\nType=Application\nName=OATS Desktop\n
 const future = (path, year) => { const d = new Date(`${year}-01-01T00:00:00Z`); utimesSync(path, d, d); };
 const mine = (root, list) => list.filter((p) => p.startsWith(root));
 
-test("soulName: a member soul, a package soul, and garbage", () => {
-  assert.equal(soulName("github.com/acme/agents#builder"), "github.com/acme/agents/builder");
-  assert.equal(soulName("package:oats.okf#knowledge-maintainer"), "oats.okf/knowledge-maintainer");
-  for (const garbage of ["", undefined, null, "builder", "#builder", "repo#", "a#b#c", "repo#a/b", "repo/x"]) {
-    assert.equal(soulName(garbage), null, String(garbage));
-  }
-});
-
-test("soulName: a package soul with no package id is garbage", () => {
-  assert.equal(soulName("package:#builder"), null);
-});
-
-test("deployment: missing, relative, nonexistent, a file, ok", (t) => {
+test("deployment: --dir, else the working directory and above, else the recorded one", (t) => {
   const s = sandbox(t);
-  assert.match(deployment({}).reason, /OATS_TEAM_SCOPE is not set/);
-  assert.equal(deployment({}).ok, false);
-  assert.deepEqual(deployment({ OATS_TEAM_SCOPE: "rel/dep" }), { ok: false, reason: "OATS_TEAM_SCOPE is not absolute: rel/dep" });
-  const gone = join(s.root, "gone");
-  assert.deepEqual(deployment({ OATS_TEAM_SCOPE: gone }), { ok: false, path: gone, reason: `the deployment directory ${gone} does not exist` });
-  const file = join(s.root, "a-file");
-  writeFileSync(file, "");
-  assert.equal(deployment({ OATS_TEAM_SCOPE: file }).ok, false);
-  assert.deepEqual(deployment(s.env), { ok: true, path: s.deployment });
+  const inside = join(s.deployment, "agents", "x");
+  mkdirSync(inside, { recursive: true });
+  assert.deepEqual(deployment({ dir: s.deployment, cwd: s.root }), { ok: true, path: s.deployment, from: "--dir" });
+  assert.deepEqual(deployment({ dir: "deployment", cwd: s.root }), { ok: true, path: s.deployment, from: "--dir" }, "relative to the working directory");
+  assert.deepEqual(deployment({ cwd: inside }), { ok: true, path: s.deployment, from: "the working directory" });
+  assert.deepEqual(deployment({ cwd: s.root, recorded: s.deployment }), { ok: true, path: s.deployment, from: "setup's state" });
+  assert.deepEqual(deployment({ cwd: inside, recorded: "/elsewhere" }).from, "the working directory", "the working directory wins over the state");
+});
+
+test("deployment: refusals name --dir as the fix", (t) => {
+  const s = sandbox(t);
+  const fix = "pass --dir <deployment>, the directory that holds oats-local.yaml";
+  assert.deepEqual(deployment({ dir: join(s.root, "gone"), cwd: s.root }), { ok: false, reason: `--dir ${join(s.root, "gone")} does not exist`, fix });
+  assert.deepEqual(deployment({ dir: s.home, cwd: s.root }), { ok: false, reason: `--dir ${s.home} holds no oats-local.yaml, so it is not an OATS deployment`, fix });
+  assert.match(deployment({ cwd: s.root }).reason, /^no OATS deployment: no oats-local\.yaml at or above /);
+  assert.deepEqual(deployment({ cwd: s.root, recorded: s.home }), { ok: false, reason: `the deployment setup is applied for, ${s.home}, holds no oats-local.yaml any more`, fix });
+});
+
+test("node: the kernel's rule; a node on PATH that is this node is stable, else a warning", (t) => {
+  const s = sandbox(t, { node: true });
+  assert.deepEqual(node(s.env), { node: join(s.root, "hostbin", "node") });
+  const bare = node(sandbox(t).env);
+  assert.equal(bare.node, process.execPath);
+  assert.match(bare.warning, /^the node path .* is not stable .*: the launchers, menu and hook setup writes stop working when it goes away .*; install a node with a stable path and run setup --apply again$/);
+});
+
+test("pluginDir: in ~/.config/omarchy/plugins or not", (t) => {
+  const p = paths(sandbox(t).env);
+  assert.deepEqual(pluginDir(p, join(p.home, ".config/omarchy/plugins/oats-omarchy")), { path: join(p.home, ".config/omarchy/plugins/oats-omarchy"), inPlugins: true });
+  assert.equal(pluginDir(p, join(p.home, "src/oats-omarchy")).inPlugins, false);
+  assert.equal(pluginDir(p, join(p.home, ".config/omarchy/plugins-old/x")).inPlugins, false);
 });
 
 test("launchEnvironment: no user session → the minimal PATH, features on this command's PATH", (t) => {
@@ -64,6 +75,19 @@ test("launchEnvironment: a user session PATH is used for the launch and for feat
   assert.equal(l.featurePath, sessionPath);
 });
 
+test("menuDefaults: Omarchy's menu definition under OMARCHY_PATH, the session's first, else /usr/share/omarchy", (t) => {
+  const s = sandbox(t);
+  const minimal = launchEnvironment(s.env);
+  assert.equal(minimal.omarchyPath, s.env.OMARCHY_PATH);
+  assert.deepEqual(menuDefaults(minimal), { path: join(s.env.OMARCHY_PATH, "default/omarchy/omarchy-menu.jsonc"), ok: true });
+  assert.equal(launchEnvironment({ ...s.env, OMARCHY_PATH: "relative/omarchy" }).omarchyPath, OMARCHY_PATH);
+  assert.equal(menuDefaults({ omarchyPath: join(s.root, "nowhere") }).ok, false);
+  // A session that sets OMARCHY_PATH wins over this command's environment.
+  const session = sandbox(t, { session: "/usr/bin:/bin" });
+  writeExecutable(join(session.fakebin, "systemctl"), `#!/bin/sh\necho "PATH=/usr/bin:/bin"\necho "OMARCHY_PATH=${join(session.root, "omarchy")}"\n`);
+  assert.equal(launchEnvironment({ ...session.env, OMARCHY_PATH: "/elsewhere" }).omarchyPath, join(session.root, "omarchy"));
+});
+
 test("features and missing: command -v skips absent names, non-executable files and directories", (t) => {
   const s = sandbox(t, { launchers: false });
   const dir = join(s.root, "feature-bin");
@@ -85,34 +109,56 @@ test("features and missing: command -v skips absent names, non-executable files 
   assert.equal(features({ featurePath: `${dir}:${later}` })["uwsm-app"], join(later, "uwsm-app"));
   // The sandbox's own PATH has every launcher.
   const all = features(launchEnvironment(sandbox(t).env));
-  assert.deepEqual(missing(all, [...FEATURES.apps, ...FEATURES.hook]), []);
+  assert.deepEqual(missing(all, [...FEATURES.apps, ...FEATURES.hook, ...FEATURES.menu, NOTIFY]), []);
+  assert.deepEqual(FEATURES.menu, ["omarchy-menu-select", "omarchy-launch-floating-terminal-with-presentation"]);
 });
 
-test("kernel: ok, unset, relative, nonexistent, and a CLI that fails --version", (t) => {
+test("kernel: `oats` on PATH, resolved to the CLI's script, proven by version --json", (t) => {
   const s = sandbox(t);
   const launch = launchEnvironment(s.env);
-  const ok = kernel(s.env, launch);
+  const ok = kernel(s.env, launch, process.execPath);
   assert.equal(ok.ok, true, ok.reason);
-  assert.equal(ok.version, "@awebai/oats 0.60.0 (desktop API v1)");
-  assert.equal(ok.node, process.execPath);
-  assert.equal(ok.cli, s.cli);
+  assert.deepEqual([ok.version, ok.features, ok.node, ok.cli, ok.onPath], ["0.60.0", ["session-attach-detach-key"], process.execPath, s.cli, join(s.fakebin, "oats")]);
 
-  const unset = kernel({ ...s.env, OATS_NODE_BIN: undefined }, launch);
-  assert.equal(unset.ok, false);
-  assert.match(unset.reason, /^OATS_NODE_BIN is not set/);
-  assert.match(kernel({ ...s.env, OATS_CLI_BIN: "" }, launch).reason, /^OATS_CLI_BIN is not set/);
-  assert.equal(kernel({ ...s.env, OATS_CLI_BIN: "kernel/oats.mjs" }, launch).reason, "OATS_CLI_BIN is not absolute: kernel/oats.mjs");
-  const gone = join(s.root, "kernel", "gone.mjs");
-  assert.equal(kernel({ ...s.env, OATS_CLI_BIN: gone }, launch).reason, `OATS_CLI_BIN does not exist: ${gone}`);
+  const none = kernel(sandbox(t, { kernel: "none" }).env, launch, process.execPath);
+  assert.deepEqual([none.ok, none.reason], [false, "`oats` is not on this command's PATH"]);
+  assert.match(none.fix, /npm install -g @awebai\/oats.*@awebai\/oats\/bin\/oats\.mjs/);
 
   const bad = sandbox(t, { kernel: "fail" });
-  const failed = kernel(bad.env, launchEnvironment(bad.env));
+  const failed = kernel(bad.env, launchEnvironment(bad.env), process.execPath);
   assert.equal(failed.ok, false);
-  assert.ok(failed.reason.includes(`failed with the minimal PATH ${MINIMAL_PATH}`), failed.reason);
+  assert.ok(failed.reason.includes(`did not answer as the OATS CLI does, with the minimal PATH ${MINIMAL_PATH}`), failed.reason);
   assert.match(failed.reason, /Cannot find module 'yaml'/);
-
   const session = sandbox(t, { kernel: "fail", session: "/session/bin:/usr/bin:/bin" });
-  assert.match(kernel(session.env, launchEnvironment(session.env)).reason, /failed with the user session's PATH/);
+  assert.match(kernel(session.env, launchEnvironment(session.env), process.execPath).reason, /with the user session's PATH/);
+});
+
+test("kernel: below 0.53.0 is refused with the reason; an instance home's shim is refused", (t) => {
+  const s = sandbox(t);
+  writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.52.9", features: [] }));
+  const old = kernel(s.env, launchEnvironment(s.env), process.execPath);
+  assert.deepEqual([old.ok, old.version, old.reason], [false, "0.52.9", "the OATS CLI is 0.52.9; setup needs 0.53.0 or later (`oats tui --dir`)"]);
+  assert.match(old.fix, /^update the OATS CLI/);
+  writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.53.0", features: [] }));
+  assert.equal(kernel(s.env, launchEnvironment(s.env), process.execPath).ok, true, "0.53.0 itself");
+
+  const h = sandbox(t, { kernel: "home-shim" });
+  const shim = kernel(h.env, launchEnvironment(h.env), process.execPath);
+  assert.equal(shim.ok, false);
+  assert.equal(shim.reason, `\`oats\` on PATH is an instance home's shim, ${h.cli}, which goes when that instance is retired`);
+  assert.match(shim.fix, /npm install -g @awebai\/oats/);
+});
+
+test("kernel: a mise shim on PATH is resolved with `mise which oats`; refused when mise names none", (t) => {
+  const s = sandbox(t, { kernel: "mise" });
+  const ok = kernel(s.env, launchEnvironment(s.env), process.execPath);
+  assert.equal(ok.ok, true, ok.reason);
+  assert.deepEqual([ok.cli, ok.via], [s.cli, "mise which oats"]);
+  const f = sandbox(t, { kernel: "mise-fail" });
+  const failed = kernel(f.env, launchEnvironment(f.env), process.execPath);
+  assert.equal(failed.ok, false);
+  assert.match(failed.reason, /is a mise shim, and `mise which oats` names no CLI: exit 1: mise ERROR oats is not a mise bin$/);
+  assert.match(failed.fix, /@awebai\/oats\/bin\/oats\.mjs/);
 });
 
 test("fuse: ldconfig -p with and without libfuse.so.2", (t) => {
@@ -228,6 +274,27 @@ test("desktop: --desktop overrides an entry and AppImages; refused unless absolu
   assert.equal(desktop(p, { flag: join(s.root, "elsewhere") }).source, null);
 });
 
+test("the Desktop's standard install: the entry is matched by its Exec (no StartupWMClass), and the AppImage alone is found", (t) => {
+  const s = sandbox(t);
+  const p = paths(s.env);
+  const image = join(s.home, ".local/opt/oats-desktop/OATS-Desktop.AppImage");
+  writeExecutable(image, "#!/bin/sh\n");
+  assert.deepEqual(mine(s.root, appImages(p).map((i) => i.path)), [image]);
+  assert.deepEqual(desktop(p), { source: "appimage", appImage: image, others: [] });
+  const file = join(p.applications, "oats-desktop.desktop");
+  write(file, `[Desktop Entry]\nType=Application\nName=OATS Desktop\nExec=${image} %U\nTerminal=false\nCategories=Development;\n`);
+  assert.deepEqual(desktop(p), { source: "entry", entry: file, exec: [image], program: image, appImage: image, extracted: false, others: [] });
+  write(file, `[Desktop Entry]\nType=Application\nName=OATS Desktop\nExec=${image} --appimage-extract-and-run %U\n`);
+  assert.equal(desktop(p).extracted, true);
+});
+
+test("extractAndRun: right after the AppImage, after an env prefix too, never twice", () => {
+  assert.deepEqual(extractAndRun(["/a/OATS.AppImage", "--x"], "/a/OATS.AppImage"), ["/a/OATS.AppImage", "--appimage-extract-and-run", "--x"]);
+  assert.deepEqual(extractAndRun(["env", "A=1", "/a/OATS.AppImage"], "/a/OATS.AppImage"), ["env", "A=1", "/a/OATS.AppImage", "--appimage-extract-and-run"]);
+  assert.deepEqual(extractAndRun(["/a/OATS.AppImage", "--appimage-extract-and-run"], "/a/OATS.AppImage"), ["/a/OATS.AppImage", "--appimage-extract-and-run"]);
+  assert.deepEqual(extractAndRun(["/other"], "/a/OATS.AppImage"), ["/other"]);
+});
+
 test("desktop: none found → a reason and the GET_DESKTOP fix", (t) => {
   const s = sandbox(t);
   const p = paths(s.env);
@@ -235,7 +302,9 @@ test("desktop: none found → a reason and the GET_DESKTOP fix", (t) => {
   const d = desktop(p);
   assert.equal(d.source, null);
   assert.match(d.reason, /^no OATS Desktop found \(no launcher entry with StartupWMClass=awebai-oats-desktop/);
+  assert.match(d.reason, /or an Exec that runs an OATS Desktop AppImage, no AppImage in ~\/\.local\/opt\/oats-desktop \(the standard install, OATS-Desktop\.AppImage\), ~\/Applications, ~\/\.local\/bin, ~\/Downloads or \/opt\)$/);
   assert.equal(d.fix, GET_DESKTOP);
+  assert.match(GET_DESKTOP, /save it as ~\/\.local\/opt\/oats-desktop\/OATS-Desktop\.AppImage, make it executable \(chmod \+x\)/);
 });
 
 test("layout: Lua only, hyprlang only, both (Lua wins), neither", (t) => {
@@ -294,4 +363,18 @@ test("printBindings: runs omarchy with a temporary XDG_CACHE_HOME that is gone a
     assert.equal(existsSync(join(box.home, ".cache")), false);
   }
   assert.equal(existsSync(join(s.home, ".cache")), false);
+});
+
+test("desktop: the chmod fix quotes the path for the shell, a single quote included", (t) => {
+  const s = sandbox(t);
+  const p = paths(s.env);
+  const image = join(s.home, "Applications", "it's mine", "OATS-Desktop.AppImage");
+  write(image, "");
+  chmodSync(image, 0o644);
+  future(image, 2300);
+  const d = desktop(p);
+  assert.equal(d.fix, `chmod +x '${join(s.home, "Applications", "it")}'\\''s mine/OATS-Desktop.AppImage', then run setup again`);
+  const r = spawnSync("bash", ["-c", d.fix.replace(/, then run setup again$/, "")], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(statSync(image).mode & 0o111, 0o111, "the printed command makes that file executable");
 });

@@ -10,9 +10,9 @@ import { join } from "node:path";
 import {
   assertSafePath, desktopExec, desktopExecArg, evalWord, hyprlangValue, luaString,
   parseDesktopExec, shellQuote, shellWord, unescapeDesktopString,
-} from "../oats-package/capabilities/oats-omarchy/lib/quote.mjs";
-import { desktopCommand, tuiCommand, tuiEntry, TUI_ID, DESKTOP_ID } from "../oats-package/capabilities/oats-omarchy/lib/files.mjs";
-import { readDesktopEntry } from "../oats-package/capabilities/oats-omarchy/lib/desktop-entry.mjs";
+} from "../lib/quote.mjs";
+import { desktopCommand, tuiCommand, tuiEntry, TUI_ID, DESKTOP_ID } from "../lib/files.mjs";
+import { readDesktopEntry } from "../lib/desktop-entry.mjs";
 
 const NASTY = [
   "plain", "with space", "dollar$HOME", 'double"quote', "back\\slash", "back`tick`", "hash#tag",
