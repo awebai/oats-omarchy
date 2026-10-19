@@ -60,12 +60,14 @@ export function parseAgents(text, now) {
     if (!d.ok) { view.notes.push(d.name + ": " + (str(d.reason) || "could not be read")); return }
     var rows = (Array.isArray(d.agents) ? d.agents : []).filter(function(a) { return a && str(a.instance) && str(a.home) })
     var names = rows.map(function(a) { return a.instance })
+    var where = whereIn(listed, d, group)
+    var agentsOf = function(o) { return (Array.isArray(o.agents) ? o.agents : []).map(function(a) { return a && a.instance }) }
     rows.forEach(function(a) {
-      // The name, and the deployment's when two in one group share it.
-      var label = names.indexOf(a.instance) !== names.lastIndexOf(a.instance) || sameInGroup(listed, d, group, a.instance) ? a.instance + " (" + d.name + ")" : a.instance
+      // The name, and where it is when another row of the group has it too.
+      var label = names.indexOf(a.instance) !== names.lastIndexOf(a.instance) || sameInGroup(listed, d, group, a.instance, agentsOf) ? a.instance + " (" + where + ")" : a.instance
       var w = view.waitingReported ? a.waitingOnYou : null
       var row = {
-        kind: "agent", group: group, label: label, subtitle: str(a.agent), home: a.home, deployment: d.path, key: "",
+        kind: "agent", group: group, label: label, subtitle: str(a.agent), home: a.home, deployment: d.path, key: "", where: d.name,
         running: a.running === true ? "running" : a.running === false ? "stopped" : "unknown",
         waiting: !!w, message: "", meta: "", since: "", act: true,
       }
@@ -74,17 +76,21 @@ export function parseAgents(text, now) {
         row.message = c.message
         row.meta = c.meta
         row.since = c.since
-        view.waiting.push(withSearch({ kind: "waiting", group: group, label: label, subtitle: row.subtitle, home: a.home, deployment: d.path, key: "", running: row.running, waiting: true, message: c.message, meta: c.meta, since: c.since, act: true }))
+        view.waiting.push(withSearch({ kind: "waiting", group: group, label: label, subtitle: row.subtitle, home: a.home, deployment: d.path, key: "", where: d.name, running: row.running, waiting: true, message: c.message, meta: c.meta, since: c.since, act: true }))
       }
       view.agents.push(withSearch(row))
     })
     if (!Array.isArray(d.souls)) { view.soulNotes.push(d.name + ": " + (str(d.soulsReason) || "its souls could not be read")); return }
+    var soulsOf = function(o) { return (Array.isArray(o.souls) ? o.souls : []).map(function(x) { return x && x.key }) }
     d.souls.forEach(function(s) {
       if (!s || !str(s.key)) return
+      // The key, and where it is offered when another deployment of the
+      // group offers it too: Enter spawns in this row's deployment.
+      var label = sameInGroup(listed, d, group, s.key, soulsOf) ? s.key + " (" + where + ")" : s.key
       var problem = s.problem && str(s.problem.message) ? s.problem.message : ""
       var count = typeof s.instances === "number" ? (s.instances === 1 ? "1 instance" : s.instances + " instances") : ""
       view.souls.push(withSearch({
-        kind: "soul", group: group, label: s.key, subtitle: str(s.description), home: "", deployment: d.path, key: s.key,
+        kind: "soul", group: group, label: label, subtitle: str(s.description), home: "", deployment: d.path, key: s.key, where: d.name,
         running: "", waiting: false, message: s.spawnable ? "" : problem, meta: count, since: "", act: s.spawnable === true,
       }))
     })
@@ -92,18 +98,25 @@ export function parseAgents(text, now) {
   return view
 }
 
-// Whether another deployment of the same group lists an instance of this
-// name (two deployments of one workspace).
-function sameInGroup(listed, d, group, instance) {
+// The group a deployment's rows go in: its workspace, or its name.
+function groupOf(o) { return o.ok && str(o.workspace) ? o.workspace : o.name }
+
+// Whether another deployment of the same group has `value` among
+// `valuesOf(it)` (two deployments of one workspace).
+function sameInGroup(listed, d, group, value, valuesOf) {
   if (!group) return false
-  return listed.some(function(o) {
-    return o !== d && o.ok && (str(o.workspace) ? o.workspace : o.name) === group
-      && Array.isArray(o.agents) && o.agents.some(function(a) { return a && a.instance === instance })
-  })
+  return listed.some(function(o) { return o !== d && o.ok && groupOf(o) === group && valuesOf(o).indexOf(value) >= 0 })
+}
+
+// What tells a deployment apart in its group: its name, or its path when
+// another deployment of the group has the same name.
+function whereIn(listed, d, group) {
+  var twin = !!group && listed.some(function(o) { return o !== d && o.ok && groupOf(o) === group && o.name === d.name })
+  return twin ? d.path : d.name
 }
 
 function withSearch(row) {
-  row.search = [row.label, row.subtitle, row.group, row.message, row.meta, row.key].join(" ").toLowerCase()
+  row.search = [row.label, row.subtitle, row.group, row.message, row.meta, row.key, row.where].join(" ").toLowerCase()
   return row
 }
 

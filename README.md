@@ -211,7 +211,9 @@ omarchy plugin add https://github.com/awebai/oats-omarchy --enable
     starts nothing), then runs `oats spawn` in a floating terminal, in the
     deployment that soul was listed from, and opens the new agent's
     session. If the spawn fails, the terminal stays open on the kernel's
-    error.
+    error; if no terminal opens, nothing runs and a notification says so.
+    When two deployments of one workspace offer the same soul, or have an
+    agent of the same name, the row names the deployment it is in.
   - It reads only when it opens (each `oats status --json` and
     `oats souls --json` within 25 seconds, all of them within 110), and
     says so while it reads. A deployment that could not be read is shown as

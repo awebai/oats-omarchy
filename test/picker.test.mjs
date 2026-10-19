@@ -17,7 +17,7 @@ const dep = (path, name, workspace, agents, souls = []) => ({ path, name, worksp
 test("one deployment: the three sections, ungrouped; a waiting agent is a card and an agent row; a soul counts its instances", () => {
   const view = P.parseAgents(answer([dep("/d", "d", "w", [inst("a", { waitingOnYou: W }), inst("b", { running: false }), inst("c", { running: null })], [soul("writer", { instances: 1 }), soul("reviewer", { instances: 3 })])]), NOW);
   assert.equal(view.known, true);
-  assert.deepEqual(view.waiting.map(({ search: _, ...r }) => r), [{ kind: "waiting", group: "", label: "a", subtitle: "writer", home: "/h/a", deployment: "/d", key: "", running: "running", waiting: true, message: "needs a decision", meta: "attention · agent · 2 min", since: W.since, act: true }]);
+  assert.deepEqual(view.waiting.map(({ search: _, ...r }) => r), [{ kind: "waiting", group: "", label: "a", subtitle: "writer", home: "/h/a", deployment: "/d", key: "", where: "d", running: "running", waiting: true, message: "needs a decision", meta: "attention · agent · 2 min", since: W.since, act: true }]);
   assert.deepEqual(view.agents.map((r) => [r.label, r.running, r.waiting, r.message]), [["a", "running", true, "needs a decision"], ["b", "stopped", false, ""], ["c", "unknown", false, ""]]);
   assert.deepEqual(view.souls.map((r) => [r.label, r.subtitle, r.meta, r.act, r.deployment]), [["writer", "writer does things", "1 instance", true, "/d"], ["reviewer", "reviewer does things", "3 instances", true, "/d"]]);
   assert.equal(P.defaultSection(view), "waiting");
@@ -40,6 +40,32 @@ test("several deployments: grouped by workspace; a name two deployments share sa
   assert.deepEqual(P.notes(view, "souls"), ["bad: oats-lock.json is unreadable", "two: its souls could not be read"]);
   assert.deepEqual(view.souls.map((r) => [r.group, r.label, r.deployment]), [["github.com/acme/agents", "writer", "/p/one"]]);
   assert.equal(P.defaultSection(view), "agents", "nobody said they wait: the agents");
+});
+
+test("two deployments of one workspace offering the same soul: each row says where it spawns, by name, or by path when the names match too", () => {
+  const writer = () => [soul("writer", { description: "Writes." })];
+  const view = P.parseAgents(answer([
+    dep("/deploy/dev", "dev", "acme/team", [inst("w-1")], writer()),
+    dep("/deploy/prod", "prod", "acme/team", [inst("w-1")], writer().concat([soul("only-prod")])),
+  ]), NOW);
+  assert.deepEqual(view.souls.map((r) => [r.group, r.label, r.key, r.deployment]), [
+    ["acme/team", "writer (dev)", "writer", "/deploy/dev"],
+    ["acme/team", "writer (prod)", "writer", "/deploy/prod"],
+    ["acme/team", "only-prod", "only-prod", "/deploy/prod"],
+  ]);
+  assert.deepEqual(view.agents.map((r) => r.label), ["w-1 (dev)", "w-1 (prod)"]);
+  assert.deepEqual(P.filterRows(view, "souls", "writer prod").map((r) => r.deployment), ["/deploy/prod"], "the deployment's name is searched");
+
+  const twins = P.parseAgents(answer([
+    dep("/a/oats", "oats", "acme/team", [inst("x")], writer()),
+    dep("/b/oats", "oats", "acme/team", [inst("x")], writer()),
+  ]), NOW);
+  assert.deepEqual(twins.souls.map((r) => [r.label, r.deployment]), [["writer (/a/oats)", "/a/oats"], ["writer (/b/oats)", "/b/oats"]]);
+  assert.deepEqual(twins.agents.map((r) => r.label), ["x (/a/oats)", "x (/b/oats)"]);
+
+  // In different workspaces the group already tells them apart.
+  const apart = P.parseAgents(answer([dep("/1", "one", "w1", [], writer()), dep("/2", "two", "w2", [], writer())]), NOW);
+  assert.deepEqual(apart.souls.map((r) => [r.group, r.label]), [["w1", "writer"], ["w2", "writer"]]);
 });
 
 test("never \"nobody is waiting\": the empty Waiting section says no agent has said so, or that the CLI does not report it", () => {

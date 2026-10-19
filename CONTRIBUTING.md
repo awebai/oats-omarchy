@@ -306,6 +306,12 @@ null), and the souls answer must be `soulsApi: 1`, or that deployment's
 souls are unknown on their own. A deployment whose roster cannot be read is
 `ok: false` with its reason, and the rest are listed.
 
+In the picker, rows are grouped by workspace when more than one deployment
+is listed. When two deployments of one workspace both have an instance name
+or a soul, each such row's label names its deployment (by name, or by path
+when their names match too), and every row is found by its deployment's
+name: Enter spawns in, or attaches from, the row's own deployment.
+
 `bin/spawn.mjs` (`lib/spawn.mjs`) starts an agent from a soul in two steps,
 so the task never passes through a shell:
 
@@ -316,10 +322,17 @@ so the task never passes through a shell:
    file of mode 0600 in a directory of mode 0700 of its own (under the
    system's temporary directory, named `oats-omarchy-task-*`), and the
    floating terminal runs step 2 with a line naming that file, never the
-   task.
+   task. Step 1 keeps the file until step 2 has claimed it: the launcher
+   hands off on its own (`setsid`, `uwsm-app`), so its exit proves nothing.
+   When the launcher fails, or nothing claims the file within 60 s
+   (`HANDOFF_MS`), step 1 withdraws the file, removes it and says so in a
+   notification.
 2. `spawn --run --dir <deployment> --task-file <file> <soul>`, in the
-   terminal: the kernel's `oats spawn <soul> --dir <deployment> --task-file
-   <file> --json`, as argv, in that deployment, with no other flag (the
+   terminal: first claims the file by renaming it to `claimed` (step 1
+   withdraws it by renaming it too, so exactly one of them has it, and a
+   terminal that starts after a withdrawal runs nothing), then runs the
+   kernel's `oats spawn <soul> --dir <deployment> --task-file <claimed
+   file> --json`, as argv, in that deployment, with no other flag (the
    relation is top-level, and the deployment's own resolution picks the
    harness). Its progress shows as it runs, and it is not retried. A
    refusal prints the kernel's code and message (and `details.unconfirmed`
@@ -327,7 +340,8 @@ so the task never passes through a shell:
    Otherwise it attaches to the instance by the home the spawn answered,
    never by "the newest instance".
 
-The task file goes on every path: once the spawn answers, in a `finally`,
+The task file goes on every path: withdrawn by step 1 when no terminal
+claims it, and in step 2 once the spawn answers, in a `finally`,
 on exit, and on SIGTERM, SIGINT or SIGHUP (then 128 + the signal). The
 kernel runs in step 2's process group, so a signal the terminal sends
 reaches it too, and a SIGTERM sent to step 2 alone is passed on. If step 2 is killed outright, the terminal's line removes

@@ -8,8 +8,8 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { parseArgs, spawnAnswer, spawnSoul, TASK_FILE, TASK_PREFIX, taskDir, terminalLine } from "../lib/spawn.mjs";
+import { basename, dirname, join } from "node:path";
+import { CLAIMED_FILE, parseArgs, spawnAnswer, spawnSoul, TASK_FILE, TASK_PREFIX, taskDir, terminalLine } from "../lib/spawn.mjs";
 import { BIN, sandbox, writeExecutable } from "./helpers/sandbox.mjs";
 
 const HOSTILE = `'; rm -rf "$HOME" #\n$(touch pwned) \`touch pwned\` "quoted" \\ back`;
@@ -33,9 +33,9 @@ function box(t, options) {
 }
 
 // The ask step in this process, as the picker runs it.
-async function ask(s, args, extra = {}) {
+async function ask(s, args, extra = {}, { handoffMs } = {}) {
   let stderr = "";
-  const status = await spawnSoul(args, { ...s.env, ...extra }, { write: (x) => { stderr += x; } }, { out: { write() {} } });
+  const status = await spawnSoul(args, { ...s.env, ...extra }, { write: (x) => { stderr += x; } }, { out: { write() {} }, handoffMs });
   return { status, stderr };
 }
 
@@ -80,11 +80,13 @@ test("the task reaches the kernel as text, by a 0600 file: --dir is the soul's d
   assert.deepEqual(r, { status: 0, stderr: "" });
   const [spawned] = waitFor(() => jsonLines(s, "spawn.log").length && jsonLines(s, "spawn.log")) || [];
   assert.ok(spawned, "the kernel's spawn ran");
-  const file = spawned.argv[5];
-  assert.deepEqual(spawned.argv, ["spawn", "pkg/writer", "--dir", s.deployment, "--task-file", file, "--json"]);
+  const claimed = spawned.argv[5];
+  assert.deepEqual(spawned.argv, ["spawn", "pkg/writer", "--dir", s.deployment, "--task-file", claimed, "--json"]);
   assert.equal(spawned.cwd, s.deployment);
   assert.equal(spawned.task, HOSTILE, "as typed, byte for byte");
   assert.equal(spawned.mode, 0o600);
+  assert.equal(basename(claimed), CLAIMED_FILE, "the file the terminal claimed");
+  const file = join(dirname(claimed), TASK_FILE);
   assert.notEqual(taskDir(file), null);
 
   const [attached] = waitFor(() => attaches(s).length && attaches(s)) || [];
@@ -99,10 +101,10 @@ test("the task reaches the kernel as text, by a 0600 file: --dir is the soul's d
   assert.deepEqual(calls(s, "notify.log"), []);
 });
 
-test("the file is 0600 in a 0700 directory of its own, and the terminal's line removes the directory after the run, whatever happened", async (t) => {
+test("the file is 0600 in a 0700 directory of its own, kept until the terminal claims it; the terminal's line removes the directory after the run, whatever happened", async (t) => {
   const s = box(t);
-  const r = await ask(s, ["--dir", s.deployment, "writer"], { FAKE_INPUT: "do it" });
-  assert.equal(r.status, 0);
+  // The stand-in terminal only logs its line: this test runs it.
+  const pending = ask(s, ["--dir", s.deployment, "writer"], { FAKE_INPUT: "do it" }, { handoffMs: 30_000 });
   const line = waitFor(() => { try { return readFileSync(join(s.root, "floating.log"), "utf8").trim(); } catch { return null; } });
   const file = /'--task-file' '([^']+)'/.exec(line)[1];
   assert.equal(readFileSync(file, "utf8"), "do it");
@@ -113,7 +115,32 @@ test("the file is 0600 in a 0700 directory of its own, and the terminal's line r
   writeFileSync(join(s.root, "spawn.status"), "1");
   const ran = spawnSync("bash", ["-c", line], { env: s.env, encoding: "utf8" });
   assert.match(ran.stdout, /oats spawn failed: E_SOUL_UNKNOWN: no soul writer/);
+  assert.equal(jsonLines(s, "spawn.log")[0].argv[5], join(taskDir(file), CLAIMED_FILE), "the kernel reads the claimed file");
   assert.equal(existsSync(taskDir(file)), false);
+  assert.deepEqual(await pending, { status: 0, stderr: "" }, "the picker's step ends once the terminal has the task");
+  assert.deepEqual(calls(s, "notify.log"), []);
+});
+
+test("a terminal launcher that fails, or starts no terminal in time: the task is withdrawn and removed, nothing runs, and a notification says why", async (t) => {
+  const s = box(t);
+  const launcher = join(s.fakebin, "omarchy-launch-floating-terminal-with-presentation");
+  const before = taskDirs();
+  writeExecutable(launcher, "#!/bin/sh\nexit 1\n");
+  assert.equal((await ask(s, ["--dir", s.deployment, "writer"], { FAKE_INPUT: "secret task" }, { handoffMs: 10_000 })).status, 1);
+  // Exits at once, as setsid and uwsm-app do, and never runs the line.
+  writeExecutable(launcher, `#!/bin/sh\nprintf '%s\\n' "$*" > '${join(s.root, "line")}'\nexit 0\n`);
+  assert.equal((await ask(s, ["--dir", s.deployment, "writer"], { FAKE_INPUT: "secret task" }, { handoffMs: 800 })).status, 1);
+  assert.deepEqual(calls(s, "notify.log"), [
+    ["OATS: no agent started", "omarchy-launch-floating-terminal-with-presentation failed (exit 1)"],
+    ["OATS: no agent started", "omarchy-launch-floating-terminal-with-presentation started no terminal within 1 s"],
+  ]);
+  assert.deepEqual(taskDirs(), before, "no task file is left");
+  assert.deepEqual(jsonLines(s, "spawn.log"), []);
+
+  // A terminal that starts after that runs nothing: the task was withdrawn.
+  const late = spawnSync("bash", ["-c", readFileSync(join(s.root, "line"), "utf8").trim()], { env: s.env, encoding: "utf8" });
+  assert.match(late.stdout, /the task was withdrawn: .* nothing was run/);
+  assert.deepEqual(jsonLines(s, "spawn.log"), []);
 });
 
 test("a refusal shows the kernel's code and message, runs no attach and is not retried; the file is gone", (t) => {
