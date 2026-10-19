@@ -7,20 +7,21 @@ import qs.Commons
 import qs.Ui
 import "widget.mjs" as Widget
 
-// The OATS icon in the bar, with the number of agents waiting on you beside
-// it, and a panel: those agents (a click opens the session), the TUI, the
-// Desktop, and setup. Everything it runs or reads is built by widget.mjs from
-// setup's plugin.json; this file only displays it, runs commands through the
+// The OATS icon in the bar, and a panel: the agents waiting on you (a click
+// opens the session), the TUI, the Desktop, and setup. Everything it runs or
+// reads is built by widget.mjs from setup's plugin.json; this file only displays it, runs commands through the
 // bar, and writes nothing. Without plugin.json, setup has not run: a click
 // on the icon runs the whole setup in a floating terminal instead
 // (widget.mjs clickAction), and the tooltip says so.
 //
-// The count is `waiting --json` (bin/waiting.mjs), read on a timer and when
-// the panel opens, after plugin.json is read again. One widget reads for
-// every bar (the first the bar lists) and hands the result to the others. A
-// read never overlaps another (widget.mjs's read state), and one that has not
-// answered by READ_TIMEOUT_MS, or whose program could not start, is stopped
-// and shows "?". Stopping waiting stops the kernel's read with it.
+// The rows are `waiting --json` (bin/waiting.mjs), read only when the panel
+// opens, after plugin.json is read again: nothing is read in the background,
+// and the icon shows no count. The panel says it is reading until the read
+// answers. One widget reads for every bar (the first the bar lists) and hands
+// the result to the others. A read never overlaps another (widget.mjs's read
+// state), and one that has not answered by READ_TIMEOUT_MS, or whose program
+// could not start, is stopped and shows why in the panel. Stopping waiting
+// stops the kernel's read with it.
 Panel {
   id: root
   moduleName: "ai.aweb.oats"
@@ -31,13 +32,14 @@ Panel {
   readonly property string setupPath: Widget.urlPath(Qt.resolvedUrl("setup"))
   readonly property string pluginPath: Widget.pluginFilePath(Quickshell.env("HOME"), Quickshell.env("XDG_STATE_HOME"))
 
-  // setup's commands, or null; the last read, or null before the first.
+  // setup's commands, or null; this opening's read, or null until it
+  // answers; and whether it is being read.
   property var plugin: null
   property var waiting: null
-  readonly property string badge: Widget.badge(waiting)
+  property bool reading: false
   readonly property var rows: waiting && waiting.known ? waiting.rows : []
   readonly property bool failed: !!waiting && !waiting.known
-  // The count read: its state, the read the process runs, and whether a
+  // The read: its state, the read the process runs, and whether a
   // read waits for plugin.json to be read first.
   property var readState: Widget.newReadState()
   property int readAttempt: 0
@@ -64,8 +66,10 @@ Panel {
     }
   }
 
-  // Read plugin.json again, then the count: here, or by the reader.
+  // Read plugin.json again, then the rows, fresh: here, or by the reader.
   function refresh() {
+    root.waiting = null
+    root.reading = true
     var all = root.peers()
     if (Widget.isReader(all, root)) root.readAfterLoad = true
     else if (typeof all[0].refresh === "function") all[0].refresh()
@@ -87,10 +91,13 @@ Panel {
     var all = root.peers()
     for (var i = 0; i < all.length; i++)
       if (all[i] && all[i] !== root && typeof all[i].receive === "function") all[i].receive(result)
-    root.waiting = result
+    root.receive(result)
   }
 
-  function receive(result) { root.waiting = result }
+  function receive(result) {
+    root.waiting = result
+    root.reading = false
+  }
 
   onOpenedChanged: if (opened) {
     root.refresh()
@@ -140,14 +147,6 @@ Panel {
     }
   }
 
-  Timer {
-    interval: Widget.refreshMs(root.setting("refreshIntervalSec", 60))
-    running: true
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: if (Widget.isReader(root.peers(), root)) root.refresh()
-  }
-
   Row {
     id: bar_
     spacing: 0
@@ -183,17 +182,6 @@ Panel {
         else root.runLine(action.line)
       }
     }
-
-    Text {
-      visible: root.badge !== ""
-      anchors.verticalCenter: button.verticalCenter
-      rightPadding: Style.spacing.sm
-      text: root.badge
-      textFormat: Text.PlainText
-      color: root.foreground
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.bodySmall
-    }
   }
 
   KeyboardPanel {
@@ -226,10 +214,20 @@ Panel {
         width: parent.width
         spacing: Style.space(8)
 
-        // The kernel's own words when the read failed.
+        // That the rows are being read; the kernel's own words when the
+        // read failed.
         Column {
           id: above
           width: parent.width
+          Text {
+            visible: root.reading
+            width: parent.width
+            text: "Reading who is waiting on you\u2026"
+            textFormat: Text.PlainText
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
           Text {
             visible: root.failed
             width: parent.width
@@ -294,7 +292,7 @@ Panel {
           }
 
           PanelSeparator {
-            visible: root.rows.length > 0 || root.failed
+            visible: root.rows.length > 0 || root.failed || root.reading
             foreground: root.foreground
           }
 

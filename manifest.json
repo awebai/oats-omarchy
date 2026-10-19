@@ -5,7 +5,7 @@
   "version": "0.2.0",
   "author": "OATS Framework",
   "license": "MIT",
-  "description": "OATS on Omarchy: an OATS icon in the bar with the agents waiting on you and a panel to open them, the TUI and the Desktop, and a setup script for launchers, keys and an oats menu.",
+  "description": "OATS on Omarchy: an OATS icon in the bar whose panel lists the agents waiting on you, read when you open it, and opens their sessions, the TUI and the Desktop; and a setup script for launchers, keys and an oats menu.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,25 +14,11 @@
   },
   "barWidget": {
     "displayName": "OATS",
-    "description": "The number of agents waiting on you, and a panel that opens their sessions, the OATS TUI and Desktop, and setup.",
+    "description": "A panel, read fresh each time it opens, that lists the agents waiting on you and opens their sessions, the OATS TUI and Desktop, and setup.",
     "category": "AI",
     "aliases": [
       "oats"
     ],
-    "allowMultiple": false,
-    "defaults": {
-      "refreshIntervalSec": 60
-    },
-    "schema": [
-      {
-        "key": "refreshIntervalSec",
-        "type": "integer",
-        "label": "Refresh interval (seconds)",
-        "min": 15,
-        "max": 3600,
-        "step": 15,
-        "defaultValue": 60
-      }
-    ]
+    "allowMultiple": false
   }
 }

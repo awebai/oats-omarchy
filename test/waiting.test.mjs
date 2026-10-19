@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { attachCommand, attachPrefix, DETACH_KEY, waiting, waitingRows } from "../lib/waiting.mjs";
 import { BIN, sandbox, writeExecutable } from "./helpers/sandbox.mjs";
-import { badge, parseWaiting } from "../widget.mjs";
+import { parseWaiting } from "../widget.mjs";
 
 const row = (instance, home, waitingOnYou = null) => ({ agent: "a", instance, home, running: true, waitingOnYou });
 const W = { since: "2026-10-16T11:57:35.651Z", producer: "agent", reason: "attention", message: "needs a decision" };
@@ -205,15 +205,15 @@ test("--json: the count and the rows waiting on you, nothing opened, nothing not
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.result, { ok: true, count: 2, rows: [{ instance: "alpha", home: a }, { instance: "with space", home: b }] });
   assert.equal(r.stdout.split("\n").length, 2, "one line");
-  assert.equal(badge(parseWaiting(r.stdout)), "2", "what the bar widget shows");
+  assert.deepEqual(parseWaiting(r.stdout).rows.map((x) => x.instance), ["alpha", "with space"], "what the panel shows");
   assert.equal(r.stderr, "");
   assert.deepEqual([calls(s, "select.log"), calls(s, "notify.log")], [[], []]);
 
-  // No row claims to wait: a count of 0, which the widget shows as no badge.
+  // No row claims to wait: a count of 0, and the panel lists no one.
   withStatus(s, [{ name: "x", instances: [row("idle", "/h/idle")] }]);
   const none = await json(s);
   assert.deepEqual(none.result, { ok: true, count: 0, rows: [] });
-  assert.equal(badge(parseWaiting(none.stdout)), "", "no badge, no claim");
+  assert.deepEqual(parseWaiting(none.stdout).rows, [], "no rows, no claim");
 });
 
 test("--json: a failed read is {ok: false, reason} with the kernel's first line, bounded; exit 1; nothing notified", async (t) => {
@@ -225,7 +225,7 @@ test("--json: a failed read is {ok: false, reason} with the kernel's first line,
   assert.equal(r.result.ok, false);
   assert.equal(r.result.reason.length, 200);
   assert.ok(!r.result.reason.includes("second line"));
-  assert.equal(badge(parseWaiting(r.stdout)), "?");
+  assert.equal(parseWaiting(r.stdout).known, false);
   assert.deepEqual(calls(s, "notify.log"), []);
 
   writeFileSync(join(s.root, "status.mode"), "stderr");
@@ -243,7 +243,7 @@ test("--json: a kernel that never answers is stopped at the timeout, with every 
   const r = await json(s, [], { statusTimeoutMs: 1000 });
   assert.equal(r.status, 1);
   assert.match(r.result.reason, /timed out after 1000 ms/);
-  assert.equal(badge(parseWaiting(r.stdout)), "?");
+  assert.equal(parseWaiting(r.stdout).known, false);
   const [kernel, child] = pidsOf(s);
   assert.ok(gone(kernel), "the kernel is gone");
   assert.ok(gone(child), "and its child");

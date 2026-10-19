@@ -1,6 +1,6 @@
 // Everything the bar widget builds or reads, kept apart from the QML so a
 // node test can run it: the command lines it hands to the bar's `run` (which
-// runs `bash -lc <line>`), the argv of its count read, and the reading of
+// runs `bash -lc <line>`), the argv of its read, and the reading of
 // setup's plugin.json and of `waiting --json`. The QML only displays what
 // these return.
 //
@@ -52,7 +52,7 @@ export function parsePlugin(text) {
   return { deployment: p.deployment, tui: p.tui, desktop: p.desktop, waiting: p.waiting, attach: p.attach, setup: p.setup }
 }
 
-// The count read: `waiting --json`, run as argv (no shell).
+// The read when the panel opens: `waiting --json`, run as argv (no shell).
 export function readArgv(plugin) {
   return plugin.waiting.concat(["--json"])
 }
@@ -74,19 +74,12 @@ export function parseWaiting(text) {
   return { known: false, reason: r && typeof r.reason === "string" ? r.reason : "waiting --json printed no result" }
 }
 
-// Beside the icon: the count when some row waits on you, "?" when the read
-// failed, else nothing (never a claim that nobody is waiting).
-export function badge(result) {
-  if (!result) return ""
-  if (!result.known) return "?"
-  return result.count > 0 ? String(result.count) : ""
-}
-
-// The count read's state, one per reader. A read is pending from the moment
+// The read's state, one per reader. A read is pending from the moment
 // it is asked for until its output is parsed or its deadline passes, whether
 // or not its process ever started: Quickshell reports nothing for a program
 // that cannot start, so only the deadline settles that read. While one is
-// pending no other starts, and a refresh does not move its deadline.
+// pending no other starts, and opening the panel again does not move its
+// deadline.
 export function newReadState() {
   return { pending: false, attempt: 0 }
 }
@@ -113,13 +106,6 @@ export function expireRead(state, attempt) {
   if (!state.pending || attempt !== state.attempt) return null
   state.pending = false
   return { known: false, reason: READ_TIMEOUT_REASON }
-}
-
-// The refresh interval from the widget's setting, in ms: 15 s to an hour.
-export function refreshMs(seconds) {
-  var s = Number(seconds)
-  if (!(s > 0)) s = 60
-  return Math.round(Math.min(3600, Math.max(15, s)) * 1000)
 }
 
 // One reader for all the widget's bars: the first of the peers the bar

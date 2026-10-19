@@ -15,7 +15,7 @@ import * as W from "../widget.mjs";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const HOSTILE = "it's a $(touch pwned) `x` dir";
 
-test("manifest: a bar widget whose id and entry point Omarchy's validator accepts, with the refresh setting", () => {
+test("manifest: a bar widget whose id and entry point Omarchy's validator accepts, with no refresh setting", () => {
   const m = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
   assert.equal(m.schemaVersion, 1);
   for (const field of ["id", "name", "version", "kinds", "entryPoints"]) assert.ok(m[field], field);
@@ -23,9 +23,13 @@ test("manifest: a bar widget whose id and entry point Omarchy's validator accept
   assert.ok(!m.id.startsWith("omarchy.") && !m.id.includes(".."));
   assert.deepEqual(m.kinds, ["bar-widget"]);
   assert.ok(existsSync(join(root, m.entryPoints.barWidget)), m.entryPoints.barWidget);
-  assert.deepEqual(m.barWidget.defaults, { refreshIntervalSec: 60 });
-  assert.deepEqual(m.barWidget.schema, [{ key: "refreshIntervalSec", type: "integer", label: "Refresh interval (seconds)", min: 15, max: 3600, step: 15, defaultValue: 60 }]);
+  assert.equal(m.barWidget.defaults, undefined, "nothing is read in the background, so there is no interval");
+  assert.equal(m.barWidget.schema, undefined);
   const qml = readFileSync(join(root, m.entryPoints.barWidget), "utf8");
+  // Nothing on a timer but the read's own deadline, and no count beside the icon.
+  assert.equal((qml.match(/\bTimer \{/g) || []).length, 1);
+  assert.match(qml, /Timer \{\s*id: readTimeout/);
+  assert.doesNotMatch(qml, /refreshIntervalSec|badge|triggeredOnStart/);
   assert.match(qml, /moduleName: "ai\.aweb\.oats"/);
   assert.match(qml, /import "widget\.mjs" as Widget/);
   // It runs commands only through the bar and its one reader, and writes nothing.
@@ -52,39 +56,35 @@ test("plugin.json: its path as setup finds it, and only what setup writes is rea
   assert.deepEqual(W.readArgv(good), ["n", "w", "--json"]);
 });
 
-test("the count: the number when some row waits on you, ? only when the read failed, else nothing", () => {
+test("the read: the rows waiting on you, or why it failed", () => {
   const rows = [{ instance: "a", home: "/h/a" }, { instance: "b", home: "/h/b" }];
   const two = W.parseWaiting(JSON.stringify({ ok: true, count: 2, rows }));
   assert.deepEqual(two, { known: true, count: 2, rows });
-  assert.equal(W.badge(two), "2");
-  assert.equal(W.badge(W.parseWaiting(JSON.stringify({ ok: true, count: 0, rows: [] }))), "");
+  assert.deepEqual(W.parseWaiting(JSON.stringify({ ok: true, count: 0, rows: [] })), { known: true, count: 0, rows: [] });
   const failed = W.parseWaiting(JSON.stringify({ ok: false, reason: "oats-lock.json is unreadable" }));
   assert.deepEqual(failed, { known: false, reason: "oats-lock.json is unreadable" });
-  assert.equal(W.badge(failed), "?");
-  assert.equal(W.badge(W.parseWaiting("")), "?", "no output: the read failed");
-  assert.equal(W.badge(W.parseWaiting("{\"ok\":tr")), "?", "a read cut short");
-  assert.equal(W.badge(null), "", "not read yet");
+  assert.deepEqual(W.parseWaiting(""), { known: false, reason: "waiting --json printed no result" }, "no output: the read failed");
+  assert.equal(W.parseWaiting("{\"ok\":tr").known, false, "a read cut short");
   assert.equal(W.READ_TIMEOUT_MS, 30000);
 });
 
-test("the read state: one read at a time; a refresh does not move the deadline; only the deadline settles a read that never started", () => {
+test("the read state: one read at a time; opening the panel again does not move the deadline; only the deadline settles a read that never started", () => {
   const state = W.newReadState();
-  // At the shortest interval: a read at 0 s whose program never starts (no output ever).
+  // A read whose program never starts (no output ever).
   const first = W.beginRead(state);
   assert.equal(first, 1);
-  assert.equal(W.beginRead(state), 0, "the refresh at 15 s starts nothing");
-  assert.deepEqual(W.expireRead(state, first), { known: false, reason: W.READ_TIMEOUT_REASON }, "the deadline at 30 s settles it: ?");
-  assert.equal(W.badge(W.expireRead(state, first) || { known: false }), "?");
+  assert.equal(W.beginRead(state), 0, "opening the panel again starts nothing");
+  assert.deepEqual(W.expireRead(state, first), { known: false, reason: W.READ_TIMEOUT_REASON }, "the deadline at 30 s settles it");
+  assert.equal(W.expireRead(state, first), null, "once");
   const second = W.beginRead(state);
-  assert.equal(second, 2, "the next refresh reads again");
+  assert.equal(second, 2, "the next opening reads again");
   assert.equal(W.finishRead(state, first, '{"ok":true,"count":1,"rows":[]}'), null, "output of a read stopped at its deadline is ignored");
   assert.deepEqual(W.finishRead(state, second, '{"ok":true,"count":0,"rows":[]}'), { known: true, count: 0, rows: [] });
   assert.equal(W.expireRead(state, second), null, "a finished read has no deadline left");
   assert.equal(W.finishRead(state, second, "{}"), null, "nor a second result");
 });
 
-test("the refresh interval and the one reader for every bar", () => {
-  assert.deepEqual([W.refreshMs(undefined), W.refreshMs(60), W.refreshMs(5), W.refreshMs(99999), W.refreshMs("120")], [60000, 60000, 15000, 3600000, 120000]);
+test("the one reader for every bar", () => {
   const a = {}, b = {};
   assert.equal(W.isReader([a, b], a), true);
   assert.equal(W.isReader([a, b], b), false);
