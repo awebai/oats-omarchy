@@ -251,3 +251,30 @@ test("after setup, a left click toggles the panel and a right click opens the TU
     ["run", "exec 'omarchy-launch-or-focus-tui' 'tui'"], ["right", { opened: false }],
   ]);
 });
+
+test("with the list, the panel groups the rows by workspace and shows a deployment that could not be read", { skip }, (t) => {
+  const w = world(t);
+  const result = {
+    ok: true, count: 2,
+    rows: [{ instance: "alpha", home: "/h/a", deployment: "/d/one", workspace: "github.com/acme/one" }, { instance: "beta", home: "/h/b", deployment: "/d/two", workspace: "github.com/acme/two" }],
+    deployments: [
+      { path: "/d/one", name: "one", workspace: "github.com/acme/one", ok: true, at: 1 },
+      { path: "/d/two", name: "two", workspace: "github.com/acme/two", ok: true, at: 1 },
+      { path: "/d/three", name: "three", workspace: null, ok: false, reason: "oats-lock.json is unreadable", at: 1 },
+    ],
+  };
+  const read = w.exe("list.sh", `#!/bin/sh\ncat <<'E'\n${JSON.stringify(result)}\nE\n`);
+  w.plugin({ deployment: null, waiting: ["/bin/sh", read, "--list"] });
+  const [report] = w.play(scene(`
+  Timer { interval: 500; running: true; onTriggered: scene.w.open() }
+  Timer { interval: 3000; running: true; onTriggered: {
+    var texts = []
+    var items = scene.all(scene.w, [])
+    for (var i = 0; i < items.length; i++) if (typeof items[i].text === "string" && items[i].text !== "" && items[i].visible) texts.push(items[i].text)
+    scene.probe("texts", texts)
+  } }`, 4));
+  const texts = report.value;
+  for (const text of ["github.com/acme/one", "alpha", "github.com/acme/two", "beta", "three", "three: oats-lock.json is unreadable"]) assert.ok(texts.includes(text), `${text} in ${JSON.stringify(texts)}`);
+  assert.ok(texts.indexOf("github.com/acme/one") < texts.indexOf("alpha") && texts.indexOf("alpha") < texts.indexOf("github.com/acme/two"), "each title above its rows");
+  assert.ok(!texts.some((x) => /^Reading/.test(x)), "the read answered");
+});

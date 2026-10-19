@@ -285,5 +285,5 @@ test("arguments: --dir, else the working directory; anything else exits 2; --hel
   assert.equal(fromCwd.status, 0, fromCwd.stderr);
   const help = s.run(["waiting", "--help"]);
   assert.equal(help.status, 0);
-  assert.match(help.stdout, /^usage: waiting \[--dir <deployment>\] \[--json\]/);
+  assert.match(help.stdout, /^usage: waiting \[--dir <deployment> \| --list\] \[--json\]/);
 });
