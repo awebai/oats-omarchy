@@ -59,8 +59,9 @@ test("plugin.json: its path as setup finds it, and only what setup writes is rea
 test("the read: the rows waiting on you, or why it failed", () => {
   const rows = [{ instance: "a", home: "/h/a" }, { instance: "b", home: "/h/b" }];
   const two = W.parseWaiting(JSON.stringify({ ok: true, count: 2, rows }));
-  assert.deepEqual(two, { known: true, count: 2, rows });
-  assert.deepEqual(W.parseWaiting(JSON.stringify({ ok: true, count: 0, rows: [] })), { known: true, count: 0, rows: [] });
+  const groups = [{ title: "", rows: rows.map((r) => ({ ...r, label: r.instance })), unknown: [] }];
+  assert.deepEqual(two, { known: true, count: 2, rows, groups, note: "" });
+  assert.deepEqual(W.parseWaiting(JSON.stringify({ ok: true, count: 0, rows: [] })), { known: true, count: 0, rows: [], groups: [], note: "" });
   const failed = W.parseWaiting(JSON.stringify({ ok: false, reason: "oats-lock.json is unreadable" }));
   assert.deepEqual(failed, { known: false, reason: "oats-lock.json is unreadable" });
   assert.deepEqual(W.parseWaiting(""), { known: false, reason: "waiting --json printed no result" }, "no output: the read failed");
@@ -79,7 +80,7 @@ test("the read state: one read at a time; opening the panel again does not move 
   const second = W.beginRead(state);
   assert.equal(second, 2, "the next opening reads again");
   assert.equal(W.finishRead(state, first, '{"ok":true,"count":1,"rows":[]}'), null, "output of a read stopped at its deadline is ignored");
-  assert.deepEqual(W.finishRead(state, second, '{"ok":true,"count":0,"rows":[]}'), { known: true, count: 0, rows: [] });
+  assert.deepEqual(W.finishRead(state, second, '{"ok":true,"count":0,"rows":[]}'), { known: true, count: 0, rows: [], groups: [], note: "" });
   assert.equal(W.expireRead(state, second), null, "a finished read has no deadline left");
   assert.equal(W.finishRead(state, second, "{}"), null, "nor a second result");
 });

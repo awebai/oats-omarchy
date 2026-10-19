@@ -41,11 +41,12 @@ function isArgv(value) {
 }
 
 // plugin.json's text → its commands, or null when it is absent or not what
-// setup writes (then the widget offers setup only).
+// setup writes (then the widget offers setup only). `deployment` is null
+// when setup uses this computer's list of deployments.
 export function parsePlugin(text) {
   var p
   try { p = JSON.parse(String(text)) } catch (e) { return null }
-  if (!p || typeof p.deployment !== "string") return null
+  if (!p || (typeof p.deployment !== "string" && p.deployment !== null)) return null
   if (!isArgv(p.waiting) || !isArgv(p.attach) || !isArgv(p.setup)) return null
   if (p.tui !== null && !isArgv(p.tui)) return null
   if (p.desktop !== null && !isArgv(p.desktop)) return null
@@ -57,21 +58,74 @@ export function readArgv(plugin) {
   return plugin.waiting.concat(["--json"])
 }
 
-// How long a read may take before it is stopped and counts as failed.
+// Whether setup uses this computer's list of deployments: then the read is
+// `waiting --list --json`, every listed deployment one after another.
+export function isList(plugin) {
+  return !!plugin && plugin.deployment === null
+}
+
+// How long a read may take before it is stopped and counts as failed: a
+// list read reads each deployment in turn, within 110 s of its own.
 export var READ_TIMEOUT_MS = 30000
 export var READ_TIMEOUT_REASON = "waiting --json did not answer within 30 s"
+export var LIST_READ_TIMEOUT_MS = 120000
 
-// What `waiting --json` printed → { known: true, count, rows } or
-// { known: false, reason }. Only a failed read is unknown: a row the kernel
-// makes no claim about is simply not counted.
+export function readTimeoutMs(plugin) {
+  return isList(plugin) ? LIST_READ_TIMEOUT_MS : READ_TIMEOUT_MS
+}
+
+// What `waiting --json` printed → { known: true, count, rows, groups, note }
+// or { known: false, reason }. Only a failed read is unknown: a row the
+// kernel makes no claim about is simply not counted. With the list, a
+// deployment that could not be read is unknown on its own, in its group.
 export function parseWaiting(text) {
   var r
   try { r = JSON.parse(String(text)) } catch (e) { return { known: false, reason: "waiting --json printed no result" } }
   if (r && r.ok === true && typeof r.count === "number" && Array.isArray(r.rows)) {
     var rows = r.rows.filter(function(x) { return x && typeof x.instance === "string" && typeof x.home === "string" })
-    return { known: true, count: r.count, rows: rows }
+    var listed = Array.isArray(r.deployments) ? r.deployments.filter(function(d) { return d && typeof d.path === "string" && typeof d.name === "string" }) : null
+    return { known: true, count: r.count, rows: rows, groups: groups(rows, listed), note: typeof r.note === "string" ? r.note : "" }
   }
   return { known: false, reason: r && typeof r.reason === "string" ? r.reason : "waiting --json printed no result" }
+}
+
+// The panel's rows by workspace, in the list's order: [{ title, rows:
+// [{ instance, home, label }], unknown: [text] }]. A group is a workspace,
+// or, for a deployment that could not be read (it has no workspace), that
+// deployment alone, by its path; its title is the workspace key or the
+// deployment's name. One deployment (or a read of one deployment, `listed`
+// null) is one group with no title; nothing to show is no group. A row names
+// its deployment when its group has more than one, and its path when even
+// that would not tell two rows apart.
+export function groups(rows, listed) {
+  if (!listed) return rows.length ? [{ title: "", rows: rows.map(function(x) { return { instance: x.instance, home: x.home, label: x.instance } }), unknown: [] }] : []
+  var out = []
+  var keyOf = function(d) { return d.ok && d.workspace ? "workspace " + d.workspace : "deployment " + d.path }
+  var find = function(key) { for (var i = 0; i < out.length; i++) if (out[i].key === key) return out[i]; return null }
+  listed.forEach(function(d) {
+    var key = keyOf(d)
+    var g = find(key)
+    if (!g) { g = { key: key, title: d.ok && d.workspace ? d.workspace : d.name, rows: [], unknown: [], count: 0 }; out.push(g) }
+    g.count += 1
+    if (!d.ok) g.unknown.push(d.name + ": " + (typeof d.reason === "string" ? d.reason : "could not be read"))
+  })
+  rows.forEach(function(x) {
+    var d = listed.filter(function(y) { return y.path === x.deployment })[0]
+    var g = d ? find(keyOf(d)) : null
+    if (g) g.rows.push({ instance: x.instance, home: x.home, name: d.name, path: d.path })
+  })
+  var shown = out.filter(function(g) { return g.rows.length || g.unknown.length })
+  return shown.map(function(g) {
+    var first = g.rows.map(function(x) { return g.count > 1 ? x.instance + " (" + x.name + ")" : x.instance })
+    return {
+      title: shown.length > 1 ? g.title : "",
+      rows: g.rows.map(function(x, i) {
+        var clash = first.indexOf(first[i]) !== first.lastIndexOf(first[i])
+        return { instance: x.instance, home: x.home, label: clash ? x.instance + " (" + x.path + ")" : first[i] }
+      }),
+      unknown: g.unknown,
+    }
+  })
 }
 
 // The read's state, one per reader. A read is pending from the moment
@@ -100,12 +154,13 @@ export function finishRead(state, attempt, text) {
   return parseWaiting(text)
 }
 
-// Read `attempt`'s deadline → what to show (it failed), or null when it had
-// already finished.
-export function expireRead(state, attempt) {
+// Read `attempt`'s deadline (`ms`, READ_TIMEOUT_MS by default) → what to
+// show (it failed), or null when it had already finished.
+export function expireRead(state, attempt, ms) {
   if (!state.pending || attempt !== state.attempt) return null
   state.pending = false
-  return { known: false, reason: READ_TIMEOUT_REASON }
+  var limit = ms || READ_TIMEOUT_MS
+  return { known: false, reason: limit === READ_TIMEOUT_MS ? READ_TIMEOUT_REASON : "waiting --json did not answer within " + Math.round(limit / 1000) + " s" }
 }
 
 // One reader for all the widget's bars: the first of the peers the bar

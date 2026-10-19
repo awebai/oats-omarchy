@@ -17,11 +17,15 @@ import "widget.mjs" as Widget
 // The rows are `waiting --json` (bin/waiting.mjs), read only when the panel
 // opens, after plugin.json is read again: nothing is read in the background,
 // and the icon shows no count. The panel says it is reading until the read
-// answers. One widget reads for every bar (the first the bar lists) and hands
-// the result to the others. A read never overlaps another (widget.mjs's read
-// state), and one that has not answered by READ_TIMEOUT_MS, or whose program
-// could not start, is stopped and shows why in the panel. Stopping waiting
-// stops the kernel's read with it.
+// answers. With this computer's list of deployments the read is
+// `waiting --list --json`: every listed deployment, one after another, its
+// rows grouped by workspace in the panel; one that could not be read is shown
+// as such in its group. One widget reads for every bar (the first the bar
+// lists) and hands the result to the others. A read never overlaps another
+// (widget.mjs's read state), and one that has not answered by its deadline
+// (widget.mjs readTimeoutMs), or whose program could not start, is stopped
+// and shows why in the panel. Stopping waiting stops the kernel's read with
+// it.
 Panel {
   id: root
   moduleName: "ai.aweb.oats"
@@ -38,6 +42,8 @@ Panel {
   property var waiting: null
   property bool reading: false
   readonly property var rows: waiting && waiting.known ? waiting.rows : []
+  readonly property var groups: waiting && waiting.known ? waiting.groups : []
+  readonly property string note: waiting && waiting.known ? waiting.note : ""
   readonly property bool failed: !!waiting && !waiting.known
   // The read: its state, the read the process runs, and whether a
   // read waits for plugin.json to be read first.
@@ -137,9 +143,9 @@ Panel {
   // The read's deadline: it also settles a read whose program never started.
   Timer {
     id: readTimeout
-    interval: Widget.READ_TIMEOUT_MS
+    interval: Widget.readTimeoutMs(root.plugin)
     onTriggered: {
-      var result = Widget.expireRead(root.readState, root.readAttempt)
+      var result = Widget.expireRead(root.readState, root.readAttempt, interval)
       if (result) {
         reader.running = false
         root.share(result)
@@ -215,7 +221,8 @@ Panel {
         spacing: Style.space(8)
 
         // That the rows are being read; the kernel's own words when the
-        // read failed.
+        // read failed, or what to do when this computer's list holds no
+        // deployment to read.
         Column {
           id: above
           width: parent.width
@@ -229,9 +236,9 @@ Panel {
             font.pixelSize: Style.font.caption
           }
           Text {
-            visible: root.failed
+            visible: root.failed || root.note !== ""
             width: parent.width
-            text: root.failed ? root.waiting.reason : ""
+            text: root.failed ? root.waiting.reason : root.note
             textFormat: Text.PlainText
             color: root.dim
             font.family: root.fontFamily
@@ -242,7 +249,7 @@ Panel {
 
         Flickable {
           id: rowsFlick
-          visible: root.rows.length > 0
+          visible: root.groups.length > 0
           width: parent.width
           height: visible ? Math.min(rows.implicitHeight, panel.rowsCap) : 0
           contentWidth: width
@@ -257,19 +264,58 @@ Panel {
             id: rows
             width: rowsFlick.width
 
+            // A group per workspace: its title (when there is more than
+            // one), the rows waiting on you, and each deployment of it that
+            // could not be read.
             Repeater {
-              model: root.rows
+              model: root.groups
 
-              Button {
+              Column {
+                id: group
                 required property var modelData
                 width: rows.width
-                leftAlign: true
-                text: modelData.instance
-                foreground: root.foreground
-                fontFamily: root.fontFamily
-                onClicked: {
-                  root.runLine(Widget.attachCommand(root.plugin, modelData.home))
-                  root.close()
+
+                Text {
+                  visible: group.modelData.title !== ""
+                  width: parent.width
+                  text: group.modelData.title
+                  textFormat: Text.PlainText
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                }
+
+                Repeater {
+                  model: group.modelData.rows
+
+                  Button {
+                    required property var modelData
+                    width: group.width
+                    leftAlign: true
+                    text: modelData.label
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    onClicked: {
+                      root.runLine(Widget.attachCommand(root.plugin, modelData.home))
+                      root.close()
+                    }
+                  }
+                }
+
+                Repeater {
+                  model: group.modelData.unknown
+
+                  Text {
+                    required property var modelData
+                    width: group.width
+                    text: modelData
+                    textFormat: Text.PlainText
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.WordWrap
+                  }
                 }
               }
             }
@@ -292,7 +338,7 @@ Panel {
           }
 
           PanelSeparator {
-            visible: root.rows.length > 0 || root.failed || root.reading
+            visible: root.groups.length > 0 || root.failed || root.note !== "" || root.reading
             foreground: root.foreground
           }
 

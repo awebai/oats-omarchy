@@ -5,7 +5,10 @@ An [Omarchy](https://omarchy.org) plugin that makes
 the terminal UI (`oats tui`) and OATS Desktop, become Omarchy apps with a
 launcher entry, an icon and a key. An `oats` submenu in the Omarchy menu
 opens either client and lists the agents waiting on you, and the OATS icon in
-the bar opens a panel that lists them, read when you open it.
+the bar opens a panel that lists them, read when you open it. With an OATS
+CLI that keeps this computer's list of deployments (`oats deployments`),
+all of that covers every listed deployment; with an older one, the one
+deployment setup is applied for.
 
 It is set up with one command, `setup --plan | --apply | --remove | --check`,
 run from the plugin's directory. Setup finds what it needs on the machine
@@ -20,7 +23,8 @@ there before.
 
 This section is written to you, the coding agent asked to install this
 plugin. Follow the steps in order. Every command here is checked against
-v0.2.1.
+v0.2.1, except this computer's list of deployments (step 2), which needs a
+release of the plugin later than v0.2.1.
 
 > **Never pass `--yes` to `setup --apply` or `setup --remove` until the
 > person has said yes in the chat to what you showed them.** You have no
@@ -48,7 +52,22 @@ person how to fix it. Don't install system packages yourself.
 - **tmux:** `command -v tmux` finds it. The TUI and attaching to an agent
   need it. Fix: the person runs `sudo pacman -S tmux`.
 
-**2. Ask for the deployment:** the directory that directly holds
+**2. The deployments.** Setup uses this computer's list of deployments
+when two things hold:
+- `oats version --json` lists the feature `deployments-list`;
+- the plugin you install has the list: after step 3,
+  `~/.config/omarchy/plugins/ai.aweb.oats/setup --help` mentions
+  `oats deployments`. v0.2.0 and v0.2.1 do not, so with either pin, ask
+  for the deployment as below.
+
+With both, setup needs no deployment, and you pass no `--dir` in the steps
+below.
+- Show the person `oats deployments`. The kernel adds a deployment to it
+  whenever any `oats` command runs in it.
+- If one they use is missing, they run `oats deployments add <path>` (or
+  you do, once they agree). Setup never writes the list.
+
+Otherwise, ask for the deployment: the directory that directly holds
 `oats-local.yaml`.
 - Ask the person which directory it is, unless they have already named it.
 - If the current directory or one of its parents holds `oats-local.yaml`,
@@ -83,7 +102,8 @@ git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.2.1
 omarchy plugin enable ai.aweb.oats
 ```
 
-**4. Show the plan.**
+**4. Show the plan.** Leave out `--dir <deployment>` here and in step 5
+only when both checks in step 2 hold.
 
 ```bash
 ~/.config/omarchy/plugins/ai.aweb.oats/setup --plan --dir <deployment>
@@ -100,7 +120,9 @@ point out:
   temporary copy of their Hyprland config, which runs their config's own
   commands (its `io.popen` calls), on the copy;
 - any fixes it suggests, such as `sudo pacman -S fuse2`, for the person to
-  run.
+  run;
+- with the list, its notes: that the list holds no deployment yet, or that a
+  `--dir` you passed is not in it, and what to run.
 
 Then ask whether to apply it.
 
@@ -123,7 +145,8 @@ themselves.
 **7. Tell the person how to look after it.** Here `setup` is
 `~/.config/omarchy/plugins/ai.aweb.oats/setup`.
 - **Check:** `setup --check` reports drift. Omarchy runs it after each
-  `omarchy update`.
+  `omarchy update`. When the OATS CLI gains the list of deployments, it says
+  so: `setup --apply` again (without `--dir`) switches to it.
 - **Update:** `omarchy plugin update ai.aweb.oats`, then `setup --check`.
   Updating moves a pinned checkout to the tip of the default branch.
 - **Pin a release:** `git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout <tag>`, for
@@ -137,7 +160,10 @@ after the person has agreed in the chat. `setup --check` needs no `--yes`.
 ## Install
 
 It needs Node.js and the OATS CLI (`npm install -g @awebai/oats`, 0.53.0 or
-later) on your PATH, and an OATS deployment: the directory that holds
+later) on your PATH. With an OATS CLI that keeps this computer's list of
+deployments (`oats version --json` lists `deployments-list`), this plugin
+later than v0.2.1 needs nothing else, and you leave out `--dir` below; with
+an older one, setup is for one OATS deployment: the directory that holds
 `oats-local.yaml`. `oats` on your PATH must be the installed CLI, the
 package's `bin/oats.mjs` or the npm or mise link to it, not a wrapper
 script: setup runs that script with node directly and records its path.
@@ -156,19 +182,33 @@ omarchy plugin add https://github.com/awebai/oats-omarchy --enable
   a right click opens the TUI.
 - **Before setup has run**, a click on the icon (its tooltip says "OATS:
   click to set up") runs the whole setup in a floating terminal: it asks for
-  the deployment, shows the plan and asks before applying it.
+  the deployment (not with the list), shows the plan and asks before
+  applying it.
 - **Its panel** (a left click, once setup has run) reads the agents waiting
   on you each time it opens, and says so while it reads. An agent is listed
   when the kernel says it is waiting on you; for the others the kernel makes
   no claim, so an empty list never means that nobody is waiting. When the
   read fails, the panel says why. A click on an agent opens its session in a
-  floating terminal, and Alt+O leaves that viewer
-  when your OATS CLI supports a detach key. It also has Open OATS TUI, Open
-  OATS Desktop (when setup found one) and Set up keys and launchers, which
-  runs `setup --apply` in a floating terminal.
-- **Finding the deployment.** Setup takes `--dir`, else the deployment
-  around the working directory, else the one it is applied for. With none of
-  those, in a terminal, it asks for the path of your deployment.
+  floating terminal. It also has Open OATS TUI, Open OATS Desktop (when
+  setup found one) and Set up keys and launchers, which runs `setup --apply`
+  in a floating terminal.
+- **With the list,** the panel reads every listed deployment, one after
+  another (each `oats status --json` within 25 seconds, all of them within
+  110), and groups the agents by workspace when there is more than one. A
+  deployment that could not be read is shown as such, and the others are
+  still listed. The TUI and the Desktop open on their own list of
+  deployments.
+- **Alt+O.** While you're attached to an agent from the panel or the menu,
+  Alt+O leaves the viewer, so it never reaches a harness that binds Alt+O
+  itself. It needs an OATS CLI with a detach key (`oats version --json`
+  lists `session-attach-detach-key`).
+- **Finding the deployment.** With the list, setup is for every listed
+  deployment and needs none: `--dir` only checks that a deployment is
+  listed, and an empty list makes the plan say how to fill it (run any
+  `oats` command in a deployment, or `oats deployments add <path>`).
+  Without it, setup takes `--dir`, else the deployment around the working
+  directory, else the one it is applied for. With none of those, in a
+  terminal, it asks for the path of your deployment.
 - **`setup --plan`** says what `--apply` would write and what it found.
   `--apply` shows the plan again and asks before writing (`--yes` skips the
   question; without a terminal it is required). When the plan says the key is

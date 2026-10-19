@@ -42,7 +42,9 @@ last `--apply` recorded (`$XDG_STATE_HOME/oats-omarchy/node`). Setup
 compares them with what is there, and only then writes:
 
 - `lib/discover.mjs` finds things instead of assuming them:
-  - the deployment: `--dir`, else the nearest `oats-local.yaml` at or above
+  - the deployment, only when the OATS CLI keeps no list of this computer's
+    deployments (see "This computer's list of deployments" below): `--dir`,
+    else the nearest `oats-local.yaml` at or above
     the working directory, else the one setup's state records. With none,
     `--plan` and `--apply` in a terminal ask for its path, which must be a
     directory holding a regular `oats-local.yaml` (not a link). Nothing is
@@ -134,7 +136,7 @@ compares them with what is there, and only then writes:
 - `lib/system.mjs` runs commands with a timeout and a given environment.
 
 `bin/waiting.mjs --dir <deployment>` (`lib/waiting.mjs`) is the menu's
-"Waiting on you" row. Through setup's shim, it reads `oats status --json` for
+"Waiting on you" row for one deployment (`--list` below is the other). Through setup's shim, it reads `oats status --json` for
 the deployment, shows the instances
 waiting on you in `omarchy-menu-select` (the count and the names, nothing
 else), and opens the chosen one's `oats session attach` in
@@ -155,6 +157,32 @@ a process group of its own, which waiting kills on its own timeout (25 s,
 inside the widget's 30 s) and when it is stopped by SIGTERM, SIGINT or
 SIGHUP, so a stopped read leaves no kernel process behind.
 
+### This computer's list of deployments
+
+When the OATS CLI setup checked lists the feature `deployments-list` in
+`oats version --json` (awebai/oats#1390), setup is for no deployment of its
+own. Its state and `plugin.json` record `deployment: null`. The launchers,
+the panel's buttons, the menu and setup's own argv carry no `--dir`, and the
+post-update hook does not `cd` anywhere. Without the feature, all of that is
+for the one deployment, exactly as above; `--check` reports when the CLI
+gains or loses the list, and `--apply` switches either way. Setup reads the
+list (`lib/deployments.mjs`, `deploymentsApi: 1`, each row's path, name and
+state) only for the plan's notes; the plugin never writes it.
+
+`waiting --list` reads `oats deployments --json`, then `oats status --json
+--dir <path>` for each row whose state is `ok`, one after another, never two
+at once: each read within 25 s with `--json` (30 s in the menu), and all of
+them within 110 s (`LIST_BUDGET`); a
+deployment not reached in time is not read. Every one of these reads, the
+menu's and the Status row's (`bin/status.mjs`, `statusEvery`) included, runs
+in a process group of its own, killed with it, as for `--json` above.
+`--list --json` prints `{ok, count, rows: [{instance, home, deployment,
+workspace}], deployments: [{path, name, workspace, ok, reason?}], note?}`.
+A deployment that could not be read is unknown on its own (`ok: false` with
+its reason) and the others still count; `ok` is false only when the list
+could not be read or no deployment could, and `note` says how to fill an
+empty list.
+
 ### The bar widget
 
 `OatsBarWidget.qml` displays; `widget.mjs` decides. The QML reads
@@ -169,14 +197,20 @@ offscreen, with Omarchy's own `Ui` and `Commons` and a stand-in only for the
 panel's layer-shell window (`KeyboardPanel`, which needs a compositor): the
 layout with more rows than fit, a `plugin.json` change, a destroy during a
 read, a program that cannot start, and that nothing is read before the panel
-opens. It runs in CI's Omarchy container. The icon shows no count.
+opens. It runs in CI's Omarchy container. The icon shows no count. With the
+list, the panel groups the rows by workspace (`widget.mjs` `groups`): a
+deployment that could not be read is a group of its own, keyed by its path
+and titled by its name, and a row's label names its deployment, or its
+path, when that is what tells two rows apart. The panel shows the read as
+failed only when no deployment could be read.
 
 Nothing is read in the background: there is no timer and no interval
 setting. The read runs only when the panel opens, fresh each time, after
 `plugin.json` is read again: the widget takes the file's contents when its
 read completes (`onLoaded`), and the read waits for that. Until the read
-answers, the panel lists nobody and says it is reading. `widget.mjs`'s read state keeps one
-read pending from its start to its output or its 30 s deadline, whether or
+answers, the panel lists nobody and says it is reading. `widget.mjs`'s read
+state keeps one read pending from its start to its output or its deadline
+(30 s; 120 s for a `--list` read, `readTimeoutMs`), whether or
 not its program started (Quickshell reports nothing for a program that
 cannot start), so opening the panel again neither overlaps a read nor
 moves its deadline; at the deadline the read is stopped and the panel says

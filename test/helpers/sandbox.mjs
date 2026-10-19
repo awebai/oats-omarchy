@@ -61,7 +61,14 @@ export function writeExecutable(path, text) {
 //   menu: true | false                  Omarchy's menu definition is there ($OMARCHY_PATH)
 // The kernel stand-in answers `status --json` from <root>/status.json (and
 // <root>/status.mode: "envelope", "stderr" or "hang" for a failure) and
-// `version --json` from <root>/version.json; files a test writes.
+// `version --json` from <root>/version.json; files a test writes. With
+// `--dir <d>`, status answers from <d>/status.json and <d>/status.mode
+// instead, and `status --dir <d>` (text) prints a line naming <d>, or
+// hangs as the JSON read does. When
+// version.json lists the feature deployments-list, `deployments --json`
+// answers the kernel's envelope around <root>/deployments.json (a result a
+// test writes, else an empty list); <root>/deployments.mode "envelope" makes
+// it fail, and "hang" makes it never answer (its pids in deployments.pids). Without the feature, deployments is refused as an older CLI does.
 // FAKE_SELECT picks in omarchy-menu-select: "cancel" (the default), "first",
 // or the text to return. FAKE_FLOATING_RUN=1 makes the floating terminal run
 // its command with bash -c, as the real one does.
@@ -154,8 +161,30 @@ echo "config ok"
 import { appendFileSync, readFileSync } from "node:fs";
 const [cmd, ...rest] = process.argv.slice(2);
 const fake = (name) => { try { return readFileSync(${JSON.stringify(root)} + "/" + name, "utf8"); } catch { return null; } };
-if (cmd === "status" && rest.join(" ") === "--json") {
-  const mode = (fake("status.mode") || "").trim();
+const version = fake("version.json") || JSON.stringify({ version: "0.60.0", features: ["session-attach-detach-key"] });
+const dirAt = rest.indexOf("--dir");
+const dir = dirAt >= 0 ? rest[dirAt + 1] : null;
+const args = dirAt >= 0 ? [...rest.slice(0, dirAt), ...rest.slice(dirAt + 2)] : rest;
+if (cmd === "status" && dir) appendFileSync(${JSON.stringify(root)} + "/status-dirs.log", dir + "\\n");
+const at = (name) => { if (!dir) return fake(name); try { return readFileSync(dir + "/" + name, "utf8"); } catch { return null; } };
+if (cmd === "status" && dir && args.length === 0 && (at("status.mode") || "").trim() !== "hang") { console.log("oats status — agents root " + dir + "/agents"); process.exit(0); }
+if (cmd === "deployments" && rest.join(" ") === "--json") {
+  if (!JSON.parse(version).features?.includes("deployments-list")) {
+    console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_UNKNOWN_COMMAND", message: "unknown command: deployments" } })); process.exit(2);
+  }
+  if ((fake("deployments.mode") || "").trim() === "hang") {
+    const { spawn } = await import("node:child_process");
+    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    appendFileSync(${JSON.stringify(root)} + "/deployments.pids", process.pid + " " + child.pid + "\\n");
+    setInterval(() => {}, 1000);
+    await new Promise(() => {});
+  }
+  if ((fake("deployments.mode") || "").trim() === "envelope") { console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_DEPLOYMENTS_INVALID", message: "deployments.json cannot be read as this computer's deployments list (not JSON)" } })); process.exit(1); }
+  const result = JSON.parse(fake("deployments.json") || JSON.stringify({ deploymentsApi: 1, file: ${JSON.stringify(join(home, ".oats", "config", "deployments.json"))}, deployments: [], imports: {} }));
+  console.log(JSON.stringify({ schemaVersion: 1, ok: true, result })); process.exit(0);
+}
+if (cmd === "status" && (args.join(" ") === "--json" || (dir && args.length === 0))) {
+  const mode = (at("status.mode") || "").trim();
   if (mode === "hang") {
     // A kernel that never answers, with a child of its own; both pids logged.
     const { spawn } = await import("node:child_process");
@@ -166,9 +195,9 @@ if (cmd === "status" && rest.join(" ") === "--json") {
   }
   if (mode === "envelope") { console.log(JSON.stringify({ ok: false, error: { code: "E_LOCK", message: "oats-lock.json is unreadable: Unexpected end of JSON input" } })); process.exit(1); }
   else if (mode === "stderr") { console.error("oats: no oats-local.yaml at or above " + process.cwd()); process.exit(1); }
-  else { process.stdout.write(fake("status.json") || JSON.stringify({ root: process.cwd(), agents: [] })); process.exit(0); }
+  else { process.stdout.write(at("status.json") || JSON.stringify({ root: dir || process.cwd(), agents: [] })); process.exit(0); }
 }
-if (cmd === "version" && rest.join(" ") === "--json") { process.stdout.write(fake("version.json") || JSON.stringify({ version: "0.60.0", features: ["session-attach-detach-key"] })); process.exit(0); }
+if (cmd === "version" && rest.join(" ") === "--json") { process.stdout.write(version); process.exit(0); }
 appendFileSync(${JSON.stringify(join(root, "kernel.log"))}, JSON.stringify(process.argv.slice(2)) + "\\n");
 console.error("fake kernel: " + process.argv.slice(2).join(" ")); process.exit(1);
 `;
