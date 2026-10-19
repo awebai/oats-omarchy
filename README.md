@@ -47,13 +47,15 @@ person how to fix it. Don't install system packages yourself.
 - **tmux:** `command -v tmux` finds it. The TUI and attaching to an agent
   need it. Fix: the person runs `sudo pacman -S tmux`.
 
-**2. Find the deployment:** the directory that holds `oats-local.yaml`.
-- Look in the directories directly inside `~/Agents` (a common place; setup
-  itself does not search it), and in the current directory and its parents.
-- If you find exactly one, name it to the person in step 4. If you find
-  more than one, or none, ask the person which directory it is.
-- Never guess. `--dir` must be the directory that directly holds
-  `oats-local.yaml`.
+**2. Ask for the deployment:** the directory that directly holds
+`oats-local.yaml`.
+- Ask the person which directory it is, unless they have already named it.
+- If the current directory or one of its parents holds `oats-local.yaml`,
+  offer that directory as a suggestion for them to confirm, never as a
+  default.
+- Never guess.
+- Check that the directory holds a regular `oats-local.yaml` before you
+  pass it as `--dir`.
 
 **3. Add the plugin.** First tell the person what Omarchy's installer would
 warn them, since `--yes` skips that warning: plugins run as unsandboxed code
