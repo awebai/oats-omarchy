@@ -5,8 +5,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { attachCommand, DETACH_KEY, waiting, waitingRows } from "../lib/waiting.mjs";
+import { attachCommand, attachPrefix, DETACH_KEY, waiting, waitingRows } from "../lib/waiting.mjs";
 import { sandbox, writeExecutable } from "./helpers/sandbox.mjs";
+import { badge, parseWaiting } from "../widget.mjs";
 
 const row = (instance, home, waitingOnYou = null) => ({ agent: "a", instance, home, running: true, waitingOnYou });
 const W = { since: "2026-10-16T11:57:35.651Z", producer: "agent", reason: "attention", message: "needs a decision" };
@@ -85,7 +86,7 @@ test("a choice opens its session in the floating terminal through the shim, with
   withStatus(s, [{ name: "y", instances: [row("with space", b, W)] }]);
   const r = call(s, [], { FAKE_SELECT: "first" });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(waitFor(join(s.root, "floating.log")), `'${shimPath(s)}' session attach --home '${b}' --detach-key 'C-\\'\n`);
+  assert.equal(waitFor(join(s.root, "floating.log")), `'${shimPath(s)}' 'session' 'attach' '--detach-key' 'M-o' '--home' '${b}'\n`);
 });
 
 test("without the kernel feature the detach key is left out", (t) => {
@@ -94,7 +95,7 @@ test("without the kernel feature the detach key is left out", (t) => {
   withStatus(s, [{ name: "x", instances: [row("alpha", a, W)] }]);
   writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.50.0", features: ["session-start"] }));
   assert.equal(call(s, [], { FAKE_SELECT: "alpha" }).status, 0);
-  assert.equal(waitFor(join(s.root, "floating.log")), `'${shimPath(s)}' session attach --home '${a}'\n`);
+  assert.equal(waitFor(join(s.root, "floating.log")), `'${shimPath(s)}' 'session' 'attach' '--home' '${a}'\n`);
 });
 
 test("without setup's shim, or without the deployment: no selector, a \"(?)\" notification that says why, exit 1", (t) => {
@@ -119,10 +120,13 @@ test("the attach command reaches the kernel as argv through the terminal's bash 
   withStatus(s, [{ name: "y", instances: [row("with space", b, W)] }]);
   assert.equal(call(s, [], { FAKE_SELECT: "with space", FAKE_FLOATING_RUN: "1" }).status, 0);
   const log = waitFor(join(s.root, "kernel.log"));
-  assert.deepEqual(JSON.parse(log.trim()), ["session", "attach", "--home", b, "--detach-key", "C-\\"]);
-  assert.equal(DETACH_KEY, "C-\\");
-  assert.equal(attachCommand({ shim: "/s/o ats", home: "/h/it's", detachKey: true }), `'/s/o ats' session attach --home '/h/it'\\''s' --detach-key 'C-\\'`);
-  assert.equal(attachCommand({ shim: "/s/oats", home: "/h", detachKey: false }), "'/s/oats' session attach --home '/h'");
+  assert.deepEqual(JSON.parse(log.trim()), ["session", "attach", "--detach-key", "M-o", "--home", b]);
+  assert.equal(DETACH_KEY, "M-o");
+  assert.equal(attachCommand({ shim: "/s/o ats", home: "/h/it's", detachKey: true }), `'/s/o ats' 'session' 'attach' '--detach-key' 'M-o' '--home' '/h/it'\\''s'`);
+  assert.equal(attachCommand({ shim: "/s/oats", home: "/h", detachKey: false }), "'/s/oats' 'session' 'attach' '--home' '/h'");
+  // The prefix the bar widget gets: the home goes last.
+  assert.deepEqual(attachPrefix({ shim: "/s/oats", detachKey: true }), ["/s/oats", "session", "attach", "--detach-key", "M-o", "--home"]);
+  assert.deepEqual(attachPrefix({ shim: "/s/oats", detachKey: false }), ["/s/oats", "session", "attach", "--home"]);
 });
 
 test("nobody waiting: no selector, Omarchy's notification with the count only, exit 0", (t) => {
@@ -175,6 +179,52 @@ test("without omarchy-notification-send: stderr only, same exit codes", (t) => {
   assert.match(failed.stderr, /Waiting on you \(\?\): oats: no oats-local\.yaml/);
 });
 
+// waiting --json in this process: what it prints, and its exit code.
+function json(s, args = [], opts = {}) {
+  let stdout = "";
+  const r = call(s, ["--json", ...args], {}, { ...opts, out: { write: (x) => { stdout += x; } } });
+  return { ...r, stdout, result: stdout ? JSON.parse(stdout) : null };
+}
+
+test("--json: the count and the rows waiting on you, nothing opened, nothing notified", (t) => {
+  const s = sandbox(t);
+  const { a, b } = homes(s);
+  withStatus(s, [{ name: "x", instances: [row("alpha", a, W), row("idle", "/h/idle")] }, { name: "y", instances: [row("with space", b, W)] }]);
+  const r = json(s);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.result, { ok: true, count: 2, rows: [{ instance: "alpha", home: a }, { instance: "with space", home: b }] });
+  assert.equal(r.stdout.split("\n").length, 2, "one line");
+  assert.equal(badge(parseWaiting(r.stdout)), "2", "what the bar widget shows");
+  assert.equal(r.stderr, "");
+  assert.deepEqual([calls(s, "select.log"), calls(s, "notify.log")], [[], []]);
+
+  // No row claims to wait: a count of 0, which the widget shows as no badge.
+  withStatus(s, [{ name: "x", instances: [row("idle", "/h/idle")] }]);
+  assert.deepEqual(json(s).result, { ok: true, count: 0, rows: [] });
+  assert.equal(badge(parseWaiting(json(s).stdout)), "", "no badge, no claim");
+});
+
+test("--json: a failed read is {ok: false, reason} with the kernel's first line, bounded; exit 1; nothing notified", (t) => {
+  const s = sandbox(t);
+  writeFileSync(join(s.root, "status.json"), JSON.stringify({ ok: false, error: { message: `${"x".repeat(500)}\nsecond line` } }));
+  const r = json(s);
+  assert.equal(r.status, 1);
+  assert.deepEqual(Object.keys(r.result), ["ok", "reason"]);
+  assert.equal(r.result.ok, false);
+  assert.equal(r.result.reason.length, 200);
+  assert.ok(!r.result.reason.includes("second line"));
+  assert.equal(badge(parseWaiting(r.stdout)), "?");
+  assert.deepEqual(calls(s, "notify.log"), []);
+
+  writeFileSync(join(s.root, "status.mode"), "hang");
+  assert.match(json(s, [], { statusTimeoutMs: 500 }).result.reason, /timed out after 500 ms/);
+  assert.match(json(s, ["--dir", join(s.root, "gone")]).result.reason, /--dir .*gone does not exist/);
+  rmSync(shimPath(s));
+  let stdout = "";
+  assert.equal(waiting(["--json", "--dir", s.deployment], s.env, { write: () => {} }, { out: { write: (x) => { stdout += x; } } }), 1);
+  assert.deepEqual(JSON.parse(stdout), { ok: false, reason: `setup's shim ${shimPath(s)} is missing: run setup --apply` });
+});
+
 test("arguments: --dir, else the working directory; anything else exits 2; --help prints the usage", (t) => {
   const s = sandbox(t);
   withStatus(s, []);
@@ -185,5 +235,5 @@ test("arguments: --dir, else the working directory; anything else exits 2; --hel
   assert.equal(fromCwd.status, 0, fromCwd.stderr);
   const help = s.run(["waiting", "--help"]);
   assert.equal(help.status, 0);
-  assert.match(help.stdout, /^usage: waiting \[--dir <deployment>\]/);
+  assert.match(help.stdout, /^usage: waiting \[--dir <deployment>\] \[--json\]/);
 });

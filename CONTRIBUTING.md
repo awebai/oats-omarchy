@@ -6,11 +6,11 @@ The repository is the plugin: Omarchy clones it whole, and nothing is built.
 
 ```
 manifest.json            the plugin's manifest: id ai.aweb.oats, one bar widget
-OatsBarWidget.qml        the bar widget: the OATS icon; a click opens the TUI
-widget.mjs               the click's command line, kept apart so a test can run it
+OatsBarWidget.qml        the bar widget: the OATS icon, the waiting count and its panel
+widget.mjs               everything the widget builds or reads, kept apart so a test can run it
 setup                    the command people run: a POSIX sh launcher
 bin/setup.mjs            setup's engine, which the launcher and the post-update hook run
-bin/waiting.mjs          the oats menu's "Waiting on you" row
+bin/waiting.mjs          the oats menu's "Waiting on you" row, and the widget's count (--json)
 lib/                     their modules (below)
 assets/                  the icon both launcher entries use
 scripts/lint.mjs         lint
@@ -43,7 +43,13 @@ compares them with what is there, and only then writes:
 
 - `lib/discover.mjs` finds things instead of assuming them:
   - the deployment: `--dir`, else the nearest `oats-local.yaml` at or above
-    the working directory, else the one setup's state records;
+    the working directory, else the one setup's state records. With none,
+    `--plan` and `--apply` in a terminal offer the deployments directly in
+    `~/Agents`, by the kernel TUI's rule (`deploymentsInside` in awebai/oats
+    `packages/client/workspace-admission.mjs`: at most 200 entries,
+    directories only, no link followed, a regular `oats-local.yaml`), and
+    ask for a number or a path. An offer is taken only when picked; without
+    a terminal (or with `--json`) it is `E_NO_DEPLOYMENT`;
   - the OATS CLI: `oats` on PATH resolved to the CLI's script (a mise shim
     through `mise which oats`), refused when it is an instance home's
     `.oats/bin` shim, and proven by `version --json`, 0.53.0 or later;
@@ -94,8 +100,17 @@ compares them with what is there, and only then writes:
   they show what they will do and ask; otherwise they refuse with
   `E_CONFIRM` unless `--yes` is given, as `omarchy plugin add` does.
 - `lib/files.mjs` renders each file (the shim, the launcher entries, the
-  post-update hook); `lib/desktop-entry.mjs` reads and writes desktop
-  entries.
+  post-update hook, the bar widget's `plugin.json`); `lib/desktop-entry.mjs`
+  reads and writes desktop entries.
+- `plugin.json`, beside the state (`$XDG_STATE_HOME/oats-omarchy`), is what
+  the bar widget runs: `{deployment, tui, desktop, waiting, attach, setup}`,
+  each an argv from the same functions the key and the menu use (`tui` and
+  `desktop` null when that part is not applied; `attach` ends at `--home`).
+  It is written on every `--apply` that applies the shim, rewritten when it
+  differs, removed by a complete `--remove`, and `--check` reports it
+  missing. The detach key goes into `attach` when the CLI's `version --json`
+  lists `session-attach-detach-key`, so a re-apply picks up a CLI that
+  gained it.
 - `lib/menu.mjs` is the `oats` submenu: a delimited block in the user's
   `~/.config/omarchy/extensions/omarchy-menu.jsonc`, the one file setup edits
   rather than writes whole. Only the block's bytes, and a separating comma
@@ -125,9 +140,41 @@ compares them with what is there, and only then writes:
 the deployment, shows the instances
 waiting on you in `omarchy-menu-select` (the count and the names, nothing
 else), and opens the chosen one's `oats session attach` in
-`omarchy-launch-floating-terminal-with-presentation`. With nothing to pick it
+`omarchy-launch-floating-terminal-with-presentation`, with `--detach-key
+M-o` (Alt+O, OATS's leader key in the TUI and the Desktop) when the kernel
+lists `session-attach-detach-key`. With nothing to pick it
 does not open the selector, which refuses to open empty; it sends
 `omarchy-notification-send` instead, or writes to stderr without it.
+
+A row waits on you when its `waitingOnYou` is set. A null there means the
+kernel makes no claim about that row, not that it is not waiting: nothing
+here says that nobody is waiting. Only a status that could not be read is
+unknown. `--json` prints what it read and opens nothing: `{ok, count,
+rows: [{instance, home}]}`, or `{ok: false, reason}` with one bounded line
+(the kernel's first, when `oats status` failed). It is the bar widget's only
+source; the filter lives here alone.
+
+### The bar widget
+
+`OatsBarWidget.qml` displays; `widget.mjs` decides. The QML reads
+`plugin.json` (Quickshell's `FileView`), runs the count read (`plugin.json`'s
+`waiting` argv plus `--json`) as argv through one Quickshell `Process`, and
+hands every other command to the bar's `run`, which runs `bash -lc <line>`:
+`widget.mjs` builds those lines from `plugin.json`'s argv, every word
+single-quoted, and quotes them again for the floating terminal's `bash -c`.
+`test/widget.test.mjs` runs each line through bash with stand-ins that log
+their argv. The badge is the count when it is above 0, `?` when the read
+failed, and nothing otherwise.
+
+The read runs on a timer (the `refreshIntervalSec` setting, 60 s by default,
+15 to 3600) and when the panel opens. A read is never started while one runs;
+one that takes longer than 30 s is stopped and shows `?`; the widget stops
+it when it is destroyed (a hot reload or a disable). With a bar on each
+monitor there is one widget per bar, and one of them reads for all: the
+first that the bar's `moduleWidgets` lists, which hands each result to the
+others (a widget the bar does not list reads for itself). A read costs about
+1.2 s of CPU on a real deployment (`oats status`), so it is once per
+interval, not once per bar.
 
 ### Quoting
 
