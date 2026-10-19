@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
@@ -14,9 +15,11 @@ import "widget.mjs" as Widget
 // panel offers setup only.
 //
 // The count is `waiting --json` (bin/waiting.mjs), read on a timer and when
-// the panel opens. One widget reads for every bar (the first the bar lists)
-// and hands the result to the others; a read never overlaps another, and one
-// that takes longer than READ_TIMEOUT_MS is stopped and shows "?".
+// the panel opens, after plugin.json is read again. One widget reads for
+// every bar (the first the bar lists) and hands the result to the others. A
+// read never overlaps another (widget.mjs's read state), and one that has not
+// answered by READ_TIMEOUT_MS, or whose program could not start, is stopped
+// and shows "?". Stopping waiting stops the kernel's read with it.
 Panel {
   id: root
   moduleName: "ai.aweb.oats"
@@ -30,9 +33,14 @@ Panel {
   // setup's commands, or null; the last read, or null before the first.
   property var plugin: null
   property var waiting: null
-  property bool timedOut: false
   readonly property string badge: Widget.badge(waiting)
   readonly property var rows: waiting && waiting.known ? waiting.rows : []
+  readonly property bool failed: !!waiting && !waiting.known
+  // The count read: its state, the read the process runs, and whether a
+  // read waits for plugin.json to be read first.
+  property var readState: Widget.newReadState()
+  property int readAttempt: 0
+  property bool readAfterLoad: false
 
   implicitWidth: bar_.implicitWidth
   implicitHeight: bar_.implicitHeight
@@ -45,22 +53,30 @@ Panel {
     return root.bar && typeof root.bar.moduleWidgets === "function" ? root.bar.moduleWidgets(root.moduleName) : []
   }
 
-  function loadPlugin() {
-    pluginFile.reload()
-    root.plugin = Widget.parsePlugin(pluginFile.text())
+  // plugin.json as just read (null when it is gone), then the read that
+  // waited for it.
+  function pluginLoaded(parsed) {
+    root.plugin = parsed
+    if (root.readAfterLoad) {
+      root.readAfterLoad = false
+      root.startRead()
+    }
   }
 
-  // Read now, or let the reader do it; skipped while a read is running.
+  // Read plugin.json again, then the count: here, or by the reader.
   function refresh() {
-    root.loadPlugin()
     var all = root.peers()
-    if (!Widget.isReader(all, root)) {
-      if (typeof all[0].refresh === "function") all[0].refresh()
-      return
-    }
-    if (reader.running) return
+    if (Widget.isReader(all, root)) root.readAfterLoad = true
+    else if (typeof all[0].refresh === "function") all[0].refresh()
+    pluginFile.reload()
+  }
+
+  function startRead() {
     if (!root.plugin) { root.share(null); return }
-    root.timedOut = false
+    if (reader.running) return
+    var attempt = Widget.beginRead(root.readState)
+    if (!attempt) return
+    root.readAttempt = attempt
     reader.command = Widget.readArgv(root.plugin)
     reader.running = true
     readTimeout.restart()
@@ -88,10 +104,11 @@ Panel {
   FileView {
     id: pluginFile
     path: root.pluginPath
-    blockLoading: true
     watchChanges: true
     printErrors: false
-    onFileChanged: root.loadPlugin()
+    onFileChanged: reload()
+    onLoaded: root.pluginLoaded(Widget.parsePlugin(text()))
+    onLoadFailed: root.pluginLoaded(null)
   }
 
   Process {
@@ -100,19 +117,25 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        readTimeout.stop()
-        if (!root.timedOut) root.share(Widget.parseWaiting(text))
+        var result = Widget.finishRead(root.readState, root.readAttempt, text)
+        if (result) {
+          readTimeout.stop()
+          root.share(result)
+        }
       }
     }
   }
 
+  // The read's deadline: it also settles a read whose program never started.
   Timer {
     id: readTimeout
     interval: Widget.READ_TIMEOUT_MS
     onTriggered: {
-      root.timedOut = true
-      reader.running = false
-      root.share({ known: false, reason: Widget.READ_TIMEOUT_REASON })
+      var result = Widget.expireRead(root.readState, root.readAttempt)
+      if (result) {
+        reader.running = false
+        root.share(result)
+      }
     }
   }
 
@@ -181,9 +204,17 @@ Panel {
     contentWidth: panel.fittedContentWidth(Style.space(300))
     contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(480))
 
+    // The rows scroll in what the launchers and the read's reason leave of
+    // the panel, so those always stay in view however many rows there are.
+    readonly property real bodyHeight: Math.min(Style.space(480), panel.availableCardHeight > 0 ? panel.availableCardHeight - panel.verticalContentInset : Style.space(480))
+    readonly property real rowsCap: Math.max(Style.space(64), bodyHeight - above.implicitHeight - below.implicitHeight - column.spacing * 2)
+
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      onMoveRequested: function(dx, dy) {
+        if (dy !== 0) rowsFlick.contentY = Math.max(0, Math.min(rowsFlick.contentHeight - rowsFlick.height, rowsFlick.contentY + dy * Style.space(40)))
+      }
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
 
@@ -192,84 +223,106 @@ Panel {
         width: parent.width
         spacing: Style.space(8)
 
-        PanelSectionHeader {
-          visible: root.rows.length > 0 || (!!root.waiting && !root.waiting.known)
-          text: "Waiting on you"
-          foreground: root.foreground
-          fontFamily: root.fontFamily
-        }
-
         // The kernel's own words when the read failed.
-        Text {
-          visible: !!root.waiting && !root.waiting.known
+        Column {
+          id: above
           width: parent.width
-          text: root.waiting && !root.waiting.known ? root.waiting.reason : ""
-          textFormat: Text.PlainText
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          wrapMode: Text.WordWrap
+          Text {
+            visible: root.failed
+            width: parent.width
+            text: root.failed ? root.waiting.reason : ""
+            textFormat: Text.PlainText
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
         }
 
-        Repeater {
-          model: root.rows
+        Flickable {
+          id: rowsFlick
+          visible: root.rows.length > 0
+          width: parent.width
+          height: visible ? Math.min(rows.implicitHeight, panel.rowsCap) : 0
+          contentWidth: width
+          contentHeight: rows.implicitHeight
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
+          flickableDirection: Flickable.VerticalFlick
+          interactive: contentHeight > height
+          ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-          Button {
-            required property var modelData
-            width: column.width
-            leftAlign: true
-            text: modelData.instance
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            onClicked: {
-              root.runLine(Widget.attachCommand(root.plugin, modelData.home))
-              root.close()
+          Column {
+            id: rows
+            width: rowsFlick.width
+
+            Repeater {
+              model: root.rows
+
+              Button {
+                required property var modelData
+                width: rows.width
+                leftAlign: true
+                text: modelData.instance
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                onClicked: {
+                  root.runLine(Widget.attachCommand(root.plugin, modelData.home))
+                  root.close()
+                }
+              }
             }
           }
         }
 
-        Text {
-          visible: root.rows.length > 0 && Widget.detachKey(root.plugin)
+        Column {
+          id: below
           width: parent.width
-          text: "Alt+O leaves the viewer"
-          textFormat: Text.PlainText
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-        }
+          spacing: Style.space(8)
 
-        PanelSeparator {
-          visible: root.rows.length > 0 || (!!root.waiting && !root.waiting.known)
-          foreground: root.foreground
-        }
+          Text {
+            visible: root.rows.length > 0 && Widget.detachKey(root.plugin)
+            width: parent.width
+            text: "Alt+O leaves the viewer"
+            textFormat: Text.PlainText
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
 
-        Button {
-          visible: Widget.tuiCommand(root.plugin) !== ""
-          width: column.width
-          leftAlign: true
-          text: "Open OATS TUI"
-          foreground: root.foreground
-          fontFamily: root.fontFamily
-          onClicked: { root.runLine(Widget.tuiCommand(root.plugin)); root.close() }
-        }
+          PanelSeparator {
+            visible: root.rows.length > 0 || root.failed
+            foreground: root.foreground
+          }
 
-        Button {
-          visible: Widget.desktopCommand(root.plugin) !== ""
-          width: column.width
-          leftAlign: true
-          text: "Open OATS Desktop"
-          foreground: root.foreground
-          fontFamily: root.fontFamily
-          onClicked: { root.runLine(Widget.desktopCommand(root.plugin)); root.close() }
-        }
+          Button {
+            visible: Widget.tuiCommand(root.plugin) !== ""
+            width: parent.width
+            leftAlign: true
+            text: "Open OATS TUI"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: { root.runLine(Widget.tuiCommand(root.plugin)); root.close() }
+          }
 
-        Button {
-          width: column.width
-          leftAlign: true
-          text: "Set up keys and launchers"
-          foreground: root.foreground
-          fontFamily: root.fontFamily
-          onClicked: { root.runLine(Widget.setupCommand(root.plugin, root.setupPath)); root.close() }
+          Button {
+            visible: Widget.desktopCommand(root.plugin) !== ""
+            width: parent.width
+            leftAlign: true
+            text: "Open OATS Desktop"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: { root.runLine(Widget.desktopCommand(root.plugin)); root.close() }
+          }
+
+          Button {
+            width: parent.width
+            leftAlign: true
+            text: "Set up keys and launchers"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: { root.runLine(Widget.setupCommand(root.plugin, root.setupPath)); root.close() }
+          }
         }
       }
     }

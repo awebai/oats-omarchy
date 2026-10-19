@@ -44,12 +44,10 @@ compares them with what is there, and only then writes:
 - `lib/discover.mjs` finds things instead of assuming them:
   - the deployment: `--dir`, else the nearest `oats-local.yaml` at or above
     the working directory, else the one setup's state records. With none,
-    `--plan` and `--apply` in a terminal offer the deployments directly in
-    `~/Agents`, by the kernel TUI's rule (`deploymentsInside` in awebai/oats
-    `packages/client/workspace-admission.mjs`: at most 200 entries,
-    directories only, no link followed, a regular `oats-local.yaml`), and
-    ask for a number or a path. An offer is taken only when picked; without
-    a terminal (or with `--json`) it is `E_NO_DEPLOYMENT`;
+    `--plan` and `--apply` in a terminal ask for its path, which must be a
+    directory holding a regular `oats-local.yaml` (not a link). Nothing is
+    offered or guessed; without a terminal (or with `--json`) it is
+    `E_NO_DEPLOYMENT`;
   - the OATS CLI: `oats` on PATH resolved to the CLI's script (a mise shim
     through `mise which oats`), refused when it is an instance home's
     `.oats/bin` shim, and proven by `version --json`, 0.53.0 or later;
@@ -152,7 +150,10 @@ here says that nobody is waiting. Only a status that could not be read is
 unknown. `--json` prints what it read and opens nothing: `{ok, count,
 rows: [{instance, home}]}`, or `{ok: false, reason}` with one bounded line
 (the kernel's first, when `oats status` failed). It is the bar widget's only
-source; the filter lives here alone.
+source; the filter lives here alone. With `--json` the kernel's read runs in
+a process group of its own, which waiting kills on its own timeout (25 s,
+inside the widget's 30 s) and when it is stopped by SIGTERM, SIGINT or
+SIGHUP, so a stopped read leaves no kernel process behind.
 
 ### The bar widget
 
@@ -163,13 +164,24 @@ hands every other command to the bar's `run`, which runs `bash -lc <line>`:
 `widget.mjs` builds those lines from `plugin.json`'s argv, every word
 single-quoted, and quotes them again for the floating terminal's `bash -c`.
 `test/widget.test.mjs` runs each line through bash with stand-ins that log
-their argv. The badge is the count when it is above 0, `?` when the read
+their argv. `test/widget-qml.test.mjs` loads the widget itself in Quickshell,
+offscreen, with Omarchy's own `Ui` and `Commons` and a stand-in only for the
+panel's layer-shell window (`KeyboardPanel`, which needs a compositor): the
+layout with more rows than fit, a `plugin.json` change, a destroy during a
+read, and a program that cannot start. It runs in CI's Omarchy container. The badge is the count when it is above 0, `?` when the read
 failed, and nothing otherwise.
 
 The read runs on a timer (the `refreshIntervalSec` setting, 60 s by default,
-15 to 3600) and when the panel opens. A read is never started while one runs;
-one that takes longer than 30 s is stopped and shows `?`; the widget stops
-it when it is destroyed (a hot reload or a disable). With a bar on each
+15 to 3600) and when the panel opens, after `plugin.json` is read again: the
+widget takes the file's contents when its read completes (`onLoaded`), and
+a requested count read waits for that. `widget.mjs`'s read state keeps one
+read pending from its start to its output or its 30 s deadline, whether or
+not its program started (Quickshell reports nothing for a program that
+cannot start), so a refresh neither overlaps a read nor moves its deadline;
+at the deadline the read is stopped and shows `?`. The widget also stops it
+when it is destroyed (a hot reload or a disable). The panel's rows scroll in
+what the failed read's reason and the launchers leave of the panel, so the
+launchers stay in view however many rows there are. With a bar on each
 monitor there is one widget per bar, and one of them reads for all: the
 first that the bar's `moduleWidgets` lists, which hands each result to the
 others (a widget the bar does not list reads for itself). A read costs about
@@ -236,8 +248,11 @@ CI's `omarchy` job runs in a pinned `archlinux:base` container:
   block written, refused and removed with the real Hyprland, Omarchy's
   own `MenuModel.js` reading the menu block (it is plain functions, so it
   runs as a script in a `vm` context), and `bin/waiting.mjs` opening a
-  session through the real floating terminal. Only the selector is a fake:
-  the real one needs a running Omarchy shell.
+  session through the real floating terminal, as does the bar panel's row.
+  Only the selector is a fake: the real one needs a running Omarchy shell.
+- `test/widget-qml.test.mjs` (as `ci`, with `OATS_OMARCHY_CONTAINER=1`) loads
+  the bar widget in the container's Quickshell with `QT_QPA_PLATFORM=offscreen`
+  (see "The bar widget").
 
 Installing `omarchy` in a container works as it is: Limine's post-transaction
 hooks report that there is no FAT32 boot partition, which pacman treats as

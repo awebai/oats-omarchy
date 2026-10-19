@@ -4,7 +4,8 @@ An [Omarchy](https://omarchy.org) plugin that makes
 [OATS](https://github.com/awebai/oats) feel native there. Both OATS clients,
 the terminal UI (`oats tui`) and OATS Desktop, become Omarchy apps with a
 launcher entry, an icon and a key. An `oats` submenu in the Omarchy menu
-opens either client and lists the agents waiting on you.
+opens either client and lists the agents waiting on you, and the OATS icon in
+the bar shows how many there are and opens them from a panel.
 
 It is set up with one command, `setup --plan | --apply | --remove | --check`,
 run from the plugin's directory. Setup finds what it needs on the machine
@@ -150,8 +151,23 @@ omarchy plugin add https://github.com/awebai/oats-omarchy --enable
 - **`omarchy plugin add`** clones this repository's default branch into
   `~/.config/omarchy/plugins/ai.aweb.oats/` and puts the OATS icon in your
   bar. It takes no tag. Without a terminal it needs `--yes`.
-- **The OATS icon** opens the OATS TUI once setup has run. Before that, it
-  opens setup's plan in a floating terminal.
+- **The OATS icon** shows beside it the number of agents waiting on you. An
+  agent counts when the kernel says it is waiting on you; for the others the
+  kernel makes no claim, so no number never means that nobody is waiting. It
+  shows `?` when the count could not be read. It refreshes every 60 seconds
+  (the widget's `refreshIntervalSec` setting, 15 to 3600) and whenever the
+  panel opens.
+- **Its panel** (a click) lists those agents: a click on one opens its
+  session in a floating terminal, and Alt+O leaves that viewer when your OATS
+  CLI supports a detach key. It also has Open OATS TUI, Open OATS Desktop
+  (when setup found one) and Set up keys and launchers, which runs `setup
+  --apply` in a floating terminal. A right click on the icon opens the TUI.
+  Before setup has run, the panel offers setup only, and a right click runs
+  the whole setup in a floating terminal: it asks for the deployment, shows
+  the plan and asks before applying it.
+- **Finding the deployment.** Setup takes `--dir`, else the deployment
+  around the working directory, else the one it is applied for. With none of
+  those, in a terminal, it asks for the path of your deployment.
 - **`setup --plan`** says what `--apply` would write and what it found.
   `--apply` shows the plan again and asks before writing (`--yes` skips the
   question; without a terminal it is required). When the plan says the key is

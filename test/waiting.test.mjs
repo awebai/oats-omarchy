@@ -2,11 +2,12 @@
 // setup writes), Omarchy's selector, its notifier and its floating terminal
 // (test/helpers/sandbox.mjs).
 import { test } from "node:test";
+import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { attachCommand, attachPrefix, DETACH_KEY, waiting, waitingRows } from "../lib/waiting.mjs";
-import { sandbox, writeExecutable } from "./helpers/sandbox.mjs";
+import { BIN, sandbox, writeExecutable } from "./helpers/sandbox.mjs";
 import { badge, parseWaiting } from "../widget.mjs";
 
 const row = (instance, home, waitingOnYou = null) => ({ agent: "a", instance, home, running: true, waitingOnYou });
@@ -180,17 +181,27 @@ test("without omarchy-notification-send: stderr only, same exit codes", (t) => {
 });
 
 // waiting --json in this process: what it prints, and its exit code.
-function json(s, args = [], opts = {}) {
+async function json(s, args = [], opts = {}) {
+  if (!existsSync(shimPath(s))) writeShim(s);
   let stdout = "";
-  const r = call(s, ["--json", ...args], {}, { ...opts, out: { write: (x) => { stdout += x; } } });
-  return { ...r, stdout, result: stdout ? JSON.parse(stdout) : null };
+  let stderr = "";
+  const argv = ["--json", ...(args.some((a) => a.startsWith("--dir")) ? args : ["--dir", s.deployment, ...args])];
+  const status = await waiting(argv, s.env, { write: (x) => { stderr += x; } }, { ...opts, out: { write: (x) => { stdout += x; } } });
+  return { status, stderr, stdout, result: stdout ? JSON.parse(stdout) : null };
 }
 
-test("--json: the count and the rows waiting on you, nothing opened, nothing notified", (t) => {
+// Whether a pid is gone: no such process, or one that has exited and waits
+// only to be reaped.
+const gone = (pid) => {
+  try { return /^\d+ \(.*\) Z/.test(readFileSync(`/proc/${pid}/stat`, "utf8")); } catch { return true; }
+};
+const pidsOf = (s) => readFileSync(join(s.root, "status.pids"), "utf8").trim().split(/\s+/).map(Number);
+
+test("--json: the count and the rows waiting on you, nothing opened, nothing notified", async (t) => {
   const s = sandbox(t);
   const { a, b } = homes(s);
   withStatus(s, [{ name: "x", instances: [row("alpha", a, W), row("idle", "/h/idle")] }, { name: "y", instances: [row("with space", b, W)] }]);
-  const r = json(s);
+  const r = await json(s);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.result, { ok: true, count: 2, rows: [{ instance: "alpha", home: a }, { instance: "with space", home: b }] });
   assert.equal(r.stdout.split("\n").length, 2, "one line");
@@ -200,14 +211,15 @@ test("--json: the count and the rows waiting on you, nothing opened, nothing not
 
   // No row claims to wait: a count of 0, which the widget shows as no badge.
   withStatus(s, [{ name: "x", instances: [row("idle", "/h/idle")] }]);
-  assert.deepEqual(json(s).result, { ok: true, count: 0, rows: [] });
-  assert.equal(badge(parseWaiting(json(s).stdout)), "", "no badge, no claim");
+  const none = await json(s);
+  assert.deepEqual(none.result, { ok: true, count: 0, rows: [] });
+  assert.equal(badge(parseWaiting(none.stdout)), "", "no badge, no claim");
 });
 
-test("--json: a failed read is {ok: false, reason} with the kernel's first line, bounded; exit 1; nothing notified", (t) => {
+test("--json: a failed read is {ok: false, reason} with the kernel's first line, bounded; exit 1; nothing notified", async (t) => {
   const s = sandbox(t);
   writeFileSync(join(s.root, "status.json"), JSON.stringify({ ok: false, error: { message: `${"x".repeat(500)}\nsecond line` } }));
-  const r = json(s);
+  const r = await json(s);
   assert.equal(r.status, 1);
   assert.deepEqual(Object.keys(r.result), ["ok", "reason"]);
   assert.equal(r.result.ok, false);
@@ -216,13 +228,42 @@ test("--json: a failed read is {ok: false, reason} with the kernel's first line,
   assert.equal(badge(parseWaiting(r.stdout)), "?");
   assert.deepEqual(calls(s, "notify.log"), []);
 
-  writeFileSync(join(s.root, "status.mode"), "hang");
-  assert.match(json(s, [], { statusTimeoutMs: 500 }).result.reason, /timed out after 500 ms/);
-  assert.match(json(s, ["--dir", join(s.root, "gone")]).result.reason, /--dir .*gone does not exist/);
+  writeFileSync(join(s.root, "status.mode"), "stderr");
+  assert.match((await json(s)).result.reason, /^oats: no oats-local\.yaml at or above/);
+  assert.match((await json(s, ["--dir", join(s.root, "gone")])).result.reason, /--dir .*gone does not exist/);
   rmSync(shimPath(s));
   let stdout = "";
-  assert.equal(waiting(["--json", "--dir", s.deployment], s.env, { write: () => {} }, { out: { write: (x) => { stdout += x; } } }), 1);
+  assert.equal(await waiting(["--json", "--dir", s.deployment], s.env, { write: () => {} }, { out: { write: (x) => { stdout += x; } } }), 1);
   assert.deepEqual(JSON.parse(stdout), { ok: false, reason: `setup's shim ${shimPath(s)} is missing: run setup --apply` });
+});
+
+test("--json: a kernel that never answers is stopped at the timeout, with every process it started", async (t) => {
+  const s = sandbox(t);
+  writeFileSync(join(s.root, "status.mode"), "hang");
+  const r = await json(s, [], { statusTimeoutMs: 1000 });
+  assert.equal(r.status, 1);
+  assert.match(r.result.reason, /timed out after 1000 ms/);
+  assert.equal(badge(parseWaiting(r.stdout)), "?");
+  const [kernel, child] = pidsOf(s);
+  assert.ok(gone(kernel), "the kernel is gone");
+  assert.ok(gone(child), "and its child");
+});
+
+test("--json stopped by a signal (the bar widget's deadline, a reload, a disable) stops the kernel's read with it", async (t) => {
+  const s = sandbox(t);
+  writeShim(s);
+  writeFileSync(join(s.root, "status.mode"), "hang");
+  const proc = spawn(process.execPath, [BIN.waiting, "--json", "--dir", s.deployment], { env: s.env, stdio: "ignore" });
+  t.after(() => { try { proc.kill("SIGKILL"); } catch { /* gone */ } });
+  assert.ok(waitFor(join(s.root, "status.pids"), (text) => text.trim().split(/\s+/).length === 2), "the kernel started");
+  const exited = new Promise((resolve) => proc.on("exit", (code, signal) => resolve({ code, signal })));
+  proc.kill("SIGTERM");
+  assert.deepEqual(await exited, { code: 143, signal: null });
+  const [kernel, child] = pidsOf(s);
+  const end = Date.now() + 5000;
+  while (!(gone(kernel) && gone(child)) && Date.now() < end) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(gone(kernel), "the kernel is gone");
+  assert.ok(gone(child), "and its child");
 });
 
 test("arguments: --dir, else the working directory; anything else exits 2; --help prints the usage", (t) => {

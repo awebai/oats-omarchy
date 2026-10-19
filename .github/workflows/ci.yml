@@ -54,3 +54,5 @@ jobs:
         run: pacman -S --noconfirm --needed nodejs
       - name: Setup against the real Omarchy
         run: runuser -u ci -- env OATS_OMARCHY_CONTAINER=1 node --test test/omarchy-container.test.mjs
+      - name: The bar widget in Quickshell, offscreen
+        run: runuser -u ci -- env OATS_OMARCHY_CONTAINER=1 node --test test/widget-qml.test.mjs

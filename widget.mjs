@@ -82,6 +82,39 @@ export function badge(result) {
   return result.count > 0 ? String(result.count) : ""
 }
 
+// The count read's state, one per reader. A read is pending from the moment
+// it is asked for until its output is parsed or its deadline passes, whether
+// or not its process ever started: Quickshell reports nothing for a program
+// that cannot start, so only the deadline settles that read. While one is
+// pending no other starts, and a refresh does not move its deadline.
+export function newReadState() {
+  return { pending: false, attempt: 0 }
+}
+
+// → the number of the read to start, or 0 while one is pending.
+export function beginRead(state) {
+  if (state.pending) return 0
+  state.pending = true
+  state.attempt += 1
+  return state.attempt
+}
+
+// The output of read `attempt` → what to show, or null when that read is
+// no longer the pending one (it was stopped at its deadline).
+export function finishRead(state, attempt, text) {
+  if (!state.pending || attempt !== state.attempt) return null
+  state.pending = false
+  return parseWaiting(text)
+}
+
+// Read `attempt`'s deadline → what to show (it failed), or null when it had
+// already finished.
+export function expireRead(state, attempt) {
+  if (!state.pending || attempt !== state.attempt) return null
+  state.pending = false
+  return { known: false, reason: READ_TIMEOUT_REASON }
+}
+
 // The refresh interval from the widget's setting, in ms: 15 s to an hour.
 export function refreshMs(seconds) {
   var s = Number(seconds)

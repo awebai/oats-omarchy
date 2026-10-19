@@ -156,7 +156,14 @@ const [cmd, ...rest] = process.argv.slice(2);
 const fake = (name) => { try { return readFileSync(${JSON.stringify(root)} + "/" + name, "utf8"); } catch { return null; } };
 if (cmd === "status" && rest.join(" ") === "--json") {
   const mode = (fake("status.mode") || "").trim();
-  if (mode === "hang") { setInterval(() => {}, 1000); await new Promise(() => {}); }
+  if (mode === "hang") {
+    // A kernel that never answers, with a child of its own; both pids logged.
+    const { spawn } = await import("node:child_process");
+    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    appendFileSync(${JSON.stringify(root)} + "/status.pids", process.pid + " " + child.pid + "\\n");
+    setInterval(() => {}, 1000);
+    await new Promise(() => {});
+  }
   if (mode === "envelope") { console.log(JSON.stringify({ ok: false, error: { code: "E_LOCK", message: "oats-lock.json is unreadable: Unexpected end of JSON input" } })); process.exit(1); }
   else if (mode === "stderr") { console.error("oats: no oats-local.yaml at or above " + process.cwd()); process.exit(1); }
   else { process.stdout.write(fake("status.json") || JSON.stringify({ root: process.cwd(), agents: [] })); process.exit(0); }

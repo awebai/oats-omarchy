@@ -67,6 +67,22 @@ test("the count: the number when some row waits on you, ? only when the read fai
   assert.equal(W.READ_TIMEOUT_MS, 30000);
 });
 
+test("the read state: one read at a time; a refresh does not move the deadline; only the deadline settles a read that never started", () => {
+  const state = W.newReadState();
+  // At the shortest interval: a read at 0 s whose program never starts (no output ever).
+  const first = W.beginRead(state);
+  assert.equal(first, 1);
+  assert.equal(W.beginRead(state), 0, "the refresh at 15 s starts nothing");
+  assert.deepEqual(W.expireRead(state, first), { known: false, reason: W.READ_TIMEOUT_REASON }, "the deadline at 30 s settles it: ?");
+  assert.equal(W.badge(W.expireRead(state, first) || { known: false }), "?");
+  const second = W.beginRead(state);
+  assert.equal(second, 2, "the next refresh reads again");
+  assert.equal(W.finishRead(state, first, '{"ok":true,"count":1,"rows":[]}'), null, "output of a read stopped at its deadline is ignored");
+  assert.deepEqual(W.finishRead(state, second, '{"ok":true,"count":0,"rows":[]}'), { known: true, count: 0, rows: [] });
+  assert.equal(W.expireRead(state, second), null, "a finished read has no deadline left");
+  assert.equal(W.finishRead(state, second, "{}"), null, "nor a second result");
+});
+
 test("the refresh interval and the one reader for every bar", () => {
   assert.deepEqual([W.refreshMs(undefined), W.refreshMs(60), W.refreshMs(5), W.refreshMs(99999), W.refreshMs("120")], [60000, 60000, 15000, 3600000, 120000]);
   const a = {}, b = {};

@@ -1,7 +1,7 @@
 // What setup gives the bar widget, and how it finds a deployment the first
 // time. The widget's file (plugin.json, in setup's state directory) holds the
 // commands the key and the menu run, as argv; with no deployment found and a
-// terminal, setup offers those in ~/Agents and asks.
+// terminal, setup asks for its path.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
@@ -87,62 +87,59 @@ function fromTerminal(s, args, answers) {
   return { status, out, asked };
 }
 
-function agents(s) {
-  const dir = join(s.home, "Agents");
-  for (const name of ["beta", "alpha", "plain", "linked-file"]) mkdirSync(join(dir, name), { recursive: true });
-  writeFileSync(join(dir, "alpha", "oats-local.yaml"), "# alpha\n");
-  writeFileSync(join(dir, "beta", "oats-local.yaml"), "# beta\n");
-  // Not deployments: a link to one, and a folder whose oats-local.yaml is a link.
-  symlinkSync(join(dir, "alpha"), join(dir, "a-link"));
-  symlinkSync(join(dir, "alpha", "oats-local.yaml"), join(dir, "linked-file", "oats-local.yaml"));
-  return { alpha: realpathSync(join(dir, "alpha")), beta: realpathSync(join(dir, "beta")) };
+// Directories that are, and are not, deployments.
+function places(s) {
+  const dir = join(s.root, "places");
+  for (const name of ["real", "plain", "linked-file"]) mkdirSync(join(dir, name), { recursive: true });
+  writeFileSync(join(dir, "real", "oats-local.yaml"), "# real\n");
+  symlinkSync(join(dir, "real", "oats-local.yaml"), join(dir, "linked-file", "oats-local.yaml"));
+  mkdirSync(join(s.home, "mine"));
+  writeFileSync(join(s.home, "mine", "oats-local.yaml"), "# mine\n");
+  return { real: realpathSync(join(dir, "real")), plain: join(dir, "plain"), linked: join(dir, "linked-file") };
 }
 
-test("no deployment, in a terminal: setup offers the deployments in ~/Agents and takes the one picked", (t) => {
+test("no deployment, in a terminal: setup asks for its path, offering none; ~/ works", (t) => {
   const s = sandbox(t, { node: true });
-  const { alpha, beta } = agents(s);
-  const r = fromTerminal(s, ["--plan"], ["2"]);
+  mkdirSync(join(s.home, "Agents", "beta"), { recursive: true });
+  writeFileSync(join(s.home, "Agents", "beta", "oats-local.yaml"), "# not offered\n");
+  places(s);
+  const r = fromTerminal(s, ["--plan"], ["~/mine"]);
   assert.equal(r.status, 0, r.out);
-  assert.match(r.out, /^No OATS deployment here: no oats-local\.yaml at or above the working directory, and no --dir\.\n/);
-  assert.ok(r.out.includes(`Deployments in ${join(s.home, "Agents")}:\n  1) alpha  ${alpha}\n  2) beta  ${beta}\n`), r.out);
-  assert.ok(!/a-link|linked-file|plain/.test(r.out), "only directories with a regular oats-local.yaml, no link followed");
+  assert.match(r.out, /^No OATS deployment here: no oats-local\.yaml at or above the working directory, and no --dir\.\nType the path of the deployment, the directory that holds oats-local\.yaml \(Enter to stop\): /);
+  assert.ok(!r.out.includes("Agents"), "nothing is offered");
   assert.equal(r.asked.length, 1);
-  assert.match(r.out, new RegExp(`deployment.*${beta.replace(/[/.]/g, "\\$&")}.*your answer`));
+  const mine = realpathSync(join(s.home, "mine"));
+  assert.match(r.out, new RegExp(`deployment.*${mine.replace(/[/.]/g, "\\$&")}.*your answer`));
   assert.equal(existsSync(pluginPath(s)), false, "--plan writes nothing");
 });
 
 test("a typed path is checked and asked again; Enter alone stops with E_NO_DEPLOYMENT; without a terminal nothing is asked", (t) => {
   const s = sandbox(t, { node: true });
-  agents(s);
-  const linked = join(s.home, "Agents", "linked-file");
+  const { real, plain, linked } = places(s);
   const r = fromTerminal(s, ["--plan", "--json"], []);
   assert.equal(r.asked.length, 0, "--json is not a terminal");
   assert.equal(JSON.parse(r.out).error.code, "E_NO_DEPLOYMENT");
 
-  const again = fromTerminal(s, ["--plan"], [join(s.root, "gone"), linked, "~/Agents/plain", s.deployment]);
+  const again = fromTerminal(s, ["--plan"], [join(s.root, "gone"), linked, plain, real]);
   assert.equal(again.status, 0, again.out);
   assert.equal(again.asked.length, 4);
   assert.ok(again.out.includes(`${join(s.root, "gone")} does not exist\n`));
-  assert.ok(again.out.includes(`${realpathSync(linked)} holds no regular oats-local.yaml, so it is not an OATS deployment\n`));
-  assert.ok(again.out.includes(`${realpathSync(join(s.home, "Agents", "plain"))} holds no regular oats-local.yaml`));
+  assert.ok(again.out.includes(`${realpathSync(linked)} holds no regular oats-local.yaml, so it is not an OATS deployment\n`), "a linked oats-local.yaml is not one");
+  assert.ok(again.out.includes(`${realpathSync(plain)} holds no regular oats-local.yaml`));
+  assert.ok(again.out.includes(real));
 
   const stopped = fromTerminal(s, ["--plan"], [""]);
   assert.equal(stopped.status, 1);
   assert.match(stopped.out, /setup: no OATS deployment: no oats-local\.yaml at or above/);
-
-  rmSync(join(s.home, "Agents"), { recursive: true });
-  const none = fromTerminal(s, ["--plan"], [""]);
-  assert.match(none.out, /\nType the path of the deployment, the directory that holds oats-local\.yaml \(Enter to stop\): /);
-  assert.ok(!none.out.includes("Deployments in"));
 });
 
 test("--apply from a terminal asks for the deployment first, then shows the plan and asks y/N", (t) => {
   const s = sandbox(t, { node: true });
-  const { alpha } = agents(s);
-  const r = fromTerminal(s, ["--apply"], ["1", "n"]);
+  const { real } = places(s);
+  const r = fromTerminal(s, ["--apply"], [real, "n"]);
   assert.equal(r.status, 1);
   assert.equal(r.asked.length, 2);
   assert.match(r.asked[1], /^Apply it\? \[y\/N\] $/);
-  assert.ok(r.out.includes(alpha));
+  assert.ok(r.out.includes(real));
   assert.match(r.out, /aborted: nothing was changed/);
 });
