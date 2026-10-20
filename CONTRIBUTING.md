@@ -20,7 +20,9 @@ scripts/lint.mjs         lint
 test/                    node:test suites; test/fixtures holds their inputs (with
                          test/fixtures/v0.3.0 and v0.4.0 those versions' own blocks,
                          for the upgrade, and test/fixtures/omarchy-4.0.4 Omarchy's
-                         MenuModel.js and the root of its menu, for the search),
+                         MenuModel.js and the root of its menu, for the search,
+                         from basecamp/omarchy's 4.0.4 release under its MIT
+                         notice, LICENSE there),
                          test/helpers/sandbox.mjs the temporary machine they run on
 ci/                      the Arch Linux + Omarchy container bootstrap and checks
 .github/workflows/ci.yml
@@ -147,7 +149,10 @@ compares them with what is there, and only then writes:
   launchers among those: so the default UI's row is the only one labelled
   OATS, and no row at the root starts with "o" but it.
   `test/menu-search.test.mjs` ranks the block with Omarchy's own
-  `MenuModel.js` (vendored, pinned by digest) and the root of its menu
+  `MenuModel.js` (basecamp/omarchy's 4.0.4 release,
+  `shell/plugins/menu/MenuModel.js`, vendored unchanged with Omarchy's MIT
+  notice in `test/fixtures/omarchy-4.0.4/LICENSE`, pinned by digest) and the
+  root of its menu (derived from `default/omarchy/omarchy-menu.jsonc` there)
   (`test/helpers/omarchy-search.mjs` holds `Menu.qml`'s steps), and the
   container test with the real Omarchy's whole menu. "Waiting on you" opens
   the waiting popup (`omarchy-shell shell summon ai.aweb.oats '{}'`, which

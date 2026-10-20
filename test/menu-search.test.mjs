@@ -4,6 +4,11 @@
 // block setup writes, with the app launchers installed, OATS's own two among
 // them. The container test ranks the same block with the real Omarchy's code
 // and whole menu.
+//
+// MenuModel.js is shell/plugins/menu/MenuModel.js of basecamp/omarchy at its
+// v4.0.4 release, and omarchy-menu-root.jsonc is derived from
+// default/omarchy/omarchy-menu.jsonc there. Omarchy is MIT licensed; its
+// notice is test/fixtures/omarchy-4.0.4/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
