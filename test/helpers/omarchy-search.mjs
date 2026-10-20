@@ -9,7 +9,8 @@ import vm from "node:vm";
 
 export function loadMenuModel(path) {
   const model = vm.createContext({});
-  vm.runInContext(readFileSync(path, "utf8"), model, { filename: path });
+  // A QML JavaScript resource may start with .pragma or .import lines.
+  vm.runInContext(readFileSync(path, "utf8").replace(/^\s*\.(pragma|import)\b.*$/gm, ""), model, { filename: path });
   return model;
 }
 

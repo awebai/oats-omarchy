@@ -19,6 +19,7 @@ import { parseDesktopExec } from "../lib/quote.mjs";
 import { readDesktopEntry } from "../lib/desktop-entry.mjs";
 import { fixture, repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 import * as widget from "../widget.mjs";
+import { appRow, loadMenuModel, search } from "./helpers/omarchy-search.mjs";
 
 const enabled = process.env.OATS_OMARCHY_CONTAINER === "1";
 const OMARCHY = process.env.OMARCHY_PATH || "/usr/share/omarchy";
@@ -188,7 +189,7 @@ test("an AppImage without libfuse2: the entry extracts and runs, the plan names 
   const before = snapshot(s.home);
   const p = plan(s);
   assert.ok(p.fixes.some((f) => f.fix === "sudo pacman -S fuse2"));
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.equal(s.run(["setup", "--apply", "--ui", "tui"]).status, 0);
   const entry = readDesktopEntry(readFileSync(join(s.home, ".local/share/applications/awebai-oats-desktop.desktop"), "utf8"));
   assert.deepEqual(parseDesktopExec(entry.Exec).slice(1), ["--appimage-extract-and-run", "--dir", s.deployment]);
   const v = verifySnippet(s, p.keys);
@@ -238,7 +239,7 @@ test("the real launchers run what setup wrote, with a deployment path that has a
   // that no window matches, as on a desktop with neither app open.
   writeExecutable(join(s.fakebin, "uwsm-app"), `#!/bin/sh\n[ "$1" = "--" ] && shift\nif [ "$1" = xdg-terminal-exec ]; then for a; do echo "terminal:$a"; done >> "${argvLog}"; exit 0; fi\nexec "$@"\n`);
   writeExecutable(join(s.fakebin, "hyprctl"), "#!/bin/sh\necho '[]'\n");
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.equal(s.run(["setup", "--apply", "--ui", "tui"]).status, 0);
   const p = plan(s);
   const shim = join(s.home, ".local/share/oats-omarchy/oats");
   const terminal = ["terminal:xdg-terminal-exec", "terminal:--app-id=org.oats.tui", "terminal:-e", `terminal:${shim}`, "terminal:tui", "terminal:--dir", `terminal:${s.deployment}`];
@@ -306,14 +307,36 @@ for (const [name, text] of [
     const byId = Object.fromEntries(user.map((item) => [item.id, item]));
     for (const item of userBefore) assert.deepEqual(byId[item.id], item, `${item.id} reads the same`);
     const merged = model.merge(defaults, user);
-    const oats = ["oats", "oats.tui", "oats.waiting", "oats.status"].map((id) => merged.items[id]);
-    assert.deepEqual(oats.map((x) => [x.id, x.parent, x.kind]), [["oats", "root", "menu"], ["oats.tui", "oats", "action"], ["oats.waiting", "oats", "action"], ["oats.status", "oats", "action"]]);
+    const oats = ["oats-ui", "oats", "oats.tui", "oats.waiting", "oats.status"].map((id) => merged.items[id]);
+    assert.deepEqual(oats.map((x) => [x.id, x.parent, x.kind, x.label]), [["oats-ui", "root", "action", "OATS"], ["oats", "root", "menu", "Agent team"], ["oats.tui", "oats", "action", "Open OATS TUI"], ["oats.waiting", "oats", "action", "Waiting on you"], ["oats.status", "oats", "action", "Status"]]);
+    assert.equal(merged.items["oats-ui"].action, merged.items["oats.tui"].action, "the only UI set up is the default");
     assert.equal(merged.items["oats.waiting"].label, "Waiting on you");
     assert.equal(merged.items["oats.desktop"], undefined, "no Desktop here");
     for (const item of defaults) if (!byId[item.id]) assert.ok(merged.items[item.id], `Omarchy's ${item.id} is still there`);
 
     assert.equal(s.run(["setup", "--remove"]).status, 0);
     assert.deepEqual(snapshot(s.home), before);
+  });
+}
+
+// The ranking of test/menu-search.test.mjs, with this Omarchy's own search
+// code and whole menu definition, and the block setup writes here.
+for (const ui of ["tui", "desktop"]) {
+  test(`typing o, oa, oat, oats or OATS in SUPER + SPACE: with --ui ${ui}, the default UI's row is first, ranked by Omarchy's own MenuModel.js`, { skip }, (t) => {
+    const s = omarchySandbox(t);
+    const image = join(s.home, ".local/opt/oats-desktop/OATS-Desktop.AppImage");
+    writeExecutable(image, "#!/bin/sh\nexit 0\n");
+    assert.equal(s.run(["setup", "--apply", "--ui", ui]).status, 0);
+    const user = readFileSync(join(s.home, ".config", "omarchy", "extensions", "omarchy-menu.jsonc"), "utf8");
+    const defaults = readFileSync(join(OMARCHY, "default", "omarchy", "omarchy-menu.jsonc"), "utf8");
+    const model = loadMenuModel(join(OMARCHY, "shell", "plugins", "menu", "MenuModel.js"));
+    const apps = [appRow({ id: "org.oats.tui", name: "OATS" }), appRow({ id: "awebai-oats-desktop", name: "OATS Desktop" })];
+    const opens = model.parseMenuJsonc(user).find((x) => x.id === `oats.${ui}`).action;
+    for (const query of ["o", "oa", "oat", "oats", "OATS"]) {
+      const rows = search(model, { defaults, user, apps }, query);
+      assert.equal(rows[0].itemId, "oats-ui", `${query}: ${JSON.stringify(rows.slice(0, 4))}`);
+      assert.equal(rows[0].action, opens, query);
+    }
   });
 }
 
