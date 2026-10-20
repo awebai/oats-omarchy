@@ -1,31 +1,19 @@
 # oats-omarchy
 
 An [Omarchy](https://omarchy.org) plugin that makes
-[OATS](https://github.com/awebai/oats) feel native there. With only the OATS
-CLI and tmux installed, you work with your agents in Omarchy's own UI:
-
-- **The OATS picker** (SUPER + O, then Space) lists every agent, who is
-  waiting on you and why, and the souls you can start agents from. It opens
-  any agent's session, and starts a new agent from a soul with the task you
-  type. It looks like Omarchy's own pickers and uses the shell's theme.
-- **The OATS icon in the bar** opens a panel with a card for each agent
-  waiting on you, read when you open it.
-- **An `oats` submenu** in the Omarchy menu, found by searching for "oats",
-  "agents", "instances", "souls" or "waiting", opens the picker on each of
-  its sections, and the OATS status.
-
-Both OATS clients, the terminal UI (`oats tui`) and OATS Desktop, stay
-optional. When they are installed they become Omarchy apps with a launcher
-entry, an icon and a key, as before. With an OATS CLI that keeps this
-computer's list of deployments (`oats deployments`), all of that covers every
-listed deployment; with an older one, the one deployment setup is applied
-for.
+[OATS](https://github.com/awebai/oats) feel native there. Both OATS clients,
+the terminal UI (`oats tui`) and OATS Desktop, become Omarchy apps with a
+launcher entry, an icon and a key. An `oats` submenu in the Omarchy menu
+opens either client and lists the agents waiting on you, and the OATS icon in
+the bar opens a panel that lists them, read when you open it. With an OATS
+CLI that keeps this computer's list of deployments (`oats deployments`),
+all of that covers every listed deployment; with an older one, the one
+deployment setup is applied for.
 
 It is set up with one command, `setup --plan | --apply | --remove | --check`,
 run from the plugin's directory. Setup finds what it needs on the machine
 instead of assuming paths, and applies each part only where Omarchy offers
-it. On Omarchy's Lua layout it writes the keys, SUPER + O and then Space, T
-or D, into your
+it. On Omarchy's Lua layout it writes the key, SUPER + O, into your
 `bindings.lua` as a marked block, but only over Omarchy's stock binding and
 only after Hyprland has checked a copy of your config with it. Otherwise it
 prints the snippet for you to add. `--remove` restores exactly what was
@@ -35,7 +23,7 @@ there before.
 
 This section is written to you, the coding agent asked to install this
 plugin. Follow the steps in order. Every command here is checked against
-v0.4.0.
+v0.3.0.
 
 > **Never pass `--yes` to `setup --apply` or `setup --remove` until the
 > person has said yes in the chat to what you showed them.** You have no
@@ -103,13 +91,13 @@ icon into the Omarchy shell at once; it runs no setup. `--yes` is needed
 because you have no terminal, and the person's request to install the plugin
 is their consent to it.
 
-To install the released v0.4.0 rather than the tip of the default branch,
+To install the released v0.3.0 rather than the tip of the default branch,
 pin it before the shell loads it. Add the plugin without `--enable`, check
 out the tag, then enable it:
 
 ```bash
 omarchy plugin add https://github.com/awebai/oats-omarchy --yes
-git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.4.0
+git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.3.0
 omarchy plugin enable ai.aweb.oats
 ```
 
@@ -125,9 +113,8 @@ works on a temporary copy, as below. Show the person the whole plan, and
 point out:
 - every file it will write, and any it replaces: the plan marks those
   "(replaces an existing file, backed up; --remove restores it)";
-- the key change: SUPER + O becomes a prefix. Then Space opens the OATS
-  picker, T the TUI and D the Desktop (each only when that part applies),
-  and Omarchy's "pop window out" moves to SUPER + O, then O;
+- the key change: SUPER + O becomes a prefix, and Omarchy's "pop window out"
+  moves to SUPER + O, then O;
 - that to check the key block, setup ran `Hyprland --verify-config` on a
   temporary copy of their Hyprland config, which runs their config's own
   commands (its `io.popen` calls), on the copy;
@@ -159,16 +146,10 @@ themselves.
 - **Check:** `setup --check` reports drift. Omarchy runs it after each
   `omarchy update`. When the OATS CLI gains the list of deployments, it says
   so: `setup --apply` again (without `--dir`) switches to it.
-- **Update:** `omarchy plugin update ai.aweb.oats`, then `setup --apply`
-  again, so that what setup wrote matches the new version. Updating moves a
-  pinned checkout to the tip of the default branch. Between updates,
-  `setup --check` says when this is needed: after an update from v0.3.0 it
-  reports the key block, the oats menu and the bar widget's plugin.json as
-  "from an older setup ...: run setup --apply again". `--apply` then
-  replaces only setup's own marked blocks, checking the new key block with
-  Hyprland on a copy first, as for a new one.
+- **Update:** `omarchy plugin update ai.aweb.oats`, then `setup --check`.
+  Updating moves a pinned checkout to the tip of the default branch.
 - **Pin a release:** `git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout <tag>`, for
-  example `v0.4.0`. Pin again after any `omarchy plugin update`.
+  example `v0.3.0`. Pin again after any `omarchy plugin update`.
 - **Remove:** `setup --remove` first, then `omarchy plugin remove ai.aweb.oats`.
   The other order leaves the launchers, the menu and the hook behind.
 
@@ -195,35 +176,6 @@ omarchy plugin add https://github.com/awebai/oats-omarchy --enable
 - **`omarchy plugin add`** clones this repository's default branch into
   `~/.config/omarchy/plugins/ai.aweb.oats/` and puts the OATS icon in your
   bar. It takes no tag. Without a terminal it needs `--yes`.
-- **The OATS picker** opens with SUPER + O, then Space; with Open OATS in
-  the panel or in the menu; and on one section with Waiting on you, Agents
-  or Souls in the menu. Its sections are Waiting on you (a card for each
-  agent that says it is waiting on you), Agents (every instance, by
-  workspace, running ● or stopped ○, and the bell when it waits on you) and
-  Souls (the souls each workspace offers, with how many instances each has).
-  Without a section asked for, it opens on Waiting on you when an agent
-  waits, else on Agents.
-  - Typing filters; Up and Down or Ctrl+J and Ctrl+K move; Tab and
-    Shift+Tab switch section; Enter acts; Esc clears the filter, then
-    closes.
-  - Enter on an agent opens its session in a floating terminal. Enter on a
-    soul asks for the agent's task ("Task for <soul>"; an empty answer
-    starts nothing), then runs `oats spawn` in a floating terminal, in the
-    deployment that soul was listed from, and opens the new agent's
-    session. If the spawn fails, the terminal stays open on the kernel's
-    error; if no terminal opens, nothing runs and a notification says so.
-    When two deployments of one workspace offer the same soul, or have an
-    agent of the same name, the row names the deployment it is in.
-  - It reads only when it opens (each `oats status --json` and
-    `oats souls --json` within 25 seconds, all of them within 110), and
-    says so while it reads. A deployment that could not be read is shown as
-    such, and the others are still listed. An agent is shown waiting only
-    when the kernel says so, so an empty Waiting on you never means that
-    nobody is waiting.
-  - It is the plugin's overlay, so it opens only while the plugin is
-    enabled (its icon in the bar). Otherwise Waiting on you in the menu
-    falls back to a list of the agents waiting on you, and the other rows
-    say why the picker did not open.
 - **The OATS icon** reads nothing in the background and shows no count:
   nothing runs until you open its panel. A left click opens the panel, and
   a right click opens the TUI.
@@ -234,14 +186,11 @@ omarchy plugin add https://github.com/awebai/oats-omarchy --enable
 - **Its panel** (a left click, once setup has run) reads the agents waiting
   on you each time it opens, and says so while it reads. An agent is listed
   when the kernel says it is waiting on you; for the others the kernel makes
-  no claim, so an empty list never means that nobody is waiting. Each agent
-  is a card: the kernel's message, then its reason, the producer and how long
-  ago, as the kernel gives them (the exact time in its tooltip). When the
-  read fails, the panel says why. A click on a card opens the agent's
-  session in a floating terminal. The panel also has Open OATS (the
-  picker), Open OATS TUI, Open OATS Desktop (when setup found one) and Set
-  up keys and launchers, which runs `setup --apply` in a floating
-  terminal.
+  no claim, so an empty list never means that nobody is waiting. When the
+  read fails, the panel says why. A click on an agent opens its session in a
+  floating terminal. It also has Open OATS TUI, Open OATS Desktop (when
+  setup found one) and Set up keys and launchers, which runs `setup --apply`
+  in a floating terminal.
 - **With the list,** the panel reads every listed deployment, one after
   another (each `oats status --json` within 25 seconds, all of them within
   110), and groups the agents by workspace when there is more than one. A
@@ -287,7 +236,8 @@ then point at that clone, and the plan says so.
 The plan and its progress are tracked in
 [awebai/oats#1311](https://github.com/awebai/oats/issues/1311).
 
-Status: v0.4.0. `omarchy plugin add` installs the tip of the default
-branch; to stay on v0.4.0, pin it as described under "Pinning a release".
+Status: v0.3.0 is released. `omarchy plugin add` installs the tip of the
+default branch; to stay on v0.3.0, pin it as described under "Pinning a
+release".
 
 Developing it: [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -15,16 +15,14 @@ import * as W from "../widget.mjs";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const HOSTILE = "it's a $(touch pwned) `x` dir";
 
-test("manifest: a bar widget and an overlay whose id and entry points Omarchy's validator accepts, with no refresh setting", () => {
+test("manifest: a bar widget whose id and entry point Omarchy's validator accepts, with no refresh setting", () => {
   const m = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
   assert.equal(m.schemaVersion, 1);
   for (const field of ["id", "name", "version", "kinds", "entryPoints"]) assert.ok(m[field], field);
   assert.match(m.id, /^[A-Za-z0-9][A-Za-z0-9._-]*$/);
   assert.ok(!m.id.startsWith("omarchy.") && !m.id.includes(".."));
-  assert.deepEqual(m.kinds, ["bar-widget", "overlay"]);
+  assert.deepEqual(m.kinds, ["bar-widget"]);
   assert.ok(existsSync(join(root, m.entryPoints.barWidget)), m.entryPoints.barWidget);
-  assert.equal(m.entryPoints.overlay, "OatsPicker.qml");
-  assert.ok(existsSync(join(root, m.entryPoints.overlay)));
   assert.equal(m.barWidget.defaults, undefined, "nothing is read in the background, so there is no interval");
   assert.equal(m.barWidget.schema, undefined);
   const qml = readFileSync(join(root, m.entryPoints.barWidget), "utf8");
@@ -37,17 +35,6 @@ test("manifest: a bar widget and an overlay whose id and entry points Omarchy's 
   // It runs commands only through the bar and its one reader, and writes nothing.
   assert.equal((qml.match(/\bProcess \{/g) || []).length, 1);
   assert.doesNotMatch(qml, /execDetached|atomicWrites|setText|\.write\(/);
-
-  // The picker reads on open only: one Process, and one Timer, the read's
-  // deadline, which does not repeat. It runs argv only (no shell line).
-  const picker = readFileSync(join(root, m.entryPoints.overlay), "utf8");
-  assert.equal((picker.match(/\bTimer \{/g) || []).length, 1);
-  assert.match(picker, /Timer \{\s*id: readTimeout[^}]*repeat: false/);
-  assert.doesNotMatch(picker, /repeat: true|triggeredOnStart|refreshIntervalSec/);
-  assert.equal((picker.match(/\bProcess \{/g) || []).length, 1);
-  assert.match(picker, /import "picker\.mjs" as Picker/);
-  assert.match(picker, /Util\.execArgv\(argv\)/);
-  assert.doesNotMatch(picker, /execDetached|atomicWrites|setText|\.write\(|Color\.\w+\s*\(|"#[0-9a-fA-F]{3,8}"/);
 });
 
 test("shellQuote, urlPath, commandLine", () => {
@@ -61,12 +48,8 @@ test("plugin.json: its path as setup finds it, and only what setup writes is rea
   assert.equal(W.pluginFilePath("/h", ""), "/h/.local/state/oats-omarchy/plugin.json");
   assert.equal(W.pluginFilePath("/h", "/x/state"), "/x/state/oats-omarchy/plugin.json");
   assert.equal(W.pluginFilePath("/h", "relative"), "/h/.local/state/oats-omarchy/plugin.json");
-  const good = { deployment: "/d", tui: ["t"], desktop: null, waiting: ["n", "w"], attach: ["s", "--home"], setup: ["n", "s"], agents: ["n", "a", "--dir", "/d"], spawn: ["n", "sp"] };
+  const good = { deployment: "/d", tui: ["t"], desktop: null, waiting: ["n", "w"], attach: ["s", "--home"], setup: ["n", "s"] };
   assert.deepEqual(W.parsePlugin(JSON.stringify(good)), good);
-  // A plugin.json from before 0.4.0: no picker commands, the rest as it was.
-  const { agents: _a, spawn: _s, ...old } = good;
-  assert.deepEqual(W.parsePlugin(JSON.stringify(old)), { ...old, agents: null, spawn: null });
-  assert.deepEqual(W.parsePlugin(JSON.stringify({ ...good, spawn: null })), { ...good, agents: null, spawn: null }, "both or neither");
   for (const bad of ["", "not json", "{}", JSON.stringify({ ...good, waiting: [] }), JSON.stringify({ ...good, tui: "t" }), JSON.stringify({ ...good, attach: [1] })]) {
     assert.equal(W.parsePlugin(bad), null, bad);
   }
@@ -76,7 +59,7 @@ test("plugin.json: its path as setup finds it, and only what setup writes is rea
 test("the read: the rows waiting on you, or why it failed", () => {
   const rows = [{ instance: "a", home: "/h/a" }, { instance: "b", home: "/h/b" }];
   const two = W.parseWaiting(JSON.stringify({ ok: true, count: 2, rows }));
-  const groups = [{ title: "", rows: rows.map((r) => ({ ...r, label: r.instance, waitingOnYou: null })), unknown: [] }];
+  const groups = [{ title: "", rows: rows.map((r) => ({ ...r, label: r.instance })), unknown: [] }];
   assert.deepEqual(two, { known: true, count: 2, rows, groups, note: "" });
   assert.deepEqual(W.parseWaiting(JSON.stringify({ ok: true, count: 0, rows: [] })), { known: true, count: 0, rows: [], groups: [], note: "" });
   const failed = W.parseWaiting(JSON.stringify({ ok: false, reason: "oats-lock.json is unreadable" }));
@@ -121,11 +104,10 @@ function world(t) {
   for (const d of [bin, odd]) mkdirSync(d, { recursive: true });
   const exe = (path, text) => { writeFileSync(path, text); chmodSync(path, 0o755); };
   const logger = (name) => `#!/bin/sh\nprintf '%s\\n' '${name}' "$@" >> '${log}'\n`;
-  for (const name of ["omarchy-launch-or-focus-tui", "omarchy-launch-or-focus", "omarchy-shell"]) exe(join(bin, name), logger(name));
+  for (const name of ["omarchy-launch-or-focus-tui", "omarchy-launch-or-focus"]) exe(join(bin, name), logger(name));
   // As Omarchy 4.0.4's launcher does: its arguments are one bash command line.
   exe(join(bin, "omarchy-launch-floating-terminal-with-presentation"), `#!/bin/bash\ncmd="$*"\nexec bash -c "$cmd"\n`);
   for (const name of ["shim", "node", "setup"]) exe(join(odd, name), logger(name));
-  exe(join(odd, "spawn.mjs"), logger("spawn.mjs"));
   const plugin = {
     deployment: join(odd, "deployment"),
     tui: ["omarchy-launch-or-focus-tui", "--app-id=org.oats.tui", `'${join(odd, "shim")}'`, "tui"],
@@ -133,8 +115,6 @@ function world(t) {
     waiting: [join(odd, "node"), join(odd, "waiting.mjs"), "--dir", join(odd, "deployment")],
     attach: [join(odd, "shim"), "session", "attach", "--detach-key", "M-o", "--home"],
     setup: [join(odd, "node"), join(odd, "setup.mjs"), "--dir", join(odd, "deployment")],
-    agents: [join(odd, "node"), join(odd, "agents.mjs"), "--dir", join(odd, "deployment")],
-    spawn: [join(odd, "node"), join(odd, "spawn.mjs")],
   };
   // The bar's run: `bash -lc <line>`; -c here, so no profile of this machine is read.
   const run = (line) => {
@@ -144,15 +124,7 @@ function world(t) {
     assert.ok(!existsSync(join(dir, "pwned")), "a path was not run as a command");
     return readFileSync(log, "utf8").split("\n").slice(0, -1);
   };
-  // The picker's run: argv, with no shell (Omarchy's Util.execArgv).
-  const runArgv = (argv) => {
-    rmSync(log, { force: true });
-    const r = spawnSync(argv[0], argv.slice(1), { cwd: dir, encoding: "utf8", timeout: 10000, env: { HOME: dir, PATH: `${bin}:/usr/bin:/bin` } });
-    assert.equal(r.status, 0, r.stderr);
-    assert.ok(!existsSync(join(dir, "pwned")), "a path was not run as a command");
-    return readFileSync(log, "utf8").split("\n").slice(0, -1);
-  };
-  return { dir, odd, plugin, run, runArgv };
+  return { dir, odd, plugin, run };
 }
 
 test("the panel's TUI and Desktop run the argv setup recorded, word for word", (t) => {
@@ -177,43 +149,6 @@ test("setup from the panel: --apply for the recorded deployment, or the plugin's
   const w = world(t);
   assert.deepEqual(w.run(W.setupCommand(w.plugin, join(w.odd, "setup"))), ["node", join(w.odd, "setup.mjs"), "--dir", join(w.odd, "deployment"), "--apply"]);
   assert.deepEqual(w.run(W.setupCommand(null, join(w.odd, "setup"))), ["setup", "--apply"]);
-});
-
-test("the picker's commands run as argv: a session by its home, a spawn by its deployment and soul, setup; the panel opens the picker", (t) => {
-  const w = world(t);
-  const home = join(w.odd, "instances", "with space 'and' $(quotes)");
-  assert.deepEqual(w.runArgv(W.attachArgv(w.plugin, home)), ["shim", "session", "attach", "--detach-key", "M-o", "--home", home]);
-  const deployment = join(w.odd, "other deployment");
-  assert.deepEqual(w.runArgv(W.spawnArgv(w.plugin, deployment, "pkg/soul")), ["node", join(w.odd, "spawn.mjs"), "--dir", deployment, "pkg/soul"]);
-  assert.deepEqual(w.runArgv(W.setupArgv(w.plugin, join(w.odd, "setup"))), ["node", join(w.odd, "setup.mjs"), "--dir", join(w.odd, "deployment"), "--apply"]);
-  assert.deepEqual(w.runArgv(W.setupArgv(null, join(w.odd, "setup"))), ["setup", "--apply"]);
-  assert.deepEqual(w.run(W.pickerCommand()), ["omarchy-shell", "shell", "summon", "ai.aweb.oats", "{}"]);
-});
-
-test("a waiting card: the kernel's message, then reason · producer · age, each as given; the exact since; nothing worded by the plugin", () => {
-  const now = Date.parse("2026-10-19T12:00:00Z");
-  const w = { since: "2026-10-19T11:57:00Z", producer: "oats.core", reason: "permission", message: "Allow Bash?" };
-  assert.deepEqual(W.card("alpha", w, now), { title: "alpha", message: "Allow Bash?", meta: "permission \u00b7 oats.core \u00b7 3 min", since: "2026-10-19T11:57:00Z" });
-  assert.deepEqual(W.card("alpha", { since: "2026-10-19T11:57:00Z", producer: "agent", reason: null, message: null }, now), { title: "alpha", message: "", meta: "agent \u00b7 3 min", since: "2026-10-19T11:57:00Z" }, "a field not given is left out");
-  assert.deepEqual(W.card("alpha", { since: "not a time", producer: 7, reason: "attention" }, now), { title: "alpha", message: "", meta: "attention", since: "not a time" });
-  assert.deepEqual(W.card("alpha", null, now), { title: "alpha", message: "", meta: "", since: "" });
-  assert.deepEqual(W.claim({ since: "s", producer: "p", reason: "r", message: "m", extra: "x" }), { since: "s", producer: "p", reason: "r", message: "m" });
-  assert.equal(W.claim("yes"), null);
-  const at = (ms) => W.age(new Date(now - ms).toISOString(), now);
-  assert.deepEqual([at(10_000), at(60_000), at(59 * 60_000), at(60 * 60_000), at(47 * 3600_000), at(48 * 3600_000), at(-60_000)], ["<1 min", "1 min", "59 min", "1 h", "47 h", "2 d", "<1 min"]);
-  assert.equal(W.age("", now), "");
-});
-
-test("settleRead: only the pending read settles, once", () => {
-  const state = W.newReadState();
-  const first = W.beginRead(state);
-  assert.equal(W.settleRead(state, first + 1), false);
-  assert.equal(W.settleRead(state, first), true);
-  assert.equal(W.settleRead(state, first), false);
-  assert.equal(W.expireRead(state, first), null);
-  const second = W.beginRead(state);
-  assert.deepEqual(W.expireRead(state, second, 120000, "agents --json"), { known: false, reason: "agents --json did not answer within 120 s" });
-  assert.equal(W.settleRead(state, second), false, "a read stopped at its deadline does not settle");
 });
 
 test("the icon's clicks and tooltip: before setup either click runs the whole setup; after, left toggles the panel and right opens the TUI", (t) => {

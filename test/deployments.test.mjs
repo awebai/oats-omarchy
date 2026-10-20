@@ -94,7 +94,7 @@ test("--list --json: every ok deployment read in the list's order, one at a time
   assert.deepEqual(statusDirs(s), [a, b, c], "the missing row is not read; the rest in order");
   assert.deepEqual(r.result, {
     ok: true, count: 2,
-    rows: [{ instance: "alpha", home: "/h/alpha", waitingOnYou: W8, deployment: a, workspace: "github.com/acme/one" }, { instance: "beta", home: "/h/beta", waitingOnYou: W8, deployment: b, workspace: "github.com/acme/two" }],
+    rows: [{ instance: "alpha", home: "/h/alpha", deployment: a, workspace: "github.com/acme/one" }, { instance: "beta", home: "/h/beta", deployment: b, workspace: "github.com/acme/two" }],
     deployments: [
       { path: a, name: "a", workspace: "github.com/acme/one", ok: true },
       { path: b, name: "b", workspace: "github.com/acme/two", ok: true },
@@ -104,8 +104,8 @@ test("--list --json: every ok deployment read in the list's order, one at a time
   const shown = W.parseWaiting(r.stdout);
   assert.deepEqual([shown.known, shown.count], [true, 2], "a failed deployment does not make the whole read unknown");
   assert.deepEqual(shown.groups, [
-    { title: "github.com/acme/one", rows: [{ instance: "alpha", home: "/h/alpha", label: "alpha", waitingOnYou: W8 }], unknown: [] },
-    { title: "github.com/acme/two", rows: [{ instance: "beta", home: "/h/beta", label: "beta", waitingOnYou: W8 }], unknown: [] },
+    { title: "github.com/acme/one", rows: [{ instance: "alpha", home: "/h/alpha", label: "alpha" }], unknown: [] },
+    { title: "github.com/acme/two", rows: [{ instance: "beta", home: "/h/beta", label: "beta" }], unknown: [] },
     { title: "c", rows: [], unknown: ["c: oats-lock.json is unreadable: Unexpected end of JSON input"] },
   ]);
 });
@@ -279,7 +279,7 @@ test("setup with the list: no deployment needed; the launchers, the menu and the
   assert.equal(W.readTimeoutMs(plugin), 120000);
   assert.deepEqual(W.readArgv(plugin), [node, `${PLUGIN_DIR}/bin/waiting.mjs`, "--list", "--json"]);
   const items = menu.omarchyParse(readFileSync(p.menuFile, "utf8")).items;
-  assert.equal(items["oats.waiting"].action, menu.pickerAction("waiting", `'${node}' '${PLUGIN_DIR}/bin/waiting.mjs' --list`));
+  assert.equal(items["oats.waiting"].action, `'${node}' '${PLUGIN_DIR}/bin/waiting.mjs' --list`);
   assert.equal(items["oats.status"].action, `omarchy-launch-floating-terminal-with-presentation "'${node}' '${PLUGIN_DIR}/bin/status.mjs'"`);
   assert.doesNotMatch(readFileSync(join(p.applications, "org.oats.tui.desktop"), "utf8"), /--dir/);
   assert.doesNotMatch(readFileSync(join(p.applications, "awebai-oats-desktop.desktop"), "utf8"), /--dir/);
@@ -322,7 +322,7 @@ test("a single-deployment setup: --check says when the CLI gains the list, and -
 });
 
 test("the widget: plugin.json with the list, grouped rows, the list's deadline", () => {
-  const plugin = { deployment: null, tui: ["t"], desktop: null, waiting: ["n", "w", "--list"], attach: ["s", "--home"], setup: ["n", "s"], agents: null, spawn: null };
+  const plugin = { deployment: null, tui: ["t"], desktop: null, waiting: ["n", "w", "--list"], attach: ["s", "--home"], setup: ["n", "s"] };
   assert.deepEqual(W.parsePlugin(JSON.stringify(plugin)), plugin);
   assert.equal(W.parsePlugin(JSON.stringify({ ...plugin, deployment: 1 })), null);
   assert.equal(W.isList(plugin), true);
@@ -334,9 +334,9 @@ test("the widget: plugin.json with the list, grouped rows, the list's deadline",
   // Two deployments of one workspace: one group, each row names its deployment.
   const deployments = [{ path: "/1", name: "one", workspace: "w", ok: true }, { path: "/2", name: "two", workspace: "w", ok: true }];
   const rows = [{ instance: "x", home: "/h/1", deployment: "/1", workspace: "w" }, { instance: "x", home: "/h/2", deployment: "/2", workspace: "w" }];
-  assert.deepEqual(W.groups(rows, deployments), [{ title: "", rows: [{ instance: "x", home: "/h/1", label: "x (one)", waitingOnYou: null }, { instance: "x", home: "/h/2", label: "x (two)", waitingOnYou: null }], unknown: [] }]);
+  assert.deepEqual(W.groups(rows, deployments), [{ title: "", rows: [{ instance: "x", home: "/h/1", label: "x (one)" }, { instance: "x", home: "/h/2", label: "x (two)" }], unknown: [] }]);
   assert.deepEqual(W.groups([], deployments), [], "nothing waiting, nothing unknown: no group");
-  assert.deepEqual(W.groups([{ instance: "x", home: "/h" }], null), [{ title: "", rows: [{ instance: "x", home: "/h", label: "x", waitingOnYou: null }], unknown: [] }], "one deployment, as before");
+  assert.deepEqual(W.groups([{ instance: "x", home: "/h" }], null), [{ title: "", rows: [{ instance: "x", home: "/h", label: "x" }], unknown: [] }], "one deployment, as before");
 
   // Two deployments of one workspace with the same name: the path tells them apart.
   const twins = [{ path: "/p/a/oats", name: "oats", workspace: "w", ok: true }, { path: "/p/b/oats", name: "oats", workspace: "w", ok: true }];

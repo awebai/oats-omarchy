@@ -10,7 +10,7 @@ import * as menu from "../lib/menu.mjs";
 import { repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
 const BLOCK = menu.block({ tui: "launch-tui", desktop: null, waiting: "wait-cmd", status: "status-cmd" });
-const OURS = ["oats", "oats.open", "oats.waiting", "oats.agents", "oats.souls", "oats.tui", "oats.status"];
+const OURS = ["oats", "oats.tui", "oats.waiting", "oats.status"];
 
 // Inserted, read the way Omarchy reads it, then taken out again.
 function roundTrip(text) {
@@ -29,10 +29,7 @@ test("the block: a delimited set of rows, one per line, each with a trailing com
   assert.equal(lines[0], "  // >>> oats-omarchy (managed by setup; remove with setup --remove) >>>");
   assert.equal(lines.at(-2), "  // <<< oats-omarchy <<<");
   assert.deepEqual(lines.slice(1, -2).map((l) => JSON.parse(`{${l.trim().replace(/,$/, "")}}`)).map((o) => Object.keys(o)[0]), OURS);
-  assert.deepEqual(menu.omarchyParse(`{\n${BLOCK}}\n`).items["oats.waiting"], {
-    icon: "\u{F009A}", label: "Waiting on you", aliases: ["oats", "waiting", "agents"],
-    action: `[ "$(omarchy-shell shell summon ai.aweb.oats '{"section":"waiting"}' 2>/dev/null)" = ok ] || wait-cmd`,
-  });
+  assert.deepEqual(menu.omarchyParse(`{\n${BLOCK}}\n`).items["oats.waiting"], { icon: "\u{F009A}", label: "Waiting on you", action: "wait-cmd" });
   assert.ok(menu.block({ tui: null, desktop: "d", waiting: "w", status: "s" }).includes('"oats.desktop"'));
   assert.ok(!menu.block({ tui: null, desktop: null, waiting: "w", status: "s" }).includes('"oats.tui"'));
 });
@@ -135,8 +132,8 @@ test("--apply with no menu file creates it with the block; --remove deletes it a
   const text = readFileSync(MENU(s), "utf8");
   assert.ok(text.startsWith(`{\n${menu.START}`));
   const items = menu.omarchyParse(text).items;
-  assert.deepEqual(Object.keys(items), OURS);
-  assert.equal(items["oats.waiting"].action, menu.pickerAction("waiting", `'${process.execPath}' '${repo}/bin/waiting.mjs' --dir '${s.deployment}'`));
+  assert.deepEqual(Object.keys(items), ["oats", "oats.tui", "oats.waiting", "oats.status"]);
+  assert.equal(items["oats.waiting"].action, `'${process.execPath}' '${repo}/bin/waiting.mjs' --dir '${s.deployment}'`);
   assert.equal(items["oats.status"].action, `omarchy-launch-floating-terminal-with-presentation "cd '${s.deployment}' && '${join(s.home, ".local/share/oats-omarchy/oats")}' status"`);
   assert.equal(part(s.run(["setup", "--apply", "--json"]), "menu").status, "already applied");
   assert.equal(s.run(["setup", "--remove"]).status, 0);
@@ -154,7 +151,7 @@ for (const [name, text] of [
     const before = snapshot(s.home);
     assert.equal(s.run(["setup", "--apply"]).status, 0);
     const after = readFileSync(MENU(s), "utf8");
-    assert.deepEqual(Object.keys(menu.omarchyParse(after).items), ["mine", ...OURS]);
+    assert.deepEqual(Object.keys(menu.omarchyParse(after).items), ["mine", "oats", "oats.tui", "oats.waiting", "oats.status"]);
     // The user adds a row of their own, before ours; --remove keeps it.
     writeFileSync(MENU(s), after.replace('"mine"', '"first": {"label":"First"},\n  "mine"'));
     assert.equal(s.run(["setup", "--remove"]).status, 0);
@@ -247,48 +244,7 @@ test("a symlinked menu file: the block goes into its target, and the link stays 
   assert.deepEqual(snapshot(s.home), before);
 });
 
-test("the menu's rows find OATS by its words, and open the picker on their section", () => {
-  const items = menu.omarchyParse(`{\n${BLOCK}}\n`).items;
-  for (const word of ["oats", "agents", "instances", "souls", "waiting"]) {
-    const found = Object.entries(items).filter(([id, v]) => `${v.label} ${id.split(".").pop()} ${v.aliases.join(" ")}`.toLowerCase().split(/[\s._-]+/).includes(word));
-    assert.ok(found.length > 0, word);
-  }
-  assert.equal(items["oats.open"].label, "Open OATS");
-  assert.equal(items["oats.agents"].action, `[ "$(omarchy-shell shell summon ai.aweb.oats '{"section":"agents"}' 2>/dev/null)" = ok ] || omarchy-notification-send OATS '${menu.PICKER_UNAVAILABLE}'`);
-  assert.match(items["oats.souls"].action, /'\{"section":"souls"\}'/);
-  assert.match(items["oats.open"].action, / summon ai\.aweb\.oats '\{\}' /);
-  assert.equal(menu.pickerToggle(), "omarchy-shell shell toggle ai.aweb.oats '{}'");
-});
-
-test("the menu's picker rows with the shell running: the picker opens, and nothing else runs", (t) => {
-  const s = sandbox(t, { shell: "ok" });
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
-  const items = menu.omarchyParse(readFileSync(MENU(s), "utf8")).items;
-  for (const id of ["oats.open", "oats.waiting", "oats.agents", "oats.souls"]) {
-    const r = spawnSync("bash", ["-c", items[id].action], { cwd: s.home, env: s.env, encoding: "utf8", timeout: 30_000 });
-    assert.equal(r.status, 0, r.stderr);
-  }
-  assert.deepEqual(readFileSync(join(s.root, "shell.log"), "utf8").trim().split("\n"), [
-    "shell summon ai.aweb.oats {}",
-    'shell summon ai.aweb.oats {"section":"waiting"}',
-    'shell summon ai.aweb.oats {"section":"agents"}',
-    'shell summon ai.aweb.oats {"section":"souls"}',
-  ]);
-  assert.equal(existsSync(join(s.root, "select.log")), false, "no selector");
-  assert.equal(existsSync(join(s.root, "notify.log")), false, "no notification");
-});
-
-test("the picker cannot open (the plugin disabled): Waiting on you falls back to the selector, the others say so", (t) => {
-  const s = sandbox(t, { shell: "unknown" });
-  writeFileSync(join(s.root, "status.json"), JSON.stringify({ agents: [{ instances: [{ instance: "alpha", home: "/h/a", waitingOnYou: { reason: "attention" } }] }] }));
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
-  const items = menu.omarchyParse(readFileSync(MENU(s), "utf8")).items;
-  for (const id of ["oats.waiting", "oats.agents"]) assert.equal(spawnSync("bash", ["-c", items[id].action], { cwd: s.home, env: s.env, encoding: "utf8", timeout: 30_000 }).status, 0);
-  assert.equal(readFileSync(join(s.root, "select.log"), "utf8"), "Waiting on you (1)\nalpha\n--\n");
-  assert.equal(readFileSync(join(s.root, "notify.log"), "utf8"), `OATS\n${menu.PICKER_UNAVAILABLE}\n--\n`);
-});
-
-test("the menu's actions run: waiting reaches the selector through the shim and the kernel when no shell runs; status runs the kernel's own status", (t) => {
+test("the menu's actions run: waiting reaches the selector through the shim and the kernel; status runs the kernel's own status", (t) => {
   const s = sandbox(t, { deploymentName: "my agents" });
   writeFileSync(join(s.root, "status.json"), JSON.stringify({ agents: [{ instances: [{ instance: "alpha", home: "/h/a", waitingOnYou: { reason: "attention" } }] }] }));
   assert.equal(s.run(["setup", "--apply"]).status, 0);

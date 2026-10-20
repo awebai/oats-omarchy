@@ -11,7 +11,6 @@ const captured = readFileSync(fixture("print", "omarchy-4.0.4.txt"), "utf8");
 const lua = { kind: "lua", file: "/h/.config/hypr/bindings.lua" };
 const conf = { kind: "conf", file: "/h/.config/hypr/bindings.conf" };
 const TUI = "omarchy-launch-or-focus-tui --app-id=org.oats.tui /d/oats tui --dir /dep";
-const PICKER = "omarchy-shell shell toggle ai.aweb.oats '{}'";
 const DESKTOP = `omarchy-launch-or-focus awebai-oats-desktop "uwsm-app -- '/a b/OATS.AppImage' --dir /dep"`;
 const rebind = (text, combo, action) => text.split("\n").map((l) => (l.startsWith(`${combo} `) ? `${combo.padEnd(35)} → ${action}` : l)).join("\n");
 
@@ -58,15 +57,13 @@ test("the next free key tries SUPER + SHIFT + O first", () => {
 });
 
 test("Omarchy's defaults: the snippet takes SUPER + O and keeps pop-out on the double tap", () => {
-  const k = planKeys({ layout: lua, print: { ok: true, text: captured }, picker: PICKER, tui: TUI, desktop: DESKTOP });
+  const k = planKeys({ layout: lua, print: { ok: true, text: captured }, tui: TUI, desktop: DESKTOP });
   assert.equal(k.status, "suggested");
   assert.equal(k.entry, "SUPER + O");
-  assert.equal(k.snippet, `-- OATS: SUPER + O, then Space (OATS), T (TUI) or D (Desktop); O again pops the window out.
+  assert.equal(k.snippet, `-- OATS: SUPER + O, then T (TUI) or D (Desktop); O again pops the window out.
 hl.unbind("SUPER + O")
 o.bind("SUPER + O", "OATS", hl.dsp.submap("oats"))
 hl.define_submap("oats", "reset", function()
-  o.bind("SPACE", "Open OATS", "omarchy-shell shell toggle ai.aweb.oats '{}'")
-  o.bind("SUPER + SPACE", "Open OATS", "omarchy-shell shell toggle ai.aweb.oats '{}'")
   o.bind("T", "OATS TUI", "omarchy-launch-or-focus-tui --app-id=org.oats.tui /d/oats tui --dir /dep")
   o.bind("SUPER + T", "OATS TUI", "omarchy-launch-or-focus-tui --app-id=org.oats.tui /d/oats tui --dir /dep")
   o.bind("D", "OATS Desktop", "omarchy-launch-or-focus awebai-oats-desktop \\"uwsm-app -- '/a b/OATS.AppImage' --dir /dep\\"")
@@ -81,14 +78,12 @@ end)
 });
 
 test("the hyprlang snippet is the same binding", () => {
-  const k = planKeys({ layout: conf, print: { ok: true, text: captured }, picker: PICKER, tui: TUI, desktop: DESKTOP });
+  const k = planKeys({ layout: conf, print: { ok: true, text: captured }, tui: TUI, desktop: DESKTOP });
   assert.equal(k.format, "conf");
-  assert.equal(k.snippet, `# OATS: SUPER + O, then Space (OATS), T (TUI) or D (Desktop); O again pops the window out.
+  assert.equal(k.snippet, `# OATS: SUPER + O, then T (TUI) or D (Desktop); O again pops the window out.
 unbind = SUPER, O
 bindd = SUPER, O, OATS, submap, oats
 submap = oats, reset
-bindd = , SPACE, Open OATS, exec, omarchy-shell shell toggle ai.aweb.oats '{}'
-bindd = SUPER, SPACE, Open OATS, exec, omarchy-shell shell toggle ai.aweb.oats '{}'
 bindd = , T, OATS TUI, exec, omarchy-launch-or-focus-tui --app-id=org.oats.tui /d/oats tui --dir /dep
 bindd = SUPER, T, OATS TUI, exec, omarchy-launch-or-focus-tui --app-id=org.oats.tui /d/oats tui --dir /dep
 bindd = , D, OATS Desktop, exec, omarchy-launch-or-focus awebai-oats-desktop "uwsm-app -- '/a b/OATS.AppImage' --dir /dep"
@@ -162,13 +157,6 @@ test("a skipped Desktop leaves out the D lines and says why", () => {
   assert.doesNotMatch(k.snippet, /"D"|SUPER \+ D/);
   assert.match(k.snippet, /^-- OATS: SUPER \+ O, then T \(TUI\); O again pops the window out\.$/m);
   assert.ok(k.notes.includes("The D lines are left out: no OATS Desktop found."));
-});
-
-test("the picker alone (both parts skipped): SUPER + O, then Space", () => {
-  const k = planKeys({ layout: lua, print: { ok: true, text: captured }, picker: PICKER, tui: null, desktop: null });
-  assert.match(k.snippet, /^-- OATS: SUPER \+ O, then Space \(OATS\); O again pops the window out\.$/m);
-  assert.match(k.snippet, /^ {2}o\.bind\("SPACE", "Open OATS", "omarchy-shell shell toggle ai\.aweb\.oats '\{\}'"\)$/m);
-  assert.doesNotMatch(k.snippet, /"T"|"D"/);
 });
 
 test("descriptions and commands are Lua-escaped", () => {
