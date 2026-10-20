@@ -83,15 +83,18 @@ compares them with what is there, and only then writes:
   (Omarchy's pop-out), each also with SUPER held.
 - The default UI, `tui` or `desktop` (`chooseUi` in `lib/setup.mjs`), is
   what the menu's root row "OATS" and a right click on the bar icon open.
-  With one of the two set up it is that one, and nothing is recorded. With
-  both it is `--ui`, else the one the state records, else none is chosen
-  (`pending`): `--plan` says so, `--apply` in a terminal asks
-  (`UI_QUESTION`, Enter is the TUI) before it shows the plan, and without a
-  terminal, `--yes` included, it refuses with `E_UI_REQUIRED`. A `--ui`
-  naming one that is not set up is `E_UI`, with why. The state records the
-  choice as `ui` only when there was one to make; a state from before
-  0.5.0 has none, and with both set up `--check` reports "default UI not
-  chosen".
+  With one of the two set up it is that one. With both it is `--ui`, else
+  the one the state records, else none is chosen (`pending`): `--plan` says
+  so, `--apply` in a terminal asks (`UI_QUESTION`, Enter is the TUI;
+  `askUiFirst`) before anything else, `--yes` or not, since `--yes` answers
+  only "Apply it?", and without a terminal it refuses with `E_UI_REQUIRED`,
+  naming `--ui` (and `--yes` when it is missing too). A `--ui` naming one
+  that is not set up is `E_UI`, with why. The state records the choice as
+  `ui` (`chosen`): the `--ui` or the answer, else the choice recorded
+  before, kept while only one is set up, so finding the other later does
+  not undo it; a `--ui` that changes only the state still writes it. A
+  state from before 0.5.0 has none, and with both set up `--check` reports
+  "default UI not chosen".
 - `lib/bindings.mjs` is the key block: the Lua snippet between marker
   comments, appended to the end of `~/.config/hypr/bindings.lua` after a
   blank line. Setup writes it only for the Lua layout, and only when every

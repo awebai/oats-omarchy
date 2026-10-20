@@ -199,11 +199,12 @@ omarchy plugin add https://github.com/awebai/oats-omarchy --enable
 ~/.config/omarchy/plugins/ai.aweb.oats/setup --apply --dir <deployment>
 ```
 
-With both the TUI and the Desktop set up, `--apply` asks "Open which OATS
-first: TUI or Desktop?" (Enter is the TUI); `--ui tui` or `--ui desktop`
-answers it ahead, and without a terminal `--ui` is required. With one set
-up, that one is the default. The plan shows the choice under "Default UI",
-and a later `--apply` keeps it until you pass another `--ui`.
+With both the TUI and the Desktop set up and none chosen yet, `--apply`
+asks "Open which OATS first: TUI or Desktop?" (Enter is the TUI), with
+`--yes` too; `--ui tui` or `--ui desktop` answers it ahead, and without a
+terminal `--ui` is required. With one set up, that one is the default. The
+plan shows the choice under "Default UI", and a later `--apply` keeps it
+until you pass another `--ui`, also when it was passed with one set up.
 
 - **`omarchy plugin add`** clones this repository's default branch into
   `~/.config/omarchy/plugins/ai.aweb.oats/` and puts the OATS icon in your

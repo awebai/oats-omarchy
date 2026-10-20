@@ -79,6 +79,16 @@ test("both set up, no --ui, in a terminal: --apply asks which opens first; Enter
   assert.deepEqual(again.asked, ["Apply it? [y/N] "]);
 });
 
+test("--yes in a terminal still asks which opens first; it answers only Apply it?", (t) => {
+  const s = sandbox(t);
+  withDesktop(s);
+  const r = fromTerminal(s, ["--apply", "--yes"], ["desktop"]);
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(r.asked, [UI_QUESTION]);
+  assert.equal(stateOf(s).ui, "desktop");
+  assert.equal(itemsOf(s)["oats-ui"].action, itemsOf(s)["oats.desktop"].action);
+});
+
 test("the question takes TUI or Desktop in any case, and asks again for anything else; n still aborts", (t) => {
   const s = sandbox(t);
   withDesktop(s);
@@ -100,15 +110,21 @@ test("both set up, no --ui, no terminal: --apply refuses with E_UI_REQUIRED, say
   const s = sandbox(t);
   withDesktop(s);
   const before = snapshot(s.home);
-  for (const args of [["setup", "--apply", "--json"], ["setup", "--apply", "--yes", "--json"]]) {
-    const r = s.run(args);
+  // With --yes, and without it: the refusal names --ui first, then the
+  // --yes still missing, so one command follows it.
+  for (const [yes, remedy] of [[true, "run setup --apply --ui tui|desktop"], [false, "run setup --apply --ui tui|desktop --yes"]]) {
+    const r = s.run(["setup", "--apply", "--json"], {}, { yes });
     assert.equal(r.status, 1);
-    assert.equal(r.json.error.code, "E_UI_REQUIRED");
-    assert.match(r.json.error.message, /run setup --apply --ui tui\|desktop/);
+    assert.equal(r.json.error.code, "E_UI_REQUIRED", `yes: ${yes}`);
+    assert.equal(r.json.error.message, `both the OATS TUI and OATS Desktop are set up, and setup cannot ask which opens first without a terminal: ${remedy}`);
+    const text = s.run(["setup", "--apply"], {}, { yes });
+    assert.equal(text.status, 1);
+    assert.equal(text.stderr, `setup: ${r.json.error.message}\n`);
   }
-  const text = s.run(["setup", "--apply"]);
-  assert.equal(text.status, 1);
-  assert.match(text.stderr, /^setup: both the OATS TUI and OATS Desktop are set up, and setup cannot ask which opens first here: run setup --apply --ui tui\|desktop\n/);
+  // Following the remedy works.
+  assert.equal(s.run(["setup", "--apply", "--ui", "tui", "--yes", "--json"], {}, { yes: false }).status, 0);
+  assert.equal(stateOf(s).ui, "tui");
+  assert.equal(s.run(["setup", "--remove"]).status, 0);
   assert.deepEqual(snapshot(s.home), before);
   const plan = s.run(["setup", "--plan", "--json"]);
   assert.equal(plan.status, 0);
@@ -136,6 +152,32 @@ test("only one set up: it is the default, nothing is asked, and no choice is rec
   const asked = fromTerminal(s, ["--apply"], ["desktop", "y"]);
   assert.deepEqual(asked.asked, [UI_QUESTION, "Apply it? [y/N] "]);
   assert.equal(stateOf(s).ui, "desktop");
+});
+
+test("--ui with one set up is recorded and kept: the other found later asks nothing, and a --ui alone rewrites the state", (t) => {
+  const s = sandbox(t);
+  assert.equal(s.run(["setup", "--apply", "--ui", "tui"]).status, 0);
+  assert.equal(stateOf(s).ui, "tui");
+  assert.match(s.run(["setup", "--plan", "--ui", "tui"]).stdout, /\nDefault UI\n {2}the TUI \(--ui\)/);
+  withDesktop(s);
+  const r = fromTerminal(s, ["--apply"], ["y"]);
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(r.asked, ["Apply it? [y/N] "]);
+  assert.match(r.out, /\nDefault UI\n {2}the TUI \(chosen at an earlier --apply\)/);
+  assert.equal(stateOf(s).ui, "tui");
+  assert.equal(s.run(["setup", "--apply", "--json"]).status, 0, "no terminal: the recorded choice stands");
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
+
+  // One UI, no choice recorded: a --ui that changes only the state writes it.
+  const one = sandbox(t);
+  assert.equal(one.run(["setup", "--apply"]).status, 0);
+  assert.equal(stateOf(one).ui, null);
+  const again = one.run(["setup", "--apply", "--ui", "tui", "--json"]);
+  assert.equal(again.status, 0);
+  assert.deepEqual(again.json.result.written, []);
+  assert.equal(stateOf(one).ui, "tui");
+  assert.deepEqual(one.run(["setup", "--apply", "--json"]).json.result.written, []);
+  assert.equal(stateOf(one).ui, "tui", "a later --apply without --ui keeps it");
 });
 
 test("the Desktop alone: it is the default; --ui tui is refused, with why", (t) => {
@@ -181,6 +223,6 @@ test("--ui takes tui or desktop, with --plan or --apply only", (t) => {
     assert.equal(r.status, 2, args.join(" "));
     assert.match(r.stderr, /--ui/);
   }
-  assert.equal(s.run(["setup", "--plan", "--ui=tui", "--json"]).json.result.ui.from, "the only one set up");
+  assert.equal(s.run(["setup", "--plan", "--ui=tui", "--json"]).json.result.ui.from, "--ui");
   assert.equal(existsSync(join(s.home, ".local/state/oats-omarchy")), false);
 });
