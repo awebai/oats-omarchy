@@ -35,7 +35,7 @@ test("entry and AppImage: the entry is found through its Exec, no entry is writt
   assert.match(part(plan, "desktop").reason, /the existing launcher entry .*oats-desktop\.desktop provides it/);
   assert.ok(!plan.json.result.fixes.some((f) => f.fix === "sudo pacman -S fuse2"));
 
-  const apply = s.run(["setup", "--apply", "--json"]);
+  const apply = s.run(["setup", "--apply", "--ui", "tui", "--json"]);
   assert.equal(apply.status, 0, apply.stderr);
   assert.equal(existsSync(join(s.home, ".local/share/applications/awebai-oats-desktop.desktop")), false);
   assert.ok(readFileSync(file).equals(entryBytes), "the user's entry is never changed");
@@ -51,7 +51,7 @@ test("the AppImage only: found in ~/.local/opt/oats-desktop, and its entry is wr
   const plan = s.run(["setup", "--plan", "--json"]);
   assert.deepEqual(plan.json.result.found.desktop, { source: "appimage", appImage: image });
   assert.equal(part(plan, "desktop").status, "will apply");
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.equal(s.run(["setup", "--apply", "--ui", "tui"]).status, 0);
   assert.match(readFileSync(join(s.home, ".local/share/applications/awebai-oats-desktop.desktop"), "utf8"), new RegExp(`^Exec=${image.replace(/[.]/g, "\\.")} --dir `, "m"));
 });
 
@@ -65,7 +65,7 @@ test("the entry without libfuse2: the fuse2 fix, the key and menu extract and ru
   assert.match(fix.why, /your launcher entry .*oats-desktop\.desktop runs with --appimage-extract-and-run \(your entry is left as it is/);
   assert.match(part(plan, "desktop").reason, /with --appimage-extract-and-run \(libfuse2 is missing\)/);
 
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.equal(s.run(["setup", "--apply", "--ui", "tui"]).status, 0);
   assert.equal(menuItems(s)["oats.desktop"].action, `omarchy-launch-or-focus awebai-oats-desktop "uwsm-app -- ${image} ${FLAG}"`);
   assert.equal(readFileSync(file, "utf8").includes(FLAG), false, "the user's entry is never changed");
   assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
@@ -83,7 +83,7 @@ test("the entry already extracts and runs (no libfuse2): the flag is not added t
   const plan = s.run(["setup", "--plan", "--json"]);
   assert.ok(!plan.json.result.fixes.some((f) => f.fix === "sudo pacman -S fuse2"));
   assert.ok(plan.json.result.notes.some((n) => /already runs the AppImage extracted \(--appimage-extract-and-run\), so it needs no libfuse2/.test(n)));
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.equal(s.run(["setup", "--apply", "--ui", "tui"]).status, 0);
   const action = menuItems(s)["oats.desktop"].action;
   assert.equal(action, `omarchy-launch-or-focus awebai-oats-desktop "uwsm-app -- ${image} ${FLAG}"`);
   assert.equal(count(action, FLAG), 1);
@@ -99,7 +99,7 @@ test("an entry that runs the AppImage by name, without libfuse2: the fuse2 fix, 
   const plan = s.run(["setup", "--plan", "--json"]);
   assert.deepEqual(plan.json.result.found.desktop, { source: "entry", entry: file, appImage: name });
   assert.ok(plan.json.result.fixes.some((f) => f.fix === "sudo pacman -S fuse2"));
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.equal(s.run(["setup", "--apply", "--ui", "tui"]).status, 0);
   assert.equal(menuItems(s)["oats.desktop"].action, `omarchy-launch-or-focus awebai-oats-desktop "uwsm-app -- ${name} ${FLAG}"`);
   assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
   unlinkSync(join(s.fakebin, name));
@@ -116,6 +116,6 @@ test("an entry that already extracts and runs the AppImage by name: no fuse2 fix
   const plan = s.run(["setup", "--plan", "--json"]);
   assert.ok(!plan.json.result.fixes.some((f) => f.fix === "sudo pacman -S fuse2"));
   assert.ok(plan.json.result.notes.some((n) => /already runs the AppImage extracted/.test(n)));
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.equal(s.run(["setup", "--apply", "--ui", "tui"]).status, 0);
   assert.equal(menuItems(s)["oats.desktop"].action, `omarchy-launch-or-focus awebai-oats-desktop "uwsm-app -- ${name} ${FLAG}"`);
 });

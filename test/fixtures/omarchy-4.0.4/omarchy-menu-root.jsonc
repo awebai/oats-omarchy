@@ -1,0 +1,26 @@
+// The root of Omarchy 4.0.4's menu definition
+// (/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc): every root-level
+// item, with its label, aliases and kind (an action's command replaced by
+// `true`), and one child of each submenu, so the submenu is shown. Search
+// lists root rows before deeper ones, so these are what the root row "OATS"
+// is ranked against; the container test ranks it against the whole real file.
+{
+  "apps": {"label":"Apps","aliases":["app","applications"],"provider":"apps"},
+  "learn": {"label":"Learn"},
+  "learn.keybindings": {"label":"Keybindings","action":"true"},
+  "trigger": {"label":"Trigger"},
+  "trigger.emoji": {"label":"Emoji","action":"true"},
+  "style": {"label":"Style"},
+  "style.theme": {"label":"Theme","action":"true"},
+  "setup": {"label":"Setup","aliases":["settings"]},
+  "setup.monitors": {"label":"Monitors","action":"true"},
+  "install": {"label":"Install"},
+  "install.package": {"label":"Package","action":"true"},
+  "remove": {"label":"Remove","aliases":["uninstall"]},
+  "remove.package": {"label":"Package","action":"true"},
+  "update": {"label":"Update","aliases":["restart","refresh"]},
+  "update.omarchy": {"label":"Omarchy","action":"true"},
+  "about": {"label":"About","action":"true"},
+  "system": {"label":"System","aliases":["power-menu"]},
+  "system.lock": {"label":"Lock","action":"true"},
+}

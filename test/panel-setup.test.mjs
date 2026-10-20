@@ -25,17 +25,15 @@ test("--apply writes plugin.json: the key's and the menu's commands as argv; --r
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const p = discoverPaths(s.env);
   const plugin = readPlugin(s);
-  assert.deepEqual(Object.keys(plugin), ["deployment", "tui", "desktop", "waiting", "attach", "setup", "agents", "spawn"]);
+  assert.deepEqual(Object.keys(plugin), ["deployment", "tui", "desktop", "ui", "waiting", "attach", "setup"]);
   assert.equal(plugin.deployment, s.deployment);
   assert.deepEqual(plugin.tui, files.tuiArgv({ shimPath: p.shim, deployment: s.deployment }));
   assert.equal(plugin.desktop, null, "no Desktop found");
+  assert.equal(plugin.ui, "tui", "the only UI set up is the default");
   assert.deepEqual(plugin.attach, [p.shim, "session", "attach", "--detach-key", "M-o", "--home"]);
   const node = plugin.waiting[0];
   assert.deepEqual(plugin.waiting, [node, `${PLUGIN_DIR}/bin/waiting.mjs`, "--dir", s.deployment]);
   assert.deepEqual(plugin.setup, [node, `${PLUGIN_DIR}/bin/setup.mjs`, "--dir", s.deployment]);
-  // The picker's reader and its spawn, by the same node.
-  assert.deepEqual(plugin.agents, [node, `${PLUGIN_DIR}/bin/agents.mjs`, "--dir", s.deployment]);
-  assert.deepEqual(plugin.spawn, [node, `${PLUGIN_DIR}/bin/spawn.mjs`]);
   assert.equal(statSync(pluginPath(s)).mode & 0o777, 0o644);
   // The bar widget finds it where setup wrote it, and reads all of it.
   assert.equal(pluginFilePath(s.env.HOME, s.env.XDG_STATE_HOME), pluginPath(s));
@@ -45,8 +43,8 @@ test("--apply writes plugin.json: the key's and the menu's commands as argv; --r
   // The same commands the menu runs, from the same code.
   const items = menu.omarchyParse(readFileSync(p.menuFile, "utf8")).items;
   assert.equal(items["oats.tui"].action, plugin.tui.map(shellWord).join(" "));
-  assert.equal(items["oats.waiting"].action, menu.pickerAction("waiting", `${shellQuote(node)} ${shellQuote(plugin.waiting[1])} --dir ${shellQuote(s.deployment)}`));
-  assert.equal(items["oats.agents"].action, menu.pickerAction("agents"));
+  assert.equal(items["oats.waiting"].action, menu.popupAction(`${shellQuote(node)} ${shellQuote(plugin.waiting[1])} --dir ${shellQuote(s.deployment)}`));
+  assert.equal(items["oats-ui"].action, items["oats.tui"].action);
 
   assert.deepEqual(s.run(["setup", "--apply", "--json"]).json.result.written, [], "a second --apply writes nothing");
   assert.equal(s.run(["setup", "--remove"]).status, 0);

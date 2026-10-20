@@ -9,8 +9,8 @@ import { join } from "node:path";
 import * as menu from "../lib/menu.mjs";
 import { repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
-const BLOCK = menu.block({ tui: "launch-tui", desktop: null, waiting: "wait-cmd", status: "status-cmd" });
-const OURS = ["oats", "oats.open", "oats.waiting", "oats.agents", "oats.souls", "oats.tui", "oats.status"];
+const BLOCK = menu.block({ ui: "tui", tui: "launch-tui", desktop: null, waiting: "wait-cmd", status: "status-cmd" });
+const OURS = ["oats-ui", "oats", "oats.tui", "oats.waiting", "oats.status"];
 
 // Inserted, read the way Omarchy reads it, then taken out again.
 function roundTrip(text) {
@@ -29,12 +29,15 @@ test("the block: a delimited set of rows, one per line, each with a trailing com
   assert.equal(lines[0], "  // >>> oats-omarchy (managed by setup; remove with setup --remove) >>>");
   assert.equal(lines.at(-2), "  // <<< oats-omarchy <<<");
   assert.deepEqual(lines.slice(1, -2).map((l) => JSON.parse(`{${l.trim().replace(/,$/, "")}}`)).map((o) => Object.keys(o)[0]), OURS);
-  assert.deepEqual(menu.omarchyParse(`{\n${BLOCK}}\n`).items["oats.waiting"], {
-    icon: "\u{F009A}", label: "Waiting on you", aliases: ["oats", "waiting", "agents"],
-    action: `[ "$(omarchy-shell shell summon ai.aweb.oats '{"section":"waiting"}' 2>/dev/null)" = ok ] || wait-cmd`,
-  });
+  const items = menu.omarchyParse(`{\n${BLOCK}}\n`).items;
+  assert.deepEqual(items["oats.waiting"], { icon: "\u{F009A}", label: "Waiting on you", action: `[ "$(omarchy-shell shell summon ai.aweb.oats '{}' 2>/dev/null)" = ok ] || wait-cmd` });
+  // The root row opens the default UI; the submenu is found by "oats".
+  assert.deepEqual(items["oats-ui"], { icon: "\u{F06A9}", label: "OATS", action: "launch-tui" });
+  assert.deepEqual(items.oats, { icon: "\u{F066F}", label: "Agent team", aliases: ["oats"] });
+  assert.equal(menu.omarchyParse(`{\n${menu.block({ ui: "desktop", tui: "t", desktop: "d", waiting: "w", status: "s" })}}\n`).items["oats-ui"].action, "d");
   assert.ok(menu.block({ tui: null, desktop: "d", waiting: "w", status: "s" }).includes('"oats.desktop"'));
   assert.ok(!menu.block({ tui: null, desktop: null, waiting: "w", status: "s" }).includes('"oats.tui"'));
+  assert.ok(!menu.block({ ui: null, tui: "t", desktop: null, waiting: "w", status: "s" }).includes('"oats-ui"'), "no default UI, no row");
 });
 
 test("the user's last entry with and without a trailing comma, one line, empty object: every byte comes back", () => {
@@ -136,7 +139,8 @@ test("--apply with no menu file creates it with the block; --remove deletes it a
   assert.ok(text.startsWith(`{\n${menu.START}`));
   const items = menu.omarchyParse(text).items;
   assert.deepEqual(Object.keys(items), OURS);
-  assert.equal(items["oats.waiting"].action, menu.pickerAction("waiting", `'${process.execPath}' '${repo}/bin/waiting.mjs' --dir '${s.deployment}'`));
+  assert.equal(items["oats.waiting"].action, menu.popupAction(`'${process.execPath}' '${repo}/bin/waiting.mjs' --dir '${s.deployment}'`));
+  assert.equal(items["oats-ui"].action, items["oats.tui"].action);
   assert.equal(items["oats.status"].action, `omarchy-launch-floating-terminal-with-presentation "cd '${s.deployment}' && '${join(s.home, ".local/share/oats-omarchy/oats")}' status"`);
   assert.equal(part(s.run(["setup", "--apply", "--json"]), "menu").status, "already applied");
   assert.equal(s.run(["setup", "--remove"]).status, 0);
@@ -203,7 +207,7 @@ test("the Desktop found later: --apply replaces the block in place, and --remove
   assert.equal(s.run(["setup", "--apply"]).status, 0);
   assert.ok(!readFileSync(MENU(s), "utf8").includes("oats.desktop"));
   writeExecutable(join(s.home, "Applications/OATS-Desktop.AppImage"), "#!/bin/sh\n");
-  const again = s.run(["setup", "--apply", "--json"]);
+  const again = s.run(["setup", "--apply", "--ui", "tui", "--json"]);
   assert.equal(part(again, "menu").status, "applied");
   const items = menu.omarchyParse(readFileSync(MENU(s), "utf8")).items;
   assert.match(items["oats.desktop"].action, /^omarchy-launch-or-focus awebai-oats-desktop "uwsm-app -- .*OATS-Desktop\.AppImage --dir /);
@@ -247,45 +251,24 @@ test("a symlinked menu file: the block goes into its target, and the link stays 
   assert.deepEqual(snapshot(s.home), before);
 });
 
-test("the menu's rows find OATS by its words, and open the picker on their section", () => {
-  const items = menu.omarchyParse(`{\n${BLOCK}}\n`).items;
-  for (const word of ["oats", "agents", "instances", "souls", "waiting"]) {
-    const found = Object.entries(items).filter(([id, v]) => `${v.label} ${id.split(".").pop()} ${v.aliases.join(" ")}`.toLowerCase().split(/[\s._-]+/).includes(word));
-    assert.ok(found.length > 0, word);
-  }
-  assert.equal(items["oats.open"].label, "Open OATS");
-  assert.equal(items["oats.agents"].action, `[ "$(omarchy-shell shell summon ai.aweb.oats '{"section":"agents"}' 2>/dev/null)" = ok ] || omarchy-notification-send OATS '${menu.PICKER_UNAVAILABLE}'`);
-  assert.match(items["oats.souls"].action, /'\{"section":"souls"\}'/);
-  assert.match(items["oats.open"].action, / summon ai\.aweb\.oats '\{\}' /);
-  assert.equal(menu.pickerToggle(), "omarchy-shell shell toggle ai.aweb.oats '{}'");
-});
-
-test("the menu's picker rows with the shell running: the picker opens, and nothing else runs", (t) => {
+test("Waiting on you with the shell running: the waiting popup opens, and no selector runs", (t) => {
   const s = sandbox(t, { shell: "ok" });
   assert.equal(s.run(["setup", "--apply"]).status, 0);
   const items = menu.omarchyParse(readFileSync(MENU(s), "utf8")).items;
-  for (const id of ["oats.open", "oats.waiting", "oats.agents", "oats.souls"]) {
-    const r = spawnSync("bash", ["-c", items[id].action], { cwd: s.home, env: s.env, encoding: "utf8", timeout: 30_000 });
-    assert.equal(r.status, 0, r.stderr);
-  }
-  assert.deepEqual(readFileSync(join(s.root, "shell.log"), "utf8").trim().split("\n"), [
-    "shell summon ai.aweb.oats {}",
-    'shell summon ai.aweb.oats {"section":"waiting"}',
-    'shell summon ai.aweb.oats {"section":"agents"}',
-    'shell summon ai.aweb.oats {"section":"souls"}',
-  ]);
+  const r = spawnSync("bash", ["-c", items["oats.waiting"].action], { cwd: s.home, env: s.env, encoding: "utf8", timeout: 30_000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(join(s.root, "shell.log"), "utf8"), "shell summon ai.aweb.oats {}\n");
   assert.equal(existsSync(join(s.root, "select.log")), false, "no selector");
-  assert.equal(existsSync(join(s.root, "notify.log")), false, "no notification");
 });
 
-test("the picker cannot open (the plugin disabled): Waiting on you falls back to the selector, the others say so", (t) => {
+test("Waiting on you when the popup cannot open (the plugin disabled): the selector, as before", (t) => {
   const s = sandbox(t, { shell: "unknown" });
   writeFileSync(join(s.root, "status.json"), JSON.stringify({ agents: [{ instances: [{ instance: "alpha", home: "/h/a", waitingOnYou: { reason: "attention" } }] }] }));
   assert.equal(s.run(["setup", "--apply"]).status, 0);
   const items = menu.omarchyParse(readFileSync(MENU(s), "utf8")).items;
-  for (const id of ["oats.waiting", "oats.agents"]) assert.equal(spawnSync("bash", ["-c", items[id].action], { cwd: s.home, env: s.env, encoding: "utf8", timeout: 30_000 }).status, 0);
+  assert.equal(spawnSync("bash", ["-c", items["oats.waiting"].action], { cwd: s.home, env: s.env, encoding: "utf8", timeout: 30_000 }).status, 0);
+  assert.equal(readFileSync(join(s.root, "shell.log"), "utf8"), "shell summon ai.aweb.oats {}\n");
   assert.equal(readFileSync(join(s.root, "select.log"), "utf8"), "Waiting on you (1)\nalpha\n--\n");
-  assert.equal(readFileSync(join(s.root, "notify.log"), "utf8"), `OATS\n${menu.PICKER_UNAVAILABLE}\n--\n`);
 });
 
 test("the menu's actions run: waiting reaches the selector through the shim and the kernel when no shell runs; status runs the kernel's own status", (t) => {

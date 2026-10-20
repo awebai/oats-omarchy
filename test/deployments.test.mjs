@@ -265,7 +265,7 @@ test("setup with the list: no deployment needed; the launchers, the menu and the
   listed(s, [{ path: s.deployment, name: "deployment" }]);
   assert.ok(!s.run(["setup", "--plan", "--json", "--dir", s.deployment], {}, { cwd: s.home }).json.result.notes.some((n) => /is not in this computer's list/.test(n)));
 
-  const r = s.run(["setup", "--apply", "--json"], {}, { cwd: s.home });
+  const r = s.run(["setup", "--apply", "--ui", "desktop", "--json"], {}, { cwd: s.home });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const p = discoverPaths(s.env);
   const plugin = JSON.parse(readFileSync(join(p.stateDir, "plugin.json"), "utf8"));
@@ -273,13 +273,15 @@ test("setup with the list: no deployment needed; the launchers, the menu and the
   assert.equal(plugin.deployment, null);
   assert.deepEqual(plugin.tui, ["omarchy-launch-or-focus-tui", "--app-id=org.oats.tui", p.shim, "tui"]);
   assert.deepEqual(plugin.desktop, ["omarchy-launch-or-focus", "awebai-oats-desktop", `uwsm-app -- ${image}`]);
+  assert.equal(plugin.ui, "desktop");
   assert.deepEqual(plugin.waiting, [node, `${PLUGIN_DIR}/bin/waiting.mjs`, "--list"]);
   assert.deepEqual(plugin.setup, [node, `${PLUGIN_DIR}/bin/setup.mjs`]);
   assert.ok(W.isList(W.parsePlugin(JSON.stringify(plugin))));
   assert.equal(W.readTimeoutMs(plugin), 120000);
   assert.deepEqual(W.readArgv(plugin), [node, `${PLUGIN_DIR}/bin/waiting.mjs`, "--list", "--json"]);
   const items = menu.omarchyParse(readFileSync(p.menuFile, "utf8")).items;
-  assert.equal(items["oats.waiting"].action, menu.pickerAction("waiting", `'${node}' '${PLUGIN_DIR}/bin/waiting.mjs' --list`));
+  assert.equal(items["oats.waiting"].action, menu.popupAction(`'${node}' '${PLUGIN_DIR}/bin/waiting.mjs' --list`));
+  assert.equal(items["oats-ui"].action, items["oats.desktop"].action);
   assert.equal(items["oats.status"].action, `omarchy-launch-floating-terminal-with-presentation "'${node}' '${PLUGIN_DIR}/bin/status.mjs'"`);
   assert.doesNotMatch(readFileSync(join(p.applications, "org.oats.tui.desktop"), "utf8"), /--dir/);
   assert.doesNotMatch(readFileSync(join(p.applications, "awebai-oats-desktop.desktop"), "utf8"), /--dir/);
@@ -322,7 +324,7 @@ test("a single-deployment setup: --check says when the CLI gains the list, and -
 });
 
 test("the widget: plugin.json with the list, grouped rows, the list's deadline", () => {
-  const plugin = { deployment: null, tui: ["t"], desktop: null, waiting: ["n", "w", "--list"], attach: ["s", "--home"], setup: ["n", "s"], agents: null, spawn: null };
+  const plugin = { deployment: null, tui: ["t"], desktop: null, ui: "tui", waiting: ["n", "w", "--list"], attach: ["s", "--home"], setup: ["n", "s"] };
   assert.deepEqual(W.parsePlugin(JSON.stringify(plugin)), plugin);
   assert.equal(W.parsePlugin(JSON.stringify({ ...plugin, deployment: 1 })), null);
   assert.equal(W.isList(plugin), true);

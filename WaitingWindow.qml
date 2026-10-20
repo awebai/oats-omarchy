@@ -2,7 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 
-// The OATS picker's window: a full-screen layer-shell surface over every
+// The waiting popup's window: a full-screen layer-shell surface over every
 // window, as omarchy.clipboard's, that takes the keyboard while it is shown,
 // with the theme's scrim; a click on the scrim dismisses it. The card goes in
 // as its content. On a file of its own so the QML test, which runs offscreen
@@ -16,7 +16,7 @@ PanelWindow {
 
   anchors { top: true; bottom: true; left: true; right: true }
   color: "transparent"
-  WlrLayershell.namespace: "oats-picker"
+  WlrLayershell.namespace: "oats-waiting"
   WlrLayershell.layer: WlrLayer.Overlay
   WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
   exclusionMode: ExclusionMode.Ignore

@@ -65,7 +65,7 @@ test("--apply writes exactly the parts, and a second --apply writes nothing", (t
   const s = sandbox(t);
   appImage(s);
   const p = paths(s);
-  const r = s.run(["setup", "--apply", "--json"]);
+  const r = s.run(["setup", "--apply", "--ui", "tui", "--json"]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.json.result.written.sort(), [p.shim, p.tuiEntry, p.tuiIcon, p.desktopEntry, p.desktopIcon, p.hook, p.menu].sort());
   assert.deepEqual(r.json.result.parts.map((x) => x.status), ["applied", "applied", "applied", "applied", "applied", "skipped"]);
@@ -104,7 +104,7 @@ test("--apply then --remove restores the whole tree byte for byte, with no user 
   const s = sandbox(t);
   appImage(s);
   const before = snapshot(s.home);
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.equal(s.run(["setup", "--apply", "--ui", "tui"]).status, 0);
   assert.notDeepEqual(snapshot(s.home), before);
   const r = s.run(["setup", "--remove", "--json"]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -132,7 +132,7 @@ test("--apply then --remove restores the whole tree byte for byte, with the user
   mkdirSync(join(s.home, ".local/state"), { recursive: true });
   const before = snapshot(s.home);
 
-  const r = s.run(["setup", "--apply", "--json"]);
+  const r = s.run(["setup", "--apply", "--ui", "tui", "--json"]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const state = JSON.parse(readFileSync(p.state, "utf8"));
   const prior = state.files.find((f) => f.role === "tui-entry").prior;
@@ -335,7 +335,7 @@ test("an AppImage without libfuse2: the entry adds --appimage-extract-and-run, a
   assert.equal(r.json.result.found.libfuse2.ok, false);
   assert.ok(r.json.result.fixes.some((f) => f.fix === "sudo pacman -S fuse2"));
   assert.match(r.json.result.keys.snippet, /oats-desktop-0\.60\.0-linux-x86_64\.AppImage --appimage-extract-and-run --dir/);
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.equal(s.run(["setup", "--apply", "--ui", "tui"]).status, 0);
   const desktop = readDesktopEntry(readFileSync(paths(s).desktopEntry, "utf8"));
   assert.deepEqual(parseDesktopExec(desktop.Exec).slice(1), ["--appimage-extract-and-run", "--dir", s.deployment]);
 });
@@ -346,7 +346,7 @@ test("an existing Desktop entry is used, not replaced", (t) => {
   const apps = join(s.home, ".local/share/applications");
   mkdirSync(apps, { recursive: true });
   writeFileSync(join(apps, "oats-desktop.desktop"), `[Desktop Entry]\nName=OATS Desktop\nExec=${image} --no-sandbox %U\nStartupWMClass=awebai-oats-desktop\n`);
-  const r = s.run(["setup", "--apply", "--json"]);
+  const r = s.run(["setup", "--apply", "--ui", "tui", "--json"]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(part(r.json.result, "desktop").status, "skipped");
   assert.match(part(r.json.result, "desktop").reason, /existing launcher entry .*oats-desktop\.desktop provides it/);

@@ -19,6 +19,7 @@ import { parseDesktopExec } from "../lib/quote.mjs";
 import { readDesktopEntry } from "../lib/desktop-entry.mjs";
 import { fixture, repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 import * as widget from "../widget.mjs";
+import { appRow, loadMenuModel, search } from "./helpers/omarchy-search.mjs";
 
 const enabled = process.env.OATS_OMARCHY_CONTAINER === "1";
 const OMARCHY = process.env.OMARCHY_PATH || "/usr/share/omarchy";
@@ -188,7 +189,7 @@ test("an AppImage without libfuse2: the entry extracts and runs, the plan names 
   const before = snapshot(s.home);
   const p = plan(s);
   assert.ok(p.fixes.some((f) => f.fix === "sudo pacman -S fuse2"));
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.equal(s.run(["setup", "--apply", "--ui", "tui"]).status, 0);
   const entry = readDesktopEntry(readFileSync(join(s.home, ".local/share/applications/awebai-oats-desktop.desktop"), "utf8"));
   assert.deepEqual(parseDesktopExec(entry.Exec).slice(1), ["--appimage-extract-and-run", "--dir", s.deployment]);
   const v = verifySnippet(s, p.keys);
@@ -228,53 +229,6 @@ test("keys taken, a user submap named oats: the next free key, and it passes --v
   assert.equal(v.status, 0, v.stdout + v.stderr);
 });
 
-// The picker's commands as Omarchy's Util.execArgv runs them: bash -lc 'exec "$@"'.
-const execArgv = (s, argv, extra = {}) => spawnSync("bash", ["-lc", 'exec "$@"', "bash", ...argv], { env: { ...s.env, ...extra }, cwd: s.root, encoding: "utf8", timeout: 30_000 });
-
-test("the picker's agent row opens its session through the real floating terminal, as argv", { skip }, (t) => {
-  const s = omarchySandbox(t, { deploymentName: "my agents" });
-  const home = join(s.deployment, "agents", "x", "instances", "it's $(here)");
-  mkdirSync(home, { recursive: true });
-  writeExecutable(join(s.fakebin, "uwsm-app"), '#!/bin/bash\n[[ $1 == -- ]] && shift\nif [[ $1 == xdg-terminal-exec ]]; then while [[ $1 != -e ]]; do shift; done; shift; fi\nexec "$@"\n');
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
-  const plugin = widget.parsePlugin(readFileSync(join(s.home, ".local/state/oats-omarchy/plugin.json"), "utf8"));
-  assert.ok(plugin && plugin.agents && plugin.spawn, "setup wrote the picker's commands");
-  const r = execArgv(s, widget.attachArgv(plugin, home));
-  assert.equal(r.status, 0, r.stderr);
-  const log = join(s.root, "kernel.log");
-  waitFor(log, 1);
-  assert.deepEqual(JSON.parse(readFileSync(log, "utf8").trim()), ["session", "attach", "--detach-key", "M-o", "--home", home]);
-});
-
-test("the picker's soul row: the task as typed reaches the kernel through the real floating terminal, and the new instance's session opens", { skip }, (t) => {
-  const s = omarchySandbox(t, { deploymentName: "my agents" });
-  writeExecutable(join(s.fakebin, "uwsm-app"), '#!/bin/bash\n[[ $1 == -- ]] && shift\nif [[ $1 == xdg-terminal-exec ]]; then while [[ $1 != -e ]]; do shift; done; shift; fi\nexec "$@"\n');
-  // Omarchy's input needs its running shell: a stand-in that answers.
-  writeExecutable(join(s.fakebin, "omarchy-menu-input"), '#!/bin/sh\nprintf \'%s\' "$FAKE_INPUT"\n');
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
-  const plugin = widget.parsePlugin(readFileSync(join(s.home, ".local/state/oats-omarchy/plugin.json"), "utf8"));
-  const task = `'; touch "${join(s.root, "pwned")}" #\n$(touch pwned)`;
-  const r = execArgv(s, widget.spawnArgv(plugin, s.deployment, "writer"), { FAKE_INPUT: task });
-  assert.equal(r.status, 0, r.stderr);
-  const kernel = join(s.root, "kernel.log");
-  waitFor(kernel, 1);
-  const spawned = JSON.parse(readFileSync(join(s.root, "spawn.log"), "utf8").trim());
-  assert.deepEqual(spawned.argv.filter((a, i) => i !== 5), ["spawn", "writer", "--dir", s.deployment, "--task-file", "--json"]);
-  assert.deepEqual([spawned.task, spawned.mode, spawned.cwd], [task, 0o600, s.deployment]);
-  assert.deepEqual(JSON.parse(readFileSync(kernel, "utf8").trim()), ["session", "attach", "--detach-key", "M-o", "--home", join(s.deployment, "agents", "writer", "instances", "writer-1")]);
-  assert.equal(existsSync(join(s.root, "pwned")), false);
-  assert.equal(existsSync(join(spawned.argv[5], "..")), false, "the task's directory is gone");
-});
-
-test("the key block's Space opens the picker, and the whole block verifies with the real Hyprland", { skip }, (t) => {
-  const s = omarchySandbox(t, { print: readFileSync(fixture("print", "omarchy-4.0.4.txt"), "utf8") });
-  userHypr(s, { layout: "lua" });
-  const p = plan(s);
-  assert.match(p.keys.snippet, /o\.bind\("SPACE", "Open OATS", "omarchy-shell shell toggle ai\.aweb\.oats '\{\}'"\)/);
-  const v = verifySnippet(s, p.keys);
-  assert.equal(v.status, 0, v.stdout + v.stderr);
-});
-
 test("the real launchers run what setup wrote, with a deployment path that has a space", { skip }, (t) => {
   const s = omarchySandbox(t, { deploymentName: "my agents & co" });
   mkdirSync(join(s.home, "Applications"));
@@ -285,7 +239,7 @@ test("the real launchers run what setup wrote, with a deployment path that has a
   // that no window matches, as on a desktop with neither app open.
   writeExecutable(join(s.fakebin, "uwsm-app"), `#!/bin/sh\n[ "$1" = "--" ] && shift\nif [ "$1" = xdg-terminal-exec ]; then for a; do echo "terminal:$a"; done >> "${argvLog}"; exit 0; fi\nexec "$@"\n`);
   writeExecutable(join(s.fakebin, "hyprctl"), "#!/bin/sh\necho '[]'\n");
-  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  assert.equal(s.run(["setup", "--apply", "--ui", "tui"]).status, 0);
   const p = plan(s);
   const shim = join(s.home, ".local/share/oats-omarchy/oats");
   const terminal = ["terminal:xdg-terminal-exec", "terminal:--app-id=org.oats.tui", "terminal:-e", `terminal:${shim}`, "terminal:tui", "terminal:--dir", `terminal:${s.deployment}`];
@@ -327,10 +281,10 @@ function waitFor(file, lines) {
 function menuModel() {
   const src = readFileSync(join(OMARCHY, "shell", "plugins", "menu", "MenuModel.js"), "utf8").replace(/^\s*\.(pragma|import)\b.*$/gm, "");
   const context = {};
-  vm.runInNewContext(`${src}\nthis.parseMenuJsonc = parseMenuJsonc; this.mergeMenuSources = mergeMenuSources; this.matchesQuery = matchesQuery;`, context);
+  vm.runInNewContext(`${src}\nthis.parseMenuJsonc = parseMenuJsonc; this.mergeMenuSources = mergeMenuSources;`, context);
   // Plain objects of this realm, for deepEqual.
   const plain = (x) => JSON.parse(JSON.stringify(x));
-  return { parse: (text) => plain(context.parseMenuJsonc(text)), merge: (a, b) => plain(context.mergeMenuSources(a, b)), matches: (entry, query) => context.matchesQuery(entry, query, true) };
+  return { parse: (text) => plain(context.parseMenuJsonc(text)), merge: (a, b) => plain(context.mergeMenuSources(a, b)) };
 }
 
 for (const [name, text] of [
@@ -353,21 +307,36 @@ for (const [name, text] of [
     const byId = Object.fromEntries(user.map((item) => [item.id, item]));
     for (const item of userBefore) assert.deepEqual(byId[item.id], item, `${item.id} reads the same`);
     const merged = model.merge(defaults, user);
-    const ids = ["oats", "oats.open", "oats.waiting", "oats.agents", "oats.souls", "oats.tui", "oats.status"];
-    const oats = ids.map((id) => merged.items[id]);
-    assert.deepEqual(oats.map((x) => [x.id, x.parent, x.kind]), [["oats", "root", "menu"], ...ids.slice(1).map((id) => [id, "oats", "action"])]);
-    assert.deepEqual(oats.map((x) => x.label), ["OATS", "Open OATS", "Waiting on you", "Agents", "Souls", "Open OATS TUI", "Status"]);
-    // Omarchy's own search finds them by these words.
-    for (const word of ["oats", "agents", "instances", "souls", "waiting"]) {
-      assert.ok(oats.some((x) => model.matches(x, word)), `"${word}" finds an oats row`);
-    }
-    assert.ok(model.matches(merged.items["oats.agents"], "instances"));
-    assert.ok(model.matches(merged.items["oats.waiting"], "waiting"));
+    const oats = ["oats-ui", "oats", "oats.tui", "oats.waiting", "oats.status"].map((id) => merged.items[id]);
+    assert.deepEqual(oats.map((x) => [x.id, x.parent, x.kind, x.label]), [["oats-ui", "root", "action", "OATS"], ["oats", "root", "menu", "Agent team"], ["oats.tui", "oats", "action", "Open OATS TUI"], ["oats.waiting", "oats", "action", "Waiting on you"], ["oats.status", "oats", "action", "Status"]]);
+    assert.equal(merged.items["oats-ui"].action, merged.items["oats.tui"].action, "the only UI set up is the default");
+    assert.equal(merged.items["oats.waiting"].label, "Waiting on you");
     assert.equal(merged.items["oats.desktop"], undefined, "no Desktop here");
     for (const item of defaults) if (!byId[item.id]) assert.ok(merged.items[item.id], `Omarchy's ${item.id} is still there`);
 
     assert.equal(s.run(["setup", "--remove"]).status, 0);
     assert.deepEqual(snapshot(s.home), before);
+  });
+}
+
+// The ranking of test/menu-search.test.mjs, with this Omarchy's own search
+// code and whole menu definition, and the block setup writes here.
+for (const ui of ["tui", "desktop"]) {
+  test(`typing o, oa, oat, oats or OATS in SUPER + SPACE: with --ui ${ui}, the default UI's row is first, ranked by Omarchy's own MenuModel.js`, { skip }, (t) => {
+    const s = omarchySandbox(t);
+    const image = join(s.home, ".local/opt/oats-desktop/OATS-Desktop.AppImage");
+    writeExecutable(image, "#!/bin/sh\nexit 0\n");
+    assert.equal(s.run(["setup", "--apply", "--ui", ui]).status, 0);
+    const user = readFileSync(join(s.home, ".config", "omarchy", "extensions", "omarchy-menu.jsonc"), "utf8");
+    const defaults = readFileSync(join(OMARCHY, "default", "omarchy", "omarchy-menu.jsonc"), "utf8");
+    const model = loadMenuModel(join(OMARCHY, "shell", "plugins", "menu", "MenuModel.js"));
+    const apps = [appRow({ id: "org.oats.tui", name: "OATS" }), appRow({ id: "awebai-oats-desktop", name: "OATS Desktop" })];
+    const opens = model.parseMenuJsonc(user).find((x) => x.id === `oats.${ui}`).action;
+    for (const query of ["o", "oa", "oat", "oats", "OATS"]) {
+      const rows = search(model, { defaults, user, apps }, query);
+      assert.equal(rows[0].itemId, "oats-ui", `${query}: ${JSON.stringify(rows.slice(0, 4))}`);
+      assert.equal(rows[0].action, opens, query);
+    }
   });
 }
 

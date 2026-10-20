@@ -60,7 +60,7 @@ test("--apply appends the block after a blank line, verified first on a temporar
   assert.equal(readFileSync(file, "utf8"), `${USER_BINDINGS}\n${rec.block}`);
   assert.equal(statSync(file).mode & 0o777, 0o640, "the file keeps its mode");
   assert.ok(rec.block.startsWith(bindings.START) && rec.block.endsWith(bindings.END));
-  for (const line of ['hl.unbind("SUPER + O")', 'o.bind("SUPER + O", "OATS", hl.dsp.submap("oats"))', 'hl.define_submap("oats", "reset", function()', 'o.bind("O", "Pop window out", "omarchy-hyprland-window-pop")', 'o.bind("SUPER + T", "OATS TUI",', `o.bind("SPACE", "Open OATS", "omarchy-shell shell toggle ai.aweb.oats '{}'")`]) {
+  for (const line of ['hl.unbind("SUPER + O")', 'o.bind("SUPER + O", "OATS", hl.dsp.submap("oats"))', 'hl.define_submap("oats", "reset", function()', 'o.bind("O", "Pop window out", "omarchy-hyprland-window-pop")', 'o.bind("SUPER + T", "OATS TUI",']) {
     assert.ok(rec.block.includes(line), line);
   }
   assert.deepEqual([rec.separator, rec.prior.state, rec.prior.mode], ["\n", "file", 0o640]);
@@ -137,7 +137,7 @@ test("a re-apply that rewrites the block keeps the user's edits, and --remove th
   const file = hypr(s);
   assert.equal(s.run(["setup", "--apply"]).status, 0);
   writeFileSync(file, `${readFileSync(file, "utf8")}-- user edit\n`);
-  const again = s.run(["setup", "--apply", "--desktop", appImage(s), "--json"]);
+  const again = s.run(["setup", "--apply", "--desktop", appImage(s), "--ui", "tui", "--json"]);
   assert.equal(part(again, "keys").status, "applied", again.stdout);
   const rec = record(s);
   assert.equal(rec.restorable, false);
@@ -151,7 +151,7 @@ test("a re-apply that rewrites the block keeps the user's edits, and --remove th
   const clean = sandbox(t);
   const cleanFile = hypr(clean, USER_BINDINGS, 0o600);
   assert.equal(clean.run(["setup", "--apply"]).status, 0);
-  assert.equal(part(clean.run(["setup", "--apply", "--desktop", appImage(clean), "--json"]), "keys").status, "applied");
+  assert.equal(part(clean.run(["setup", "--apply", "--desktop", appImage(clean), "--ui", "tui", "--json"]), "keys").status, "applied");
   assert.equal(record(clean).restorable, true);
   assert.equal(clean.run(["setup", "--remove"]).status, 0);
   assert.equal(readFileSync(cleanFile, "utf8"), USER_BINDINGS);
@@ -176,7 +176,7 @@ for (const [name, arrange, reason] of updateRefusals) {
     assert.equal(s.run(["setup", "--apply"]).status, 0);
     arrange(s, file);
     const before = readFileSync(file, "utf8");
-    const again = s.run(["setup", "--apply", "--desktop", appImage(s), "--json"]);
+    const again = s.run(["setup", "--apply", "--desktop", appImage(s), "--ui", "tui", "--json"]);
     assert.equal(again.status, 0, again.stdout);
     assert.equal(part(again, "keys").status, "skipped");
     assert.match(part(again, "keys").reason, reason);

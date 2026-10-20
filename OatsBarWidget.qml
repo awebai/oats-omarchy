@@ -8,9 +8,9 @@ import qs.Ui
 import "widget.mjs" as Widget
 
 // The OATS icon in the bar, and a panel: the agents waiting on you, one card
-// each in the style of Omarchy's own omarchy.agents panel (a click opens the
-// session), then the OATS picker (OatsPicker.qml, the plugin's overlay), the
-// TUI, the Desktop, and setup. Everything it runs or
+// each (WaitingCard.qml, which the waiting popup draws too; a click opens the
+// session), the TUI, the Desktop, and setup. A right click on the icon opens
+// the default UI setup chose. Everything it runs or
 // reads is built by widget.mjs from setup's plugin.json; this file only displays it, runs commands through the
 // bar, and writes nothing. Without plugin.json, setup has not run: a click
 // on the icon runs the whole setup in a floating terminal instead
@@ -19,8 +19,8 @@ import "widget.mjs" as Widget
 // The rows are `waiting --json` (bin/waiting.mjs), read only when the panel
 // opens, after plugin.json is read again: nothing is read in the background,
 // and the icon shows no count. A card shows the kernel's message, reason,
-// producer and how long the agent has waited, as given (widget.mjs card,
-// worked out once when the read answers), and the exact time in its tooltip. The panel says it is reading until the read
+// producer and how long the agent has waited, as given, worked out once
+// when the read answers. The panel says it is reading until the read
 // answers. With this computer's list of deployments the read is
 // `waiting --list --json`: every listed deployment, one after another, its
 // rows grouped by workspace in the panel; one that could not be read is shown
@@ -301,7 +301,18 @@ Panel {
                     model: group.modelData.rows
 
                     WaitingCard {
+                      required property var modelData
                       width: group.width
+                      label: modelData.label
+                      waitingOnYou: modelData.waitingOnYou
+                      readAt: root.readAt
+                      foreground: root.foreground
+                      dim: root.dim
+                      fontFamily: root.fontFamily
+                      onActivated: {
+                        root.runLine(Widget.attachCommand(root.plugin, modelData.home))
+                        root.close()
+                      }
                     }
                   }
                 }
@@ -346,16 +357,6 @@ Panel {
           }
 
           Button {
-            visible: !!root.plugin
-            width: parent.width
-            leftAlign: true
-            text: "Open OATS"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            onClicked: { root.runLine(Widget.pickerCommand()); root.close() }
-          }
-
-          Button {
             visible: Widget.tuiCommand(root.plugin) !== ""
             width: parent.width
             leftAlign: true
@@ -385,77 +386,6 @@ Panel {
           }
         }
       }
-    }
-  }
-  // One agent waiting on you: its name, the kernel's message, then reason,
-  // producer and age (widget.mjs card); the exact `since` in the tooltip.
-  // A click opens its session in the floating terminal.
-  component WaitingCard: BorderSurface {
-    id: waitingCard
-    required property var modelData
-    readonly property var shown: Widget.card(modelData.label, modelData.waitingOnYou, root.readAt)
-
-    implicitHeight: cardLines.implicitHeight + Style.space(10) * 2
-    radius: Style.cornerRadius
-    color: cardMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
-    borderSpec: Border.controlSpec(cardMouse.containsMouse ? "hover-cursor" : "normal", root.foreground, Color.accent)
-
-    Column {
-      id: cardLines
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.verticalCenter: parent.verticalCenter
-      anchors.leftMargin: Style.space(12)
-      anchors.rightMargin: Style.space(12)
-      spacing: Style.space(2)
-
-      Text {
-        width: parent.width
-        text: waitingCard.shown.title
-        textFormat: Text.PlainText
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.body
-        elide: Text.ElideRight
-      }
-      Text {
-        visible: text !== ""
-        width: parent.width
-        text: waitingCard.shown.message
-        textFormat: Text.PlainText
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
-        maximumLineCount: 4
-        elide: Text.ElideRight
-      }
-      Text {
-        visible: text !== ""
-        width: parent.width
-        text: waitingCard.shown.meta
-        textFormat: Text.PlainText
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        elide: Text.ElideRight
-      }
-    }
-
-    MouseArea {
-      id: cardMouse
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      onClicked: {
-        root.runLine(Widget.attachCommand(root.plugin, waitingCard.modelData.home))
-        root.close()
-      }
-    }
-
-    PanelToolTip {
-      visible: cardMouse.containsMouse && waitingCard.shown.since !== ""
-      text: waitingCard.shown.since
     }
   }
 }

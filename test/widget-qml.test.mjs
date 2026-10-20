@@ -1,9 +1,11 @@
-// The bar widget and the OATS picker themselves, in Quickshell:
-// OatsBarWidget.qml and OatsPicker.qml loaded with Omarchy's own Ui and
-// Commons modules, offscreen, with a temporary HOME and XDG directories and
-// a stand-in for the bar and the shell. Their layer-shell windows need a
-// Wayland compositor, so only those two types, the panel's KeyboardPanel and
-// the picker's PickerWindow, are stand-ins: Items with their properties. Each case
+// The bar widget and the waiting popup themselves, in Quickshell:
+// OatsBarWidget.qml and OatsWaiting.qml, with the WaitingCard.qml both draw,
+// loaded with Omarchy's own Ui and Commons modules, offscreen, with a
+// temporary HOME and XDG directories and a stand-in for the bar and the
+// shell. Their layer-shell windows need a Wayland compositor, so only those
+// two types, the panel's KeyboardPanel and the popup's WaitingWindow, are
+// stand-ins: Items with their properties, a card on a short screen. Nothing
+// they run is started: the bar's run and the popup's argv runner log. Each case
 // is a small QML scene that logs "PROBE <json>" lines. Runs in CI's Omarchy
 // container (OATS_OMARCHY_CONTAINER=1), where Quickshell and the shell are
 // installed.
@@ -14,6 +16,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repo } from "./helpers/sandbox.mjs";
+import * as W from "../widget.mjs";
 
 const SHELL = "/usr/share/omarchy/shell";
 const skip = process.env.OATS_OMARCHY_CONTAINER === "1" ? false : "set OATS_OMARCHY_CONTAINER=1 (CI's Omarchy container)";
@@ -39,8 +42,8 @@ Item {
 }
 `;
 
-// The picker's window, offscreen: the card's holder, at a screen's size.
-const pickerWindowStandIn = `import QtQuick
+// The popup's window, offscreen: the card's holder, at a screen's size.
+const waitingWindowStandIn = `import QtQuick
 Item {
   id: panel
   property color scrim: "transparent"
@@ -48,7 +51,7 @@ Item {
   default property alias content: holder.data
   width: 1000
   height: 800
-  Item { id: holder; objectName: "pickerWindow"; anchors.fill: parent }
+  Item { id: holder; objectName: "waitingWindow"; anchors.fill: parent }
 }
 `;
 
@@ -91,8 +94,8 @@ function world(t, { screen = 400 } = {}) {
   writeFileSync(join(ui, "KeyboardPanel.qml"), panelStandIn(screen));
   symlinkSync(join(SHELL, "Commons"), join(cfg, "Commons"));
   mkdirSync(join(cfg, "plugin"));
-  for (const name of ["OatsBarWidget.qml", "OatsPicker.qml", "widget.mjs", "picker.mjs", "assets"]) cpSync(join(repo, name), join(cfg, "plugin", name), { recursive: true });
-  writeFileSync(join(cfg, "plugin", "PickerWindow.qml"), pickerWindowStandIn);
+  for (const name of ["OatsBarWidget.qml", "OatsWaiting.qml", "WaitingCard.qml", "widget.mjs", "assets"]) cpSync(join(repo, name), join(cfg, "plugin", name), { recursive: true });
+  writeFileSync(join(cfg, "plugin", "WaitingWindow.qml"), waitingWindowStandIn);
   const home = join(root, "home");
   const state = join(home, ".local", "state", "oats-omarchy");
   const run = join(root, "run");
@@ -142,12 +145,12 @@ for (const screen of [400, 900]) test(`a list taller than the panel scrolls; the
   const { reading, card, flick, texts } = report.value;
   assert.equal(reading, false, "the read answered");
   assert.ok(flick && flick.interactive && flick.height < flick.contentHeight && flick.height > 0, JSON.stringify(flick));
-  for (const label of ["Alt+O leaves the viewer", "Open OATS", "Open OATS TUI", "Open OATS Desktop", "Set up keys and launchers", "agent-0"]) {
+  for (const label of ["Alt+O leaves the viewer", "Open OATS TUI", "Open OATS Desktop", "Set up keys and launchers", "agent-0"]) {
     assert.equal(texts[label], true, `${label} is inside the ${card}px card`);
   }
   assert.equal(texts["agent-49"], false, "the last rows are scrolled out of view, not pushed out of the card");
   // Beyond the instance names: the button labels and the hint.
-  const allowed = ["OATS", "Alt+O leaves the viewer", "Open OATS", "Open OATS TUI", "Open OATS Desktop", "Set up keys and launchers"];
+  const allowed = ["OATS", "Alt+O leaves the viewer", "Open OATS TUI", "Open OATS Desktop", "Set up keys and launchers"];
   for (const word of Object.keys(texts).filter((x) => !/^agent-\d+$/.test(x))) assert.ok(allowed.includes(word), word);
 });
 
@@ -255,16 +258,43 @@ test("before setup, a left or right click on the icon runs the whole setup; the 
   ]);
 });
 
-test("after setup, a left click toggles the panel and a right click opens the TUI; the tooltip is OATS", { skip }, (t) => {
+// The bar's run is the scene's logger: nothing is started.
+for (const [ui, line] of [["tui", "exec 'omarchy-launch-or-focus-tui' 'tui'"], ["desktop", "exec 'omarchy-launch-or-focus' 'awebai-oats-desktop' 'uwsm-app -- d'"]]) {
+  test(`after setup, a left click toggles the panel and a right click opens the default UI, ${ui === "tui" ? "the TUI" : "the Desktop"}; the tooltip is OATS`, { skip }, (t) => {
+    const w = world(t);
+    const read = w.exe("none.sh", `#!/bin/sh\necho '{"ok":true,"count":0,"rows":[]}'\n`);
+    w.plugin({ tui: ["omarchy-launch-or-focus-tui", "tui"], desktop: ["omarchy-launch-or-focus", "awebai-oats-desktop", "uwsm-app -- d"], ui, waiting: ["/bin/sh", read] });
+    const records = w.play(clicks).map((r) => [r.what, r.value]);
+    assert.deepEqual(records, [
+      ["tooltip", "OATS"],
+      ["left", { opened: true }],
+      ["run", line], ["right", { opened: false }],
+    ]);
+  });
+}
+
+const CLAIM = { since: "2026-10-19T10:00:00Z", producer: "oats.core", reason: "permission", message: "Allow Bash?" };
+
+test("the panel's rows are cards: the name, the kernel's message, then reason · producer · age; a click opens the session", { skip }, (t) => {
   const w = world(t);
-  const read = w.exe("none.sh", `#!/bin/sh\necho '{"ok":true,"count":0,"rows":[]}'\n`);
-  w.plugin({ tui: ["omarchy-launch-or-focus-tui", "tui"], waiting: ["/bin/sh", read] });
-  const records = w.play(clicks).map((r) => [r.what, r.value]);
-  assert.deepEqual(records, [
-    ["tooltip", "OATS"],
-    ["left", { opened: true }],
-    ["run", "exec 'omarchy-launch-or-focus-tui' 'tui'"], ["right", { opened: false }],
-  ]);
+  const rows = [{ instance: "alpha", home: "/h/alpha", waitingOnYou: CLAIM }, { instance: "beta", home: "/h/beta", waitingOnYou: null }];
+  const read = w.exe("cards.sh", `#!/bin/sh\ncat <<'E'\n${JSON.stringify({ ok: true, count: 2, rows })}\nE\n`);
+  w.plugin({ waiting: ["/bin/sh", read], attach: ["s", "--home"] });
+  const records = w.play(scene(`
+  Timer { interval: 500; running: true; onTriggered: scene.w.open() }
+  Timer { interval: 3000; running: true; onTriggered: {
+    var items = scene.all(scene.w, [])
+    var texts = []
+    for (var i = 0; i < items.length; i++) if (typeof items[i].text === "string" && items[i].text !== "" && items[i].visible) texts.push(items[i].text)
+    var cards = items.filter(function(x) { return x.shown !== undefined && x.highlighted !== undefined })
+    scene.probe("panel", { texts: texts, cards: cards.map(function(c) { return c.label }) })
+    cards[0].activated()
+  } }`, 4));
+  const [panel] = records.filter((r) => r.what === "panel").map((r) => r.value);
+  assert.deepEqual(panel.cards, ["alpha", "beta"], "one WaitingCard per row");
+  for (const text of ["alpha", "Allow Bash?", "beta"]) assert.ok(panel.texts.includes(text), `${text} in ${JSON.stringify(panel.texts)}`);
+  assert.ok(panel.texts.some((x) => /^permission · oats\.core · \d+ (min|h|d)$/.test(x)), JSON.stringify(panel.texts));
+  assert.deepEqual(records.filter((r) => r.what === "run").map((r) => r.value), [W.attachCommand({ attach: ["s", "--home"] }, "/h/alpha")]);
 });
 
 test("with the list, the panel groups the rows by workspace and shows a deployment that could not be read", { skip }, (t) => {
@@ -294,10 +324,10 @@ test("with the list, the panel groups the rows by workspace and shows a deployme
   assert.ok(!texts.some((x) => /^Reading/.test(x)), "the read answered");
 });
 
-// A scene with the picker (as `w`) in a window, a shell that logs what it
-// is asked to hide, and an argv runner that logs what it would run; `key()`
-// presses a key as the picker's keyboard handler receives it.
-const pickerScene = (body, seconds) => ({ seconds, qml: `import QtQuick
+// A scene with the popup (as `w`) in a window, a shell that logs what it is
+// asked to hide, and an argv runner that logs what it would run (nothing is
+// started); `key()` presses a key as the popup's keyboard handler receives it.
+const popupScene = (body, seconds) => ({ seconds, qml: `import QtQuick
 import QtQuick.Window
 import Quickshell
 import Quickshell.Io
@@ -309,18 +339,18 @@ ShellRoot {
   function all(item, out) { out.push(item); for (var i = 0; i < item.children.length; i++) all(item.children[i], out); return out }
   QtObject { id: fakeShell; function hide(id) { scene.probe("hide", id) } }
   Window { visible: true; width: 1000; height: 800
-    Loader { id: loader; active: true; sourceComponent: Component { P.OatsPicker { shell: fakeShell; manifest: ({ id: "ai.aweb.oats" }); execArgv: function(argv) { scene.probe("exec", argv) } } } }
+    Loader { id: loader; active: true; sourceComponent: Component { P.OatsWaiting { shell: fakeShell; manifest: ({ id: "ai.aweb.oats" }); execArgv: function(argv) { scene.probe("exec", argv) } } } }
   }
   readonly property var w: loader.item
-  function key(k, mods, text) { var e = { key: k, modifiers: mods || 0, text: text || "", accepted: false }; scene.w.keyPressed(e); return e.accepted }
-  function type(text) { for (var i = 0; i < text.length; i++) scene.key(0, 0, text[i]) }
+  function key(k, mods) { var e = { key: k, modifiers: mods || 0, text: "", accepted: false }; scene.w.keyPressed(e); return e.accepted }
   function texts() {
     var out = []
     var items = scene.all(scene.w, [])
     for (var i = 0; i < items.length; i++) if (typeof items[i].text === "string" && items[i].text !== "" && items[i].visible) out.push(items[i].text)
     return out
   }
-  function state() { return { opened: scene.w.opened, reading: scene.w.reading, section: scene.w.section, filter: scene.w.filterText, index: scene.w.selectedIndex, texts: scene.texts() } }
+  function cards() { return scene.all(scene.w, []).filter(function(x) { return x.shown !== undefined && x.highlighted !== undefined && x.visible }) }
+  function state() { return { opened: scene.w.opened, reading: scene.w.reading, index: scene.w.selectedIndex, texts: scene.texts(), lit: scene.cards().filter(function(c) { return c.highlighted }).map(function(c) { return c.label }) } }
   // Steps a frame or more apart, so the list has laid out what a key changed.
   property var steps: []
   property int step: 0
@@ -331,15 +361,14 @@ ${body}
 }
 ` });
 
-const PICKED = {
-  ok: true, features: { waitingOnYou: true, soulCounts: true },
+const LISTED = {
+  ok: true, count: 2,
+  rows: [
+    { instance: "alpha", home: "/h/alpha", deployment: "/d/one", workspace: "github.com/acme/one", waitingOnYou: CLAIM },
+    { instance: "beta", home: "/h/beta", deployment: "/d/one", workspace: "github.com/acme/one", waitingOnYou: { since: null, producer: "agent", reason: "attention", message: null } },
+  ],
   deployments: [
-    { path: "/d/one", name: "one", workspace: "github.com/acme/one", ok: true,
-      agents: [
-        { agent: "writer", instance: "alpha", home: "/h/alpha", running: true, waitingOnYou: { since: "2026-10-19T10:00:00Z", producer: "oats.core", reason: "permission", message: "Allow Bash?" } },
-        { agent: "writer", instance: "beta", home: "/h/beta", running: false, waitingOnYou: null },
-      ],
-      souls: [{ key: "pkg/writer", name: "writer", description: "Writes.", spawnable: true, problem: null, instances: 2 }] },
+    { path: "/d/one", name: "one", workspace: "github.com/acme/one", ok: true },
     { path: "/d/two", name: "two", workspace: null, ok: false, reason: "oats-lock.json is unreadable" },
   ],
 };
@@ -347,133 +376,77 @@ const PICKED = {
 // A reader that logs each read and answers `result` after `delay` seconds.
 function reader(w, result, delay = 0) {
   const log = join(w.root, "reads.log");
-  const read = w.exe("agents.sh", `#!/bin/sh\necho "$*" >> '${log}'\nsleep ${delay}\ncat <<'E'\n${JSON.stringify(result)}\nE\n`);
+  const read = w.exe("waiting.sh", `#!/bin/sh\necho "$*" >> '${log}'\nsleep ${delay}\ncat <<'E'\n${JSON.stringify(result)}\nE\n`);
   const count = `n=$(cat '${log}' 2>/dev/null | wc -l); echo $n`;
   return { read, count, log };
 }
 
-test("the picker reads only when it opens and says so; it opens on Waiting; it filters, moves and switches; Enter opens the session as argv", { skip }, (t) => {
+test("the popup reads only when it opens and says so; it shows the panel's cards; Up/Down and Ctrl+J/K move; Enter opens the session as argv", { skip }, (t) => {
   const w = world(t);
-  const r = reader(w, PICKED, 1);
-  w.plugin({ attach: ["s", "--detach-key", "M-o", "--home"], waiting: ["n", "w"], agents: ["/bin/sh", r.read], spawn: ["n", "spawn.mjs"] });
-  const records = w.play(pickerScene(`
+  const r = reader(w, LISTED, 1);
+  w.plugin({ deployment: null, attach: ["s", "--detach-key", "M-o", "--home"], waiting: ["/bin/sh", r.read, "--list"] });
+  const records = w.play(popupScene(`
   Process { id: reads; command: ["/bin/sh", "-c", ${JSON.stringify(r.count)}]; stdout: StdioCollector { waitForEnd: true; onStreamFinished: scene.probe("reads", Number(text.trim())) } }
   Timer { interval: 1000; running: true; onTriggered: reads.running = true }
   Timer { interval: 1500; running: true; onTriggered: scene.w.open("{}") }
   Timer { interval: 1800; running: true; onTriggered: scene.probe("reading", scene.state()) }
   Timer { interval: 4500; running: true; onTriggered: scene.run([
-    function() { scene.probe("waiting", scene.state()); scene.key(Qt.Key_Tab) },
-    function() { scene.probe("agents", scene.state()); scene.type("BET") },
-    function() { scene.probe("filtered", scene.state()); scene.key(Qt.Key_Backspace); scene.probe("backspace", scene.w.filterText); scene.key(Qt.Key_Escape) },
-    function() { scene.probe("cleared", { opened: scene.w.opened, filter: scene.w.filterText }); scene.key(Qt.Key_Tab) },
-    function() {
-      scene.probe("souls", scene.state())
-      scene.key(Qt.Key_Backtab)
-      scene.key(Qt.Key_Down)
-      var down = scene.w.selectedIndex
-      scene.key(Qt.Key_K, Qt.ControlModifier)
-      var up = scene.w.selectedIndex
-      scene.key(Qt.Key_J, Qt.ControlModifier)
-      scene.probe("moved", [scene.w.section, down, up, scene.w.selectedIndex])
-      scene.key(Qt.Key_Return)
-      scene.probe("after", { opened: scene.w.opened })
-    },
+    function() { scene.probe("read", scene.state()); scene.key(Qt.Key_Down) },
+    function() { scene.probe("down", scene.state()); scene.key(Qt.Key_K, Qt.ControlModifier) },
+    function() { scene.probe("up", scene.state()); scene.key(Qt.Key_J, Qt.ControlModifier); scene.key(Qt.Key_Up) },
+    function() { scene.probe("back", scene.state()); scene.key(Qt.Key_Return); scene.probe("after", { opened: scene.w.opened }) },
     function() { reads.running = true },
   ]) }`, 8));
   const by = (what) => records.filter((x) => x.what === what).map((x) => x.value);
   assert.deepEqual(by("reads"), [0, 1], "nothing before it opened; one read for one opening");
   const [reading] = by("reading");
   assert.equal(reading.reading, true);
-  assert.ok(reading.texts.includes("Reading your agents…"), JSON.stringify(reading.texts));
-  const [waiting] = by("waiting");
-  assert.deepEqual([waiting.reading, waiting.section], [false, "waiting"]);
-  for (const text of ["Waiting on you (1)", "Agents", "Souls", "alpha", "Allow Bash?", "two: oats-lock.json is unreadable", "Alt+O leaves the viewer", "Search OATS…"]) assert.ok(waiting.texts.includes(text), `${text} in ${JSON.stringify(waiting.texts)}`);
-  assert.ok(waiting.texts.some((x) => /^writer · permission · oats\.core · \d+ (min|h|d)$/.test(x)), JSON.stringify(waiting.texts));
-  assert.ok(!waiting.texts.includes("beta"), "only the agent waiting on you");
-  const [agents] = by("agents");
-  assert.equal(agents.section, "agents");
-  for (const text of ["github.com/acme/one", "alpha", "beta", "\u{F009A}", "●", "○"]) assert.ok(agents.texts.includes(text), `${text} in ${JSON.stringify(agents.texts)}`);
-  const [filtered] = by("filtered");
-  assert.equal(filtered.filter, "BET");
-  assert.ok(filtered.texts.includes("beta") && !filtered.texts.includes("alpha"), JSON.stringify(filtered.texts));
-  assert.deepEqual(by("backspace"), ["BE"]);
-  assert.deepEqual(by("cleared"), [{ opened: true, filter: "" }], "Esc clears the filter first");
-  const [souls] = by("souls");
-  assert.equal(souls.section, "souls");
-  for (const text of ["pkg/writer", "Writes. · 2 instances"]) assert.ok(souls.texts.includes(text), `${text} in ${JSON.stringify(souls.texts)}`);
-  assert.ok(!souls.texts.includes("Alt+O leaves the viewer"));
-  assert.deepEqual(by("moved"), [["agents", 1, 0, 1]]);
-  assert.deepEqual(by("exec"), [["omarchy-launch-floating-terminal-with-presentation", "'s' '--detach-key' 'M-o' '--home' '/h/beta'"]]);
+  assert.ok(reading.texts.includes("Reading who is waiting on you…"), JSON.stringify(reading.texts));
+  const [read] = by("read");
+  assert.equal(read.reading, false);
+  for (const text of ["Waiting on you", "alpha", "Allow Bash?", "beta", "attention · agent", "two: oats-lock.json is unreadable", "Alt+O leaves the viewer"]) assert.ok(read.texts.includes(text), `${text} in ${JSON.stringify(read.texts)}`);
+  assert.ok(read.texts.some((x) => /^permission · oats\.core · \d+ (min|h|d)$/.test(x)), JSON.stringify(read.texts));
+  assert.deepEqual(read.lit, ["alpha"], "the cursor is on the first card");
+  assert.deepEqual([by("down")[0].lit, by("up")[0].lit, by("back")[0].lit], [["beta"], ["alpha"], ["alpha"]]);
+  assert.deepEqual(by("exec"), [["omarchy-launch-floating-terminal-with-presentation", "'s' '--detach-key' 'M-o' '--home' '/h/alpha'"]]);
   assert.deepEqual(by("hide"), ["ai.aweb.oats"]);
   assert.deepEqual(by("after"), [{ opened: false }]);
-  assert.deepEqual(readFileSync(r.log, "utf8"), "--json\n", "the read is the plugin's agents command with --json");
+  assert.equal(readFileSync(r.log, "utf8"), "--list --json\n", "the read is the plugin's waiting command with --json");
 });
 
-test("the payload opens a section; Enter on a soul starts an agent from it in the deployment that listed it; Esc closes", { skip }, (t) => {
+test("Esc closes the popup; an answer with nobody waiting never says nobody is; a failed read says why", { skip }, (t) => {
   const w = world(t);
-  const r = reader(w, PICKED);
-  w.plugin({ waiting: ["n", "w"], agents: ["/bin/sh", r.read], spawn: ["n", "spawn.mjs"] });
-  const records = w.play(pickerScene(`
-  Timer { interval: 1000; running: true; onTriggered: scene.w.open('{"section":"souls"}') }
-  Timer { interval: 3000; running: true; onTriggered: { scene.probe("souls", scene.state().section); scene.key(Qt.Key_Return) } }
-  Timer { interval: 3500; running: true; onTriggered: scene.w.open("{}") }
-  Timer { interval: 5500; running: true; onTriggered: { scene.probe("default", scene.state().section); scene.key(Qt.Key_Escape); scene.probe("closed", scene.w.opened) } }`, 6));
-  const by = (what) => records.filter((x) => x.what === what).map((x) => x.value);
-  assert.deepEqual(by("souls"), ["souls"], "asked for, so kept although someone waits");
-  assert.deepEqual(by("exec"), [["n", "spawn.mjs", "--dir", "/d/one", "pkg/writer"]]);
-  assert.deepEqual(by("default"), ["waiting"]);
-  assert.deepEqual(by("closed"), [false]);
-  assert.deepEqual(by("hide"), ["ai.aweb.oats", "ai.aweb.oats"]);
-});
-
-test("before setup, and with a plugin.json from before the picker, the picker offers setup only, and reads nothing", { skip }, (t) => {
-  const w = world(t);
-  const r = reader(w, PICKED);
-  const old = JSON.stringify({ deployment: "/d", tui: null, desktop: null, attach: ["s", "--home"], setup: ["n", "s"], waiting: ["n", "w"] });
-  const records = w.play(pickerScene(`
-  Process { id: write; command: ["/bin/sh", "-c", ${JSON.stringify(`cat > "$XDG_STATE_HOME/oats-omarchy/plugin.json" <<'E'\n${old}\nE\n`)}] }
+  const quiet = w.exe("quiet.sh", `#!/bin/sh\necho '{"ok":true,"count":0,"rows":[]}'\n`);
+  const failing = w.exe("fail.sh", `#!/bin/sh\necho '{"ok":false,"reason":"oats-lock.json is unreadable"}'\nexit 1\n`);
+  w.plugin({ waiting: ["/bin/sh", quiet] });
+  const next = JSON.stringify({ deployment: "/d", tui: null, desktop: null, attach: ["s", "--home"], setup: ["n", "s"], waiting: ["/bin/sh", failing] });
+  const records = w.play(popupScene(`
+  Process { id: write; command: ["/bin/sh", "-c", ${JSON.stringify(`cat > "$XDG_STATE_HOME/oats-omarchy/plugin.json" <<'E'\n${next}\nE\n`)}] }
   Timer { interval: 1000; running: true; onTriggered: scene.w.open("{}") }
-  Timer { interval: 2000; running: true; onTriggered: { scene.probe("none", scene.state()); scene.key(Qt.Key_Return) } }
-  Timer { interval: 2500; running: true; onTriggered: write.running = true }
+  Timer { interval: 2500; running: true; onTriggered: { scene.probe("quiet", scene.state()); scene.key(Qt.Key_Return); scene.key(Qt.Key_Escape); scene.probe("closed", scene.w.opened); write.running = true } }
   Timer { interval: 3500; running: true; onTriggered: scene.w.open("{}") }
-  Timer { interval: 4500; running: true; onTriggered: { scene.probe("old", scene.state()); scene.key(Qt.Key_Return) } }`, 5));
+  Timer { interval: 5000; running: true; onTriggered: scene.probe("failed", scene.state()) }`, 6));
+  const by = (what) => records.filter((x) => x.what === what).map((x) => x.value);
+  const [quietState] = by("quiet");
+  assert.ok(quietState.texts.includes("No agent has said it is waiting on you"), JSON.stringify(quietState.texts));
+  assert.deepEqual(by("exec"), [], "Enter on no card opens nothing");
+  assert.deepEqual(by("closed"), [false]);
+  assert.deepEqual(by("hide"), ["ai.aweb.oats"]);
+  const [failed] = by("failed");
+  assert.ok(failed.texts.includes("oats-lock.json is unreadable"), JSON.stringify(failed.texts));
+  assert.ok(!failed.texts.some((x) => /^No agent/.test(x)), "a failed read claims nothing");
+  for (const state of [quietState, failed]) assert.ok(!state.texts.some((x) => /nobody|no one/i.test(x)));
+});
+
+test("before setup the popup offers setup only, and reads nothing", { skip }, (t) => {
+  const w = world(t);
+  const records = w.play(popupScene(`
+  Timer { interval: 1000; running: true; onTriggered: scene.w.open("{}") }
+  Timer { interval: 2000; running: true; onTriggered: { scene.probe("none", scene.state()); scene.key(Qt.Key_Return) } }`, 3));
   const by = (what) => records.filter((x) => x.what === what).map((x) => x.value);
   const [none] = by("none");
   assert.ok(none.texts.includes("OATS is not set up here yet: Enter runs setup."), JSON.stringify(none.texts));
-  const [old030] = by("old");
-  assert.ok(old030.texts.includes("Setup was applied by an older version of this plugin: Enter runs it again."), JSON.stringify(old030.texts));
-  for (const state of [none, old030]) assert.ok(!state.texts.some((x) => /^No agent|^No souls|^Reading/.test(x)), JSON.stringify(state.texts));
-  assert.deepEqual(by("exec"), [
-    ["omarchy-launch-floating-terminal-with-presentation", `'${join(w.root, "cfg", "plugin", "setup")}' --apply`],
-    ["omarchy-launch-floating-terminal-with-presentation", "'n' 's' '--apply'"],
-  ]);
-  assert.equal(existsSync(r.log), false, "nothing was read");
-});
-
-test("a read that fails says why; an answer with nobody waiting never says nobody is", { skip }, (t) => {
-  const w = world(t);
-  const failing = w.exe("fail.sh", `#!/bin/sh\necho '{"ok":false,"reason":"no deployment could be read: a: oats-lock.json is unreadable"}'\nexit 1\n`);
-  const quiet = { ...PICKED, deployments: [{ ...PICKED.deployments[0], agents: [PICKED.deployments[0].agents[1]] }] };
-  const fine = w.exe("quiet.sh", `#!/bin/sh\ncat <<'E'\n${JSON.stringify(quiet)}\nE\n`);
-  w.plugin({ waiting: ["n", "w"], agents: ["/bin/sh", failing], spawn: ["n", "spawn.mjs"] });
-  const next = JSON.stringify({ deployment: "/d", tui: null, desktop: null, attach: ["s", "--home"], setup: ["n", "s"], waiting: ["n", "w"], agents: ["/bin/sh", fine], spawn: ["n", "spawn.mjs"] });
-  const records = w.play(pickerScene(`
-  Process { id: write; command: ["/bin/sh", "-c", ${JSON.stringify(`cat > "$XDG_STATE_HOME/oats-omarchy/plugin.json" <<'E'\n${next}\nE\n`)}] }
-  Timer { interval: 1000; running: true; onTriggered: scene.w.open("{}") }
-  Timer { interval: 2500; running: true; onTriggered: { scene.probe("failed", scene.state()); scene.w.close(); write.running = true } }
-  Timer { interval: 3500; running: true; onTriggered: scene.w.open("{}") }
-  Timer { interval: 5000; running: true; onTriggered: scene.run([
-    function() { scene.probe("agents", scene.state()); scene.key(Qt.Key_Backtab) },
-    function() { scene.probe("waiting", scene.state()) },
-  ]) }`, 7));
-  const by = (what) => records.filter((x) => x.what === what).map((x) => x.value);
-  const [failed] = by("failed");
-  assert.ok(failed.texts.includes("no deployment could be read: a: oats-lock.json is unreadable"), JSON.stringify(failed.texts));
-  assert.ok(!failed.texts.some((x) => /^No agent/.test(x)), "a failed read claims nothing");
-  const [agents] = by("agents");
-  assert.equal(agents.section, "agents", "nobody said they wait: Agents");
-  const [waiting] = by("waiting");
-  assert.equal(waiting.section, "waiting");
-  assert.ok(waiting.texts.includes("No agent has said it is waiting on you"), JSON.stringify(waiting.texts));
-  for (const state of [failed, agents, waiting]) assert.ok(!state.texts.some((x) => /nobody|no one/i.test(x)));
+  assert.ok(!none.texts.some((x) => /^No agent|^Reading/.test(x)), JSON.stringify(none.texts));
+  assert.deepEqual(by("exec"), [["omarchy-launch-floating-terminal-with-presentation", `'${join(w.root, "cfg", "plugin", "setup")}' --apply`]]);
+  assert.equal(existsSync(join(w.root, "reads.log")), false);
 });

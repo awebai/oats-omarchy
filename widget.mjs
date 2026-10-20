@@ -1,12 +1,15 @@
-// Everything the bar widget builds or reads, kept apart from the QML so a
-// node test can run it: the command lines it hands to the bar's `run` (which
+// Everything the bar widget and the waiting popup (OatsWaiting.qml, the
+// plugin's overlay) build or read, kept apart from the QML so a node test
+// can run it: the command lines it hands to the bar's `run` (which
 // runs `bash -lc <line>`), the argv of its read, and the reading of
 // setup's plugin.json and of `waiting --json`. The QML only displays what
 // these return.
 //
 // The commands come from plugin.json, which setup writes on --apply: the
 // argv the key and the menu run, from the same code. Without it, setup has
-// not run, and the only command is setup itself.
+// not run, and the only command is setup itself. A waiting card's words
+// (card) are the same in the panel and the popup, which draw it with the one
+// WaitingCard.qml.
 
 // One shell word: single quotes, and a quote inside closed, escaped, reopened.
 export function shellQuote(s) {
@@ -42,9 +45,9 @@ function isArgv(value) {
 
 // plugin.json's text → its commands, or null when it is absent or not what
 // setup writes (then the widget offers setup only). `deployment` is null
-// when setup uses this computer's list of deployments. `agents` and `spawn`
-// are the picker's, null in a file an older setup wrote (then the picker
-// offers setup only).
+// when setup uses this computer's list of deployments. `ui` is the default
+// UI, "tui" or "desktop" (null when neither is set up); a file from before
+// 0.5.0 has none, and reads as the TUI, or the Desktop when only it is set up.
 export function parsePlugin(text) {
   var p
   try { p = JSON.parse(String(text)) } catch (e) { return null }
@@ -52,8 +55,8 @@ export function parsePlugin(text) {
   if (!isArgv(p.waiting) || !isArgv(p.attach) || !isArgv(p.setup)) return null
   if (p.tui !== null && !isArgv(p.tui)) return null
   if (p.desktop !== null && !isArgv(p.desktop)) return null
-  var picker = isArgv(p.agents) && isArgv(p.spawn)
-  return { deployment: p.deployment, tui: p.tui, desktop: p.desktop, waiting: p.waiting, attach: p.attach, setup: p.setup, agents: picker ? p.agents : null, spawn: picker ? p.spawn : null }
+  var ui = p.ui === "desktop" && p.desktop ? "desktop" : p.ui === "tui" && p.tui ? "tui" : p.tui ? "tui" : p.desktop ? "desktop" : null
+  return { deployment: p.deployment, tui: p.tui, desktop: p.desktop, ui: ui, waiting: p.waiting, attach: p.attach, setup: p.setup }
 }
 
 // The read when the panel opens: `waiting --json`, run as argv (no shell).
@@ -152,25 +155,18 @@ export function beginRead(state) {
 // The output of read `attempt` → what to show, or null when that read is
 // no longer the pending one (it was stopped at its deadline).
 export function finishRead(state, attempt, text) {
-  return settleRead(state, attempt) ? parseWaiting(text) : null
-}
-
-// Read `attempt` answered: → true when it was the pending one, which it
-// settles (the picker parses its own answer), false when it was not.
-export function settleRead(state, attempt) {
-  if (!state.pending || attempt !== state.attempt) return false
+  if (!state.pending || attempt !== state.attempt) return null
   state.pending = false
-  return true
+  return parseWaiting(text)
 }
 
 // Read `attempt`'s deadline (`ms`, READ_TIMEOUT_MS by default) → what to
-// show (it failed), or null when it had already finished. `what` names the
-// read ("waiting --json" by default).
-export function expireRead(state, attempt, ms, what) {
+// show (it failed), or null when it had already finished.
+export function expireRead(state, attempt, ms) {
   if (!state.pending || attempt !== state.attempt) return null
   state.pending = false
   var limit = ms || READ_TIMEOUT_MS
-  return { known: false, reason: limit === READ_TIMEOUT_MS && !what ? READ_TIMEOUT_REASON : (what || "waiting --json") + " did not answer within " + Math.round(limit / 1000) + " s" }
+  return { known: false, reason: limit === READ_TIMEOUT_MS ? READ_TIMEOUT_REASON : "waiting --json did not answer within " + Math.round(limit / 1000) + " s" }
 }
 
 // One reader for all the widget's bars: the first of the peers the bar
@@ -178,6 +174,27 @@ export function expireRead(state, attempt, ms, what) {
 export function isReader(peers, self) {
   if (!peers || !peers.length || peers.indexOf(self) < 0) return true
   return peers[0] === self
+}
+
+// The popup's rows, one list for the keyboard: each card of each group, in
+// order, with its group's title (the list's section). → [{ group, label,
+// home, waitingOnYou }].
+export function popupRows(waiting) {
+  if (!waiting || !waiting.known) return []
+  var out = []
+  waiting.groups.forEach(function(g) {
+    g.rows.forEach(function(x) { out.push({ group: g.title, label: x.label, home: x.home, waitingOnYou: x.waitingOnYou }) })
+  })
+  return out
+}
+
+// The deployments the popup could not read ("<name>: <reason>"), one line
+// each, above its cards.
+export function popupNotes(waiting) {
+  if (!waiting || !waiting.known) return []
+  var out = []
+  waiting.groups.forEach(function(g) { out = out.concat(g.unknown) })
+  return out
 }
 
 // A `waitingOnYou` as the kernel gave it ({ since, producer, reason,
@@ -201,11 +218,11 @@ export function age(since, now) {
   return Math.floor(min / (24 * 60)) + " d"
 }
 
-// One card per agent waiting on you, the same in the panel and the picker:
+// One card per agent waiting on you, the same in the panel and the popup:
 // its name (the label that tells it apart), the kernel's message as given
 // when it has one, then its reason, its producer and how long it has
-// waited, each as given, and the exact `since` (the panel's tooltip). The
-// plugin words nothing of its own.
+// waited, each as given, and the exact `since` (the tooltip). The plugin
+// words nothing of its own.
 export function card(label, w, now) {
   var c = claim(w) || { since: null, producer: null, reason: null, message: null }
   var meta = [c.reason, c.producer, age(c.since, now)].filter(function(x) { return !!x }).join(" \u00b7 ")
@@ -226,26 +243,22 @@ export function attachCommand(plugin, home) {
   return inTerminal(commandLine(plugin.attach.concat([home])))
 }
 
-// Whether the viewer the panel opens takes the detach key (Alt+O).
-export function detachKey(plugin) {
-  return !!plugin && plugin.attach.indexOf("--detach-key") >= 0
+// The default UI's line: the TUI or the Desktop, as setup chose; "" when
+// neither is set up.
+export function defaultCommand(plugin) {
+  if (!plugin) return ""
+  return plugin.ui === "desktop" ? desktopCommand(plugin) : tuiCommand(plugin)
 }
 
-// The OATS picker (the plugin's overlay), through the running shell.
-export var PLUGIN_ID = "ai.aweb.oats"
-export function pickerCommand() {
-  return "exec omarchy-shell shell summon " + PLUGIN_ID + " " + shellQuote("{}")
-}
-
-// The picker's commands, each an argv it runs with no shell (Omarchy's
-// Util.execArgv): an agent's session in the floating terminal, and the spawn
-// from a soul, for the deployment that listed it.
+// The popup's commands, each an argv it runs with no shell (Omarchy's
+// Util.execArgv): a session in the floating terminal, and setup.
 export function attachArgv(plugin, home) {
   return ["omarchy-launch-floating-terminal-with-presentation", commandLine(plugin.attach.concat([home]))]
 }
 
-export function spawnArgv(plugin, deployment, soul) {
-  return plugin.spawn.concat(["--dir", deployment, soul])
+// Whether the viewer the panel opens takes the detach key (Alt+O).
+export function detachKey(plugin) {
+  return !!plugin && plugin.attach.indexOf("--detach-key") >= 0
 }
 
 // setup --apply in the floating terminal: it shows the plan and asks. For
@@ -259,19 +272,20 @@ function setupLine(plugin, setupPath) {
   return plugin ? commandLine(plugin.setup.concat(["--apply"])) : shellQuote(setupPath) + " --apply"
 }
 
-// The same as the picker's argv.
+// The same, as the popup's argv.
 export function setupArgv(plugin, setupPath) {
   return ["omarchy-launch-floating-terminal-with-presentation", setupLine(plugin, setupPath)]
 }
 
-// The icon's right click: the TUI, else setup.
+// The icon's right click: the default UI, else setup.
 export function quickCommand(plugin, setupPath) {
-  return tuiCommand(plugin) || setupCommand(plugin, setupPath)
+  return defaultCommand(plugin) || setupCommand(plugin, setupPath)
 }
 
 // What a click on the icon does: { toggle: true } (the panel) or { line }.
 // Before setup has run (no plugin.json) either click runs the whole setup;
-// after, a left click toggles the panel and a right click opens the TUI.
+// after, a left click toggles the panel and a right click opens the default
+// UI.
 export function clickAction(plugin, setupPath, right) {
   if (!plugin) return { line: setupCommand(null, setupPath) }
   return right ? { line: quickCommand(plugin, setupPath) } : { toggle: true }
