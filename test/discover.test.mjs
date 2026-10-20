@@ -110,7 +110,7 @@ test("features and missing: command -v skips absent names, non-executable files 
   // The sandbox's own PATH has every launcher.
   const all = features(launchEnvironment(sandbox(t).env));
   assert.deepEqual(missing(all, [...FEATURES.apps, ...FEATURES.hook, ...FEATURES.menu, NOTIFY]), []);
-  assert.deepEqual(FEATURES.menu, ["omarchy-menu-select", "omarchy-launch-floating-terminal-with-presentation"]);
+  assert.deepEqual(FEATURES.menu, [], "the menu's row needs only the launchers `apps` needs");
 });
 
 test("kernel: `oats` on PATH, resolved to the CLI's script, proven by version --json", (t) => {

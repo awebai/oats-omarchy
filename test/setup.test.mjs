@@ -73,7 +73,7 @@ test("--apply writes exactly the parts, and a second --apply writes nothing", (t
   assert.equal(readFileSync(p.shim, "utf8"), `#!/bin/sh\nexec '${process.execPath}' '${s.cli}' "$@"\n`);
   assert.equal(statSync(p.shim).mode & 0o777, 0o755);
   const tui = readDesktopEntry(readFileSync(p.tuiEntry, "utf8"));
-  assert.equal(tui.Name, "OATS");
+  assert.equal(tui.Name, "OATS TUI");
   assert.equal(tui.Icon, "org.oats.tui");
   assert.equal(tui.Terminal, "false");
   assert.deepEqual(parseDesktopExec(tui.Exec), ["omarchy-launch-or-focus-tui", "--app-id=org.oats.tui", p.shim, "tui", "--dir", s.deployment]);

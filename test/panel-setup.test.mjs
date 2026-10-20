@@ -42,9 +42,7 @@ test("--apply writes plugin.json: the key's and the menu's commands as argv; --r
 
   // The same commands the menu runs, from the same code.
   const items = menu.omarchyParse(readFileSync(p.menuFile, "utf8")).items;
-  assert.equal(items["oats.tui"].action, plugin.tui.map(shellWord).join(" "));
-  assert.equal(items["oats.waiting"].action, menu.popupAction(`${shellQuote(node)} ${shellQuote(plugin.waiting[1])} --dir ${shellQuote(s.deployment)}`));
-  assert.equal(items["oats-ui"].action, items["oats.tui"].action);
+  assert.equal(items["oats-ui"].action, plugin.tui.map(shellWord).join(" "));
 
   assert.deepEqual(s.run(["setup", "--apply", "--json"]).json.result.written, [], "a second --apply writes nothing");
   assert.equal(s.run(["setup", "--remove"]).status, 0);
