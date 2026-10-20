@@ -1,4 +1,5 @@
-// Typing "oats" in SUPER + SPACE: the default UI is the first row. Ranked by
+// Typing "oats" in SUPER + SPACE: the default UI is the first row, and the
+// only other OATS rows are the two launchers, each named for its UI. Ranked by
 // Omarchy 4.0.4's own search code (test/fixtures/omarchy-4.0.4/MenuModel.js,
 // vendored unchanged and pinned below) over the root of its menu and the
 // block setup writes, with the app launchers installed, OATS's own two among
@@ -14,6 +15,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import * as files from "../lib/files.mjs";
 import * as menu from "../lib/menu.mjs";
 import { menuBlock } from "./fixtures/v0.3.0/blocks.mjs";
 import { appRow, loadMenuModel, search } from "./helpers/omarchy-search.mjs";
@@ -30,8 +32,8 @@ const QUERIES = ["o", "oa", "oat", "oats", "OATS"];
 // The launchers OATS installs (their entries' Name), and others whose names
 // start with the same letters.
 const APPS = [
-  appRow({ id: "org.oats.tui", name: "OATS", subtext: "The OATS terminal UI: your agents and their sessions" }),
-  appRow({ id: "awebai-oats-desktop", name: "OATS Desktop", subtext: "OATS Desktop: your agents and their sessions" }),
+  appRow({ id: "org.oats.tui", name: files.TUI_NAME, subtext: files.TUI_COMMENT }),
+  appRow({ id: "awebai-oats-desktop", name: files.DESKTOP_NAME, subtext: files.DESKTOP_COMMENT }),
   appRow({ id: "obsidian", name: "Obsidian", keywords: ["notes"] }),
   appRow({ id: "com.obsproject.Studio", name: "OBS Studio", keywords: ["oats"] }),
 ];
@@ -62,11 +64,15 @@ for (const ui of ["tui", "desktop"]) {
       const rows = search(model, { defaults: DEFAULTS, user, apps: APPS }, query);
       assert.equal(rows[0].itemId, "oats-ui", `${query}: ${JSON.stringify(rows.slice(0, 4))}`);
       assert.equal(rows[0].label, "OATS");
-      assert.equal(rows[0].action, items[`oats.${ui}`].action, `${query}: it opens what the submenu's ${ui} row opens`);
+      assert.match(rows[0].action, ui === "tui" ? /^omarchy-launch-or-focus-tui / : /^omarchy-launch-or-focus awebai-oats-desktop /, query);
+      assert.equal(items["oats-ui"].action, rows[0].action);
       const ids = rows.map((x) => x.itemId);
       // The launchers are there, and ranked below it.
       for (const id of ["apps.org.oats.tui", "apps.awebai-oats-desktop"]) assert.ok(ids.indexOf(id) > 0, `${query}: ${id} in ${ids}`);
-      if (query.length >= 3) assert.ok(ids.indexOf("oats") > 0, `${query}: the submenu is found too, below it`);
+      // Nothing else of OATS's: no submenu, no rows of one.
+      assert.deepEqual(ids.filter((id) => id === "oats" || id.startsWith("oats.")), [], `${query}: ${ids}`);
+      // Each row says which UI it opens; only the default UI's is labelled OATS.
+      assert.deepEqual(rows.filter((x) => x.label === "OATS").map((x) => x.itemId), ["oats-ui"], query);
     }
   });
 }
@@ -82,9 +88,10 @@ test("v0.3.0's block: the submenu labelled OATS is first, which is why it has an
   assert.equal(search(model, { defaults: DEFAULTS, user: both, apps: APPS }, "oats")[0].itemId, "oats");
 });
 
-test("with neither UI set up there is no OATS row, and the submenu stays", () => {
-  const block = menu.block({ ui: null, tui: null, desktop: null, waiting: "w", status: "s" });
-  const items = menu.omarchyParse(`{\n${block}}\n`).items;
-  assert.deepEqual(Object.keys(items), ["oats", "oats.waiting", "oats.status"]);
-  assert.equal(items.oats.label, menu.SUBMENU_LABEL);
+test("v0.5.0's launchers: the TUI's entry, named OATS, matched the OATS row's label exactly", () => {
+  const user = `{\n${menu.block({ open: "t" })}}\n`;
+  const model = loadMenuModel(MODEL);
+  const named = [appRow({ id: "org.oats.tui", name: "OATS" }), ...APPS.slice(1)];
+  const rows = search(model, { defaults: DEFAULTS, user, apps: named }, "oats");
+  assert.deepEqual(rows.filter((x) => x.label === "OATS").map((x) => x.itemId), ["oats-ui", "apps.org.oats.tui"]);
 });

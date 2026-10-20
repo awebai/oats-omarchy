@@ -7,13 +7,13 @@ The repository is the plugin: Omarchy clones it whole, and nothing is built.
 ```
 manifest.json            the plugin's manifest: id ai.aweb.oats, a bar widget and an overlay
 OatsBarWidget.qml        the bar widget: the OATS icon and its panel
-OatsWaiting.qml          the overlay: the waiting popup, the menu's "Waiting on you"
+OatsWaiting.qml          the overlay: the waiting popup (omarchy-shell shell summon ai.aweb.oats '{}')
 WaitingWindow.qml        the popup's layer-shell window (a file of its own for the QML test)
 WaitingCard.qml          one agent waiting on you, the card the panel and the popup both draw
 widget.mjs               everything the widget and the popup build or read, kept apart so a test can run it
 setup                    the command people run: a POSIX sh launcher
 bin/setup.mjs            setup's engine, which the launcher and the post-update hook run
-bin/waiting.mjs          the menu's fallback "Waiting on you" selector, and the read of the panel and the popup (--json)
+bin/waiting.mjs          the read of the panel and the popup (--json), and a selector of the agents waiting on you
 lib/                     their modules (below)
 assets/                  the icon both launcher entries use
 scripts/lint.mjs         lint
@@ -68,7 +68,7 @@ compares them with what is there, and only then writes:
   - the plugin's own directory, resolved.
 
   Everything setup writes runs by those recorded absolute paths, never by
-  PATH: the shim (node and CLI), the menu's "Waiting on you" fallback (node and
+  PATH: the shim (node and CLI), the bar widget's read (node and
   `bin/waiting.mjs`) and the post-update hook (node and `bin/setup.mjs
   --check`). `--check` reports any of them gone or moved. It also finds the
   Omarchy launchers on the
@@ -139,25 +139,22 @@ compares them with what is there, and only then writes:
   missing. The detach key goes into `attach` when the CLI's `version --json`
   lists `session-attach-detach-key`, so a re-apply picks up a CLI that
   gained it.
-- `lib/menu.mjs` is the menu block: the root row `oats-ui`, labelled OATS,
-  which runs the default UI's launch command (left out when there is none),
-  and the `oats` submenu, labelled Agent team with the alias `oats`: Open
-  OATS TUI, Open OATS Desktop, Waiting on you and Status. Omarchy 4.0.4's
-  search (`MenuModel.js` `searchScore`) ranks an exact label at the root
-  above any deeper match and a submenu 2 above an action with an equal
-  match, and `Menu.qml` lists root rows before deeper ones, the app
-  launchers among those: so the default UI's row is the only one labelled
-  OATS, and no row at the root starts with "o" but it.
+- `lib/menu.mjs` is the menu block: one root row, `oats-ui`, labelled OATS,
+  which runs the default UI's launch command. With neither UI set up there
+  is no row, and the menu part is skipped. Omarchy 4.0.4's search
+  (`MenuModel.js` `searchScore`) ranks an exact label at the root above any
+  other match, and `Menu.qml` lists root rows before deeper ones, the app
+  launchers among those. The launcher entries are named OATS TUI and OATS
+  Desktop (`TUI_NAME` and `DESKTOP_NAME` in `lib/files.mjs`), so the
+  default UI's row is the only one labelled OATS, and it comes first.
   `test/menu-search.test.mjs` ranks the block with Omarchy's own
   `MenuModel.js` (basecamp/omarchy's 4.0.4 release,
   `shell/plugins/menu/MenuModel.js`, vendored unchanged with Omarchy's MIT
   notice in `test/fixtures/omarchy-4.0.4/LICENSE`, pinned by digest) and the
   root of its menu (derived from `default/omarchy/omarchy-menu.jsonc` there)
   (`test/helpers/omarchy-search.mjs` holds `Menu.qml`'s steps), and the
-  container test with the real Omarchy's whole menu. "Waiting on you" opens
-  the waiting popup (`omarchy-shell shell summon ai.aweb.oats '{}'`, which
-  answers `ok` when it opened), else runs `bin/waiting.mjs`, the selector
-  (`popupAction`). It is a delimited block in the user's
+  container test with the real Omarchy's whole menu. It is a delimited
+  block in the user's
   `~/.config/omarchy/extensions/omarchy-menu.jsonc`, the one file setup edits
   rather than writes whole. Only the block's bytes, and a separating comma
   when the user's last entry had none, are added and taken out; the rest of
@@ -169,11 +166,13 @@ compares them with what is there, and only then writes:
   every row of the block as written.
 - `--check` rebuilds the menu and key blocks this version would write from
   what the state records (`blocksFor`, the same function the plan uses), so
-  a block another version wrote (v0.3.0's menu, v0.4.0's menu and key block)
-  is reported as "from another version of setup: run setup --apply again".
-  `--apply` then swaps only those blocks, a key block verified as a new one
-  is. `test/upgrade.test.mjs` starts from v0.3.0's and v0.4.0's own blocks
-  (`test/fixtures/v0.3.0`, `test/fixtures/v0.4.0`).
+  a block another version wrote (v0.3.0's and v0.5.0's menu, v0.4.0's menu
+  and key block) is reported as "from another version of setup: run setup
+  --apply again". So is the TUI's launcher entry, rebuilt the same way,
+  which v0.3.0 to v0.5.0 named OATS. `--apply` then swaps only those
+  blocks, a key block verified as a new one is, and rewrites the entry.
+  `test/upgrade.test.mjs` starts from v0.3.0's, v0.4.0's and v0.5.0's own
+  blocks and entry (`test/fixtures/v0.3.0`, `v0.4.0` and `v0.5.0`).
 - `lib/state.mjs` writes atomically and keeps the state file under
   `$XDG_STATE_HOME/oats-omarchy`: every file written, its digest, what was
   there before (backed up beside it) and the directories setup created; for
@@ -188,8 +187,9 @@ compares them with what is there, and only then writes:
   (`managedPaths`, `backupPath` and `refusal` in `lib/setup.mjs`).
 - `lib/system.mjs` runs commands with a timeout and a given environment.
 
-`bin/waiting.mjs --dir <deployment>` (`lib/waiting.mjs`) is the menu's
-"Waiting on you" selector, when the popup cannot open, for one deployment
+`bin/waiting.mjs --dir <deployment>` (`lib/waiting.mjs`) is a selector of the
+agents waiting on you, which v0.5.0's menu ran when the popup could not open
+(no menu row runs it now), for one deployment
 (`--list` below is the other). Through setup's shim, it reads `oats status --json` for
 the deployment, shows the instances
 waiting on you in `omarchy-menu-select` (the count and the names, nothing
@@ -227,10 +227,10 @@ state) only for the plan's notes; the plugin never writes it.
 
 `waiting --list` reads `oats deployments --json`, then `oats status --json
 --dir <path>` for each row whose state is `ok`, one after another, never two
-at once: each read within 25 s with `--json` (30 s in the menu), and all of
+at once: each read within 25 s with `--json` (30 s for the selector), and all of
 them within 110 s (`LIST_BUDGET`); a
 deployment not reached in time is not read. Every one of these reads, the
-menu's and the Status row's (`bin/status.mjs`, `statusEvery`) included, runs
+selector's and `bin/status.mjs`'s (`statusEvery`) included, runs
 in a process group of its own, killed with it, as for `--json` above.
 `--list --json` prints `{ok, count, rows: [{instance, home, waitingOnYou,
 deployment, workspace}], deployments: [{path, name, workspace, ok, reason?}], note?}`.

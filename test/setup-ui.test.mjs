@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import * as menu from "../lib/menu.mjs";
+import { shellWord } from "../lib/quote.mjs";
 import { setup, UI_QUESTION } from "../lib/setup.mjs";
 import { parsePlugin } from "../widget.mjs";
 import { sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
@@ -54,14 +55,14 @@ for (const ui of ["tui", "desktop"]) {
     assert.equal(parsePlugin(JSON.stringify(plugin)).ui, ui);
     const items = itemsOf(s);
     assert.equal(items["oats-ui"].label, "OATS");
-    assert.equal(items["oats-ui"].action, items[`oats.${ui}`].action);
+    assert.equal(items["oats-ui"].action, plugin[ui].map(shellWord).join(" "));
     assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
     // A re-apply keeps the choice without --ui, and --ui changes it.
     assert.deepEqual(s.run(["setup", "--apply", "--json"]).json.result.written, []);
     const other = ui === "tui" ? "desktop" : "tui";
     assert.equal(s.run(["setup", "--apply", "--ui", other]).status, 0);
     assert.equal(stateOf(s).ui, other);
-    assert.equal(itemsOf(s)["oats-ui"].action, itemsOf(s)[`oats.${other}`].action);
+    assert.equal(itemsOf(s)["oats-ui"].action, pluginOf(s)[other].map(shellWord).join(" "));
   });
 }
 
@@ -86,7 +87,7 @@ test("--yes in a terminal still asks which opens first; it answers only Apply it
   assert.equal(r.status, 0, r.out);
   assert.deepEqual(r.asked, [UI_QUESTION]);
   assert.equal(stateOf(s).ui, "desktop");
-  assert.equal(itemsOf(s)["oats-ui"].action, itemsOf(s)["oats.desktop"].action);
+  assert.equal(itemsOf(s)["oats-ui"].action, pluginOf(s).desktop.map(shellWord).join(" "));
 });
 
 test("the question takes TUI or Desktop in any case, and asks again for anything else; n still aborts", (t) => {
@@ -140,7 +141,7 @@ test("only one set up: it is the default, nothing is asked, and no choice is rec
   assert.match(r.out, /\nDefault UI\n {2}the TUI \(the only one set up\)/);
   assert.equal(stateOf(s).ui, null);
   assert.equal(pluginOf(s).ui, "tui");
-  assert.equal(itemsOf(s)["oats-ui"].action, itemsOf(s)["oats.tui"].action);
+  assert.equal(itemsOf(s)["oats-ui"].action, pluginOf(s).tui.map(shellWord).join(" "));
   assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
   // --ui naming the one that is not set up is refused, with why.
   const bad = s.run(["setup", "--apply", "--ui", "desktop", "--json"]);

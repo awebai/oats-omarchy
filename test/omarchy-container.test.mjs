@@ -15,8 +15,10 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import vm from "node:vm";
-import { parseDesktopExec } from "../lib/quote.mjs";
+import { parseDesktopExec, shellWord } from "../lib/quote.mjs";
+import { paths as discoverPaths } from "../lib/discover.mjs";
 import { readDesktopEntry } from "../lib/desktop-entry.mjs";
+import * as files from "../lib/files.mjs";
 import { fixture, repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 import * as widget from "../widget.mjs";
 import { appRow, loadMenuModel, search } from "./helpers/omarchy-search.mjs";
@@ -307,11 +309,10 @@ for (const [name, text] of [
     const byId = Object.fromEntries(user.map((item) => [item.id, item]));
     for (const item of userBefore) assert.deepEqual(byId[item.id], item, `${item.id} reads the same`);
     const merged = model.merge(defaults, user);
-    const oats = ["oats-ui", "oats", "oats.tui", "oats.waiting", "oats.status"].map((id) => merged.items[id]);
-    assert.deepEqual(oats.map((x) => [x.id, x.parent, x.kind, x.label]), [["oats-ui", "root", "action", "OATS"], ["oats", "root", "menu", "Agent team"], ["oats.tui", "oats", "action", "Open OATS TUI"], ["oats.waiting", "oats", "action", "Waiting on you"], ["oats.status", "oats", "action", "Status"]]);
-    assert.equal(merged.items["oats-ui"].action, merged.items["oats.tui"].action, "the only UI set up is the default");
-    assert.equal(merged.items["oats.waiting"].label, "Waiting on you");
-    assert.equal(merged.items["oats.desktop"], undefined, "no Desktop here");
+    const x = merged.items["oats-ui"];
+    assert.deepEqual([x.id, x.parent, x.kind, x.label], ["oats-ui", "root", "action", "OATS"]);
+    assert.match(x.action, /^omarchy-launch-or-focus-tui --app-id=org\.oats\.tui /, "the only UI set up is the default");
+    assert.deepEqual(user.map((item) => item.id).filter((id) => id === "oats" || id.startsWith("oats.")), [], "no submenu");
     for (const item of defaults) if (!byId[item.id]) assert.ok(merged.items[item.id], `Omarchy's ${item.id} is still there`);
 
     assert.equal(s.run(["setup", "--remove"]).status, 0);
@@ -330,8 +331,9 @@ for (const ui of ["tui", "desktop"]) {
     const user = readFileSync(join(s.home, ".config", "omarchy", "extensions", "omarchy-menu.jsonc"), "utf8");
     const defaults = readFileSync(join(OMARCHY, "default", "omarchy", "omarchy-menu.jsonc"), "utf8");
     const model = loadMenuModel(join(OMARCHY, "shell", "plugins", "menu", "MenuModel.js"));
-    const apps = [appRow({ id: "org.oats.tui", name: "OATS" }), appRow({ id: "awebai-oats-desktop", name: "OATS Desktop" })];
-    const opens = model.parseMenuJsonc(user).find((x) => x.id === `oats.${ui}`).action;
+    const apps = [appRow({ id: "org.oats.tui", name: files.TUI_NAME }), appRow({ id: "awebai-oats-desktop", name: files.DESKTOP_NAME })];
+    const plugin = JSON.parse(readFileSync(join(discoverPaths(s.env).stateDir, "plugin.json"), "utf8"));
+    const opens = plugin[ui].map(shellWord).join(" ");
     for (const query of ["o", "oa", "oat", "oats", "OATS"]) {
       const rows = search(model, { defaults, user, apps }, query);
       assert.equal(rows[0].itemId, "oats-ui", `${query}: ${JSON.stringify(rows.slice(0, 4))}`);

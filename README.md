@@ -3,13 +3,11 @@
 An [Omarchy](https://omarchy.org) plugin that makes
 [OATS](https://github.com/awebai/oats) feel native there. Both OATS clients,
 the terminal UI (`oats tui`) and OATS Desktop, become Omarchy apps with a
-launcher entry, an icon and a key. You choose a default UI, the TUI or the
-Desktop: typing "oats" in SUPER + SPACE puts it first, as the row **OATS**,
-and a right click on the bar icon opens it. The OATS icon in the bar opens a
-panel with a card for each agent waiting on you, read when you open it, and
-the Omarchy menu's "Waiting on you" shows the same cards in a popup. With an
-OATS
-CLI that keeps this computer's list of deployments (`oats deployments`),
+launcher entry (**OATS TUI** and **OATS Desktop**), an icon and a key. You
+choose a default UI, the TUI or the Desktop: typing "oats" in SUPER + SPACE
+puts it first, as the row **OATS**, and a right click on the bar icon opens
+it. The OATS icon in the bar opens a panel with a card for each agent
+waiting on you, read when you open it. With an OATS CLI that keeps this computer's list of deployments (`oats deployments`),
 all of that covers every listed deployment; with an older one, the one
 deployment setup is applied for.
 
@@ -228,20 +226,20 @@ until you pass another `--ui`, also when it was passed with one set up.
   Set up keys and launchers, which runs `setup --apply` in a floating
   terminal.
 - **SUPER + SPACE.** Type "oats" (or "o", "oa", "oat"): the first row is
-  **OATS**, which opens the default UI. The `oats` submenu is listed as
-  **Agent team**: Open OATS TUI, Open OATS Desktop, Waiting on you and
-  Status. SUPER + O, then T or D, opens the TUI or the Desktop.
-- **Waiting on you** in the menu opens a popup with the panel's cards, read
-  when it opens: Up and Down (or Ctrl+J and Ctrl+K) move, Enter opens the
-  agent's session, Esc closes. With the plugin disabled, or no Omarchy shell
-  running, it opens Omarchy's own selector of the agents instead.
+  **OATS**, which opens the default UI, and the launchers **OATS TUI** and
+  **OATS Desktop** follow. SUPER + O, then T or D, opens the TUI or the
+  Desktop.
+- **The waiting popup** shows the panel's cards, read when it opens:
+  `omarchy-shell shell summon ai.aweb.oats '{}'` opens it, for a key of
+  your own. Up and Down (or Ctrl+J and Ctrl+K) move, Enter opens the
+  agent's session, Esc closes.
 - **With the list,** the panel reads every listed deployment, one after
   another (each `oats status --json` within 25 seconds, all of them within
   110), and groups the agents by workspace when there is more than one. A
   deployment that could not be read is shown as such, and the others are
   still listed. The TUI and the Desktop open on their own list of
   deployments.
-- **Alt+O.** While you're attached to an agent from the panel, the popup or the menu,
+- **Alt+O.** While you're attached to an agent from the panel or the popup,
   Alt+O leaves the viewer, so it never reaches a harness that binds Alt+O
   itself. It needs an OATS CLI with a detach key (`oats version --json`
   lists `session-attach-detach-key`).
