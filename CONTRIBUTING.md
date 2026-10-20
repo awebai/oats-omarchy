@@ -5,16 +5,22 @@
 The repository is the plugin: Omarchy clones it whole, and nothing is built.
 
 ```
-manifest.json            the plugin's manifest: id ai.aweb.oats, one bar widget
+manifest.json            the plugin's manifest: id ai.aweb.oats, a bar widget and an overlay
 OatsBarWidget.qml        the bar widget: the OATS icon and its panel
-widget.mjs               everything the widget builds or reads, kept apart so a test can run it
+OatsWaiting.qml          the overlay: the waiting popup, the menu's "Waiting on you"
+WaitingWindow.qml        the popup's layer-shell window (a file of its own for the QML test)
+WaitingCard.qml          one agent waiting on you, the card the panel and the popup both draw
+widget.mjs               everything the widget and the popup build or read, kept apart so a test can run it
 setup                    the command people run: a POSIX sh launcher
 bin/setup.mjs            setup's engine, which the launcher and the post-update hook run
-bin/waiting.mjs          the oats menu's "Waiting on you" row, and the panel's read (--json)
+bin/waiting.mjs          the menu's fallback "Waiting on you" selector, and the read of the panel and the popup (--json)
 lib/                     their modules (below)
 assets/                  the icon both launcher entries use
 scripts/lint.mjs         lint
-test/                    node:test suites; test/fixtures holds their inputs,
+test/                    node:test suites; test/fixtures holds their inputs (with
+                         test/fixtures/v0.3.0 and v0.4.0 those versions' own blocks,
+                         for the upgrade, and test/fixtures/omarchy-4.0.4 Omarchy's
+                         MenuModel.js and the root of its menu, for the search),
                          test/helpers/sandbox.mjs the temporary machine they run on
 ci/                      the Arch Linux + Omarchy container bootstrap and checks
 .github/workflows/ci.yml
@@ -60,7 +66,7 @@ compares them with what is there, and only then writes:
   - the plugin's own directory, resolved.
 
   Everything setup writes runs by those recorded absolute paths, never by
-  PATH: the shim (node and CLI), the menu's "Waiting on you" row (node and
+  PATH: the shim (node and CLI), the menu's "Waiting on you" fallback (node and
   `bin/waiting.mjs`) and the post-update hook (node and `bin/setup.mjs
   --check`). `--check` reports any of them gone or moved. It also finds the
   Omarchy launchers on the
@@ -72,7 +78,20 @@ compares them with what is there, and only then writes:
   PATH, is treated as one, so without FUSE the key and the menu extract and
   run it), FUSE, and the bindings
   `omarchy menu keybindings --print` reports.
-- `lib/keys.mjs` turns that report into the key and its snippet.
+- `lib/keys.mjs` turns that report into the key and its snippet. The
+  SUPER + O submap binds T and D (each only when that part applies) and O
+  (Omarchy's pop-out), each also with SUPER held.
+- The default UI, `tui` or `desktop` (`chooseUi` in `lib/setup.mjs`), is
+  what the menu's root row "OATS" and a right click on the bar icon open.
+  With one of the two set up it is that one, and nothing is recorded. With
+  both it is `--ui`, else the one the state records, else none is chosen
+  (`pending`): `--plan` says so, `--apply` in a terminal asks
+  (`UI_QUESTION`, Enter is the TUI) before it shows the plan, and without a
+  terminal, `--yes` included, it refuses with `E_UI_REQUIRED`. A `--ui`
+  naming one that is not set up is `E_UI`, with why. The state records the
+  choice as `ui` only when there was one to make; a state from before
+  0.5.0 has none, and with both set up `--check` reports "default UI not
+  chosen".
 - `lib/bindings.mjs` is the key block: the Lua snippet between marker
   comments, appended to the end of `~/.config/hypr/bindings.lua` after a
   blank line. Setup writes it only for the Lua layout, and only when every
@@ -103,15 +122,34 @@ compares them with what is there, and only then writes:
   post-update hook, the bar widget's `plugin.json`); `lib/desktop-entry.mjs`
   reads and writes desktop entries.
 - `plugin.json`, beside the state (`$XDG_STATE_HOME/oats-omarchy`), is what
-  the bar widget runs: `{deployment, tui, desktop, waiting, attach, setup}`,
-  each an argv from the same functions the key and the menu use (`tui` and
-  `desktop` null when that part is not applied; `attach` ends at `--home`).
+  the bar widget and the popup run: `{deployment, tui, desktop, ui, waiting,
+  attach, setup}`, each an argv from the same functions the key and the menu
+  use (`tui` and `desktop` null when that part is not applied; `attach` ends
+  at `--home`), and `ui` the default UI (null when neither is set up). A
+  `plugin.json` from before 0.5.0 has no `ui`: `widget.mjs` `parsePlugin`
+  reads it as the TUI, or the Desktop when only it is set up, and ignores
+  v0.4.0's `agents` and `spawn`.
   It is written on every `--apply` that applies the shim, rewritten when it
   differs, removed by a complete `--remove`, and `--check` reports it
   missing. The detach key goes into `attach` when the CLI's `version --json`
   lists `session-attach-detach-key`, so a re-apply picks up a CLI that
   gained it.
-- `lib/menu.mjs` is the `oats` submenu: a delimited block in the user's
+- `lib/menu.mjs` is the menu block: the root row `oats-ui`, labelled OATS,
+  which runs the default UI's launch command (left out when there is none),
+  and the `oats` submenu, labelled Agent team with the alias `oats`: Open
+  OATS TUI, Open OATS Desktop, Waiting on you and Status. Omarchy 4.0.4's
+  search (`MenuModel.js` `searchScore`) ranks an exact label at the root
+  above any deeper match and a submenu 2 above an action with an equal
+  match, and `Menu.qml` lists root rows before deeper ones, the app
+  launchers among those: so the default UI's row is the only one labelled
+  OATS, and no row at the root starts with "o" but it.
+  `test/menu-search.test.mjs` ranks the block with Omarchy's own
+  `MenuModel.js` (vendored, pinned by digest) and the root of its menu
+  (`test/helpers/omarchy-search.mjs` holds `Menu.qml`'s steps), and the
+  container test with the real Omarchy's whole menu. "Waiting on you" opens
+  the waiting popup (`omarchy-shell shell summon ai.aweb.oats '{}'`, which
+  answers `ok` when it opened), else runs `bin/waiting.mjs`, the selector
+  (`popupAction`). It is a delimited block in the user's
   `~/.config/omarchy/extensions/omarchy-menu.jsonc`, the one file setup edits
   rather than writes whole. Only the block's bytes, and a separating comma
   when the user's last entry had none, are added and taken out; the rest of
@@ -121,6 +159,13 @@ compares them with what is there, and only then writes:
   trailing commas only): setup leaves a file Omarchy cannot read alone, and
   after an edit checks that Omarchy reads the user's items unchanged and
   every row of the block as written.
+- `--check` rebuilds the menu and key blocks this version would write from
+  what the state records (`blocksFor`, the same function the plan uses), so
+  a block another version wrote (v0.3.0's menu, v0.4.0's menu and key block)
+  is reported as "from another version of setup: run setup --apply again".
+  `--apply` then swaps only those blocks, a key block verified as a new one
+  is. `test/upgrade.test.mjs` starts from v0.3.0's and v0.4.0's own blocks
+  (`test/fixtures/v0.3.0`, `test/fixtures/v0.4.0`).
 - `lib/state.mjs` writes atomically and keeps the state file under
   `$XDG_STATE_HOME/oats-omarchy`: every file written, its digest, what was
   there before (backed up beside it) and the directories setup created; for
@@ -136,7 +181,8 @@ compares them with what is there, and only then writes:
 - `lib/system.mjs` runs commands with a timeout and a given environment.
 
 `bin/waiting.mjs --dir <deployment>` (`lib/waiting.mjs`) is the menu's
-"Waiting on you" row for one deployment (`--list` below is the other). Through setup's shim, it reads `oats status --json` for
+"Waiting on you" selector, when the popup cannot open, for one deployment
+(`--list` below is the other). Through setup's shim, it reads `oats status --json` for
 the deployment, shows the instances
 waiting on you in `omarchy-menu-select` (the count and the names, nothing
 else), and opens the chosen one's `oats session attach` in
@@ -150,9 +196,11 @@ A row waits on you when its `waitingOnYou` is set. A null there means the
 kernel makes no claim about that row, not that it is not waiting: nothing
 here says that nobody is waiting. Only a status that could not be read is
 unknown. `--json` prints what it read and opens nothing: `{ok, count,
-rows: [{instance, home}]}`, or `{ok: false, reason}` with one bounded line
-(the kernel's first, when `oats status` failed). It is the bar widget's only
-source; the filter lives here alone. With `--json` the kernel's read runs in
+rows: [{instance, home, waitingOnYou}]}` (`waitingOnYou` the kernel's
+`since`, `producer`, `reason` and `message`, each a string or null, as
+given), or `{ok: false, reason}` with one bounded line (the kernel's first,
+when `oats status` failed). It is the only source of the bar widget and the
+popup; the filter lives here alone. With `--json` the kernel's read runs in
 a process group of its own, which waiting kills on its own timeout (25 s,
 inside the widget's 30 s) and when it is stopped by SIGTERM, SIGINT or
 SIGHUP, so a stopped read leaves no kernel process behind.
@@ -176,28 +224,46 @@ them within 110 s (`LIST_BUDGET`); a
 deployment not reached in time is not read. Every one of these reads, the
 menu's and the Status row's (`bin/status.mjs`, `statusEvery`) included, runs
 in a process group of its own, killed with it, as for `--json` above.
-`--list --json` prints `{ok, count, rows: [{instance, home, deployment,
-workspace}], deployments: [{path, name, workspace, ok, reason?}], note?}`.
+`--list --json` prints `{ok, count, rows: [{instance, home, waitingOnYou,
+deployment, workspace}], deployments: [{path, name, workspace, ok, reason?}], note?}`.
 A deployment that could not be read is unknown on its own (`ok: false` with
 its reason) and the others still count; `ok` is false only when the list
 could not be read or no deployment could, and `note` says how to fill an
 empty list.
 
-### The bar widget
+### The bar widget and the waiting popup
 
-`OatsBarWidget.qml` displays; `widget.mjs` decides. The QML reads
+`OatsBarWidget.qml` and `OatsWaiting.qml` display; `widget.mjs` decides.
+Both draw an agent waiting on you with `WaitingCard.qml`: its name, the
+kernel's message, then reason, producer and age, as given (`widget.mjs`
+`card`, its age worked out once, when the read answered; nothing ticks),
+and the exact `since` in its tooltip. The popup is the plugin's overlay,
+in the shape of Omarchy's own pickers and its `[menu]` theme: the panel's
+read (`plugin.json`'s `waiting` argv plus `--json`), run when it opens, with
+one Quickshell `Process` and the read's deadline as its only `Timer`, which
+does not repeat; its cards in one list (`popupRows`, each group's title as
+the list's section; `popupNotes` the deployments not read), Up/Down or
+Ctrl+J/K, Enter running `attachArgv` through Omarchy's `Util.execArgv` (no
+shell), Esc closing it. With no `plugin.json` it offers setup only; with
+nothing waiting it says "No agent has said it is waiting on you", which
+claims nothing about the others.
+
+The bar widget's QML reads
 `plugin.json` (Quickshell's `FileView`), runs the panel's read (`plugin.json`'s
 `waiting` argv plus `--json`) as argv through one Quickshell `Process`, and
 hands every other command to the bar's `run`, which runs `bash -lc <line>`:
 `widget.mjs` builds those lines from `plugin.json`'s argv, every word
 single-quoted, and quotes them again for the floating terminal's `bash -c`.
 `test/widget.test.mjs` runs each line through bash with stand-ins that log
-their argv. `test/widget-qml.test.mjs` loads the widget itself in Quickshell,
-offscreen, with Omarchy's own `Ui` and `Commons` and a stand-in only for the
-panel's layer-shell window (`KeyboardPanel`, which needs a compositor): the
-layout with more rows than fit, a `plugin.json` change, a destroy during a
-read, a program that cannot start, and that nothing is read before the panel
-opens. It runs in CI's Omarchy container. The icon shows no count. With the
+their argv. `test/widget-qml.test.mjs` loads the widget and the popup
+themselves in Quickshell, offscreen, with Omarchy's own `Ui` and `Commons`
+and stand-ins only for their layer-shell windows (`KeyboardPanel` and
+`WaitingWindow`, which need a compositor): the layout with more rows than
+fit, the cards, a `plugin.json` change, a destroy during a read, a program
+that cannot start, that nothing is read before the panel or the popup
+opens, and the popup's keys. It runs in CI's Omarchy container. Nothing
+there is started: the bar's `run` and the popup's argv runner log what
+they were given. The icon shows no count. With the
 list, the panel groups the rows by workspace (`widget.mjs` `groups`): a
 deployment that could not be read is a group of its own, keyed by its path
 and titled by its name, and a row's label names its deployment, or its
@@ -283,12 +349,13 @@ CI's `omarchy` job runs in a pinned `archlinux:base` container:
   the user's whole configuration with the printed snippet added, the key
   block written, refused and removed with the real Hyprland, Omarchy's
   own `MenuModel.js` reading the menu block (it is plain functions, so it
-  runs as a script in a `vm` context), and `bin/waiting.mjs` opening a
+  runs as a script in a `vm` context) and ranking the default UI's row first
+  in a search over its whole menu, and `bin/waiting.mjs` opening a
   session through the real floating terminal, as does the bar panel's row.
   Only the selector is a fake: the real one needs a running Omarchy shell.
 - `test/widget-qml.test.mjs` (as `ci`, with `OATS_OMARCHY_CONTAINER=1`) loads
-  the bar widget in the container's Quickshell with `QT_QPA_PLATFORM=offscreen`
-  (see "The bar widget").
+  the bar widget and the popup in the container's Quickshell with
+  `QT_QPA_PLATFORM=offscreen` (see "The bar widget and the waiting popup").
 
 Installing `omarchy` in a container works as it is: Limine's post-transaction
 hooks report that there is no FAT32 boot partition, which pacman treats as
