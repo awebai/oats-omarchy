@@ -113,7 +113,7 @@ for (const version of Object.keys(VERSIONS)) {
     assert.equal(hyprCalls(s), verifiedBefore + (keysChange ? 2 : 0), keysChange ? "the unchanged copy, then the copy with the new block" : "an unchanged key block is not verified again");
 
     const state = JSON.parse(readFileSync(statePath(s), "utf8"));
-    assert.equal(state.version, "0.5.0");
+    assert.equal(state.version, "0.6.0");
     const keys = state.files.find((f) => f.role === "keys");
     assert.equal(keys.block, v030.keyBlock({ tui: files.tuiCommand({ shimPath: discoverPaths(s.env).shim, deployment: s.deployment }), desktop: null }), "v0.3.0's key block again");
     assert.ok(!keys.block.includes("SPACE"));

@@ -24,7 +24,7 @@ there before.
 
 This section is written to you, the coding agent asked to install this
 plugin. Follow the steps in order. Every command here is checked against
-v0.5.0.
+v0.6.0.
 
 > **Never pass `--yes` to `setup --apply` or `setup --remove` until the
 > person has said yes in the chat to what you showed them.** You have no
@@ -92,13 +92,13 @@ icon into the Omarchy shell at once; it runs no setup. `--yes` is needed
 because you have no terminal, and the person's request to install the plugin
 is their consent to it.
 
-To install the released v0.5.0 rather than the tip of the default branch,
+To install the released v0.6.0 rather than the tip of the default branch,
 pin it before the shell loads it. Add the plugin without `--enable`, check
 out the tag, then enable it:
 
 ```bash
 omarchy plugin add https://github.com/awebai/oats-omarchy --yes
-git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.5.0
+git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.6.0
 omarchy plugin enable ai.aweb.oats
 ```
 
@@ -173,7 +173,7 @@ themselves.
 - **Update:** `omarchy plugin update ai.aweb.oats`, then `setup --check`.
   Updating moves a pinned checkout to the tip of the default branch.
 - **Pin a release:** `git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout <tag>`, for
-  example `v0.5.0`. Pin again after any `omarchy plugin update`.
+  example `v0.6.0`. Pin again after any `omarchy plugin update`.
 - **Remove:** `setup --remove` first, then `omarchy plugin remove ai.aweb.oats`.
   The other order leaves the launchers, the menu and the hook behind.
 
@@ -278,9 +278,11 @@ then point at that clone, and the plan says so.
 The plan and its progress are tracked in
 [awebai/oats#1311](https://github.com/awebai/oats/issues/1311).
 
-Status: v0.5.0 is released. It is v0.3.0 with the waiting cards, the
-popup and the default UI; v0.4.0's picker and soul spawning are gone.
+Status: v0.6.0 is released. It is v0.3.0 with the waiting cards and a
+default UI, which the one OATS row in SUPER + SPACE opens beside the
+OATS TUI and OATS Desktop launchers; v0.4.0's picker and soul spawning
+are gone.
 `omarchy plugin add` installs the tip of the default branch; to stay on
-v0.5.0, pin it as described under "Pinning a release".
+v0.6.0, pin it as described under "Pinning a release".
 
 Developing it: [CONTRIBUTING.md](CONTRIBUTING.md).
