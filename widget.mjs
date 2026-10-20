@@ -1,12 +1,15 @@
-// Everything the bar widget builds or reads, kept apart from the QML so a
-// node test can run it: the command lines it hands to the bar's `run` (which
+// Everything the bar widget and the waiting popup (OatsWaiting.qml, the
+// plugin's overlay) build or read, kept apart from the QML so a node test
+// can run it: the command lines it hands to the bar's `run` (which
 // runs `bash -lc <line>`), the argv of its read, and the reading of
 // setup's plugin.json and of `waiting --json`. The QML only displays what
 // these return.
 //
 // The commands come from plugin.json, which setup writes on --apply: the
 // argv the key and the menu run, from the same code. Without it, setup has
-// not run, and the only command is setup itself.
+// not run, and the only command is setup itself. A waiting card's words
+// (card) are the same in the panel and the popup, which draw it with the one
+// WaitingCard.qml.
 
 // One shell word: single quotes, and a quote inside closed, escaped, reopened.
 export function shellQuote(s) {
@@ -42,7 +45,9 @@ function isArgv(value) {
 
 // plugin.json's text → its commands, or null when it is absent or not what
 // setup writes (then the widget offers setup only). `deployment` is null
-// when setup uses this computer's list of deployments.
+// when setup uses this computer's list of deployments. `ui` is the default
+// UI, "tui" or "desktop" (null when neither is set up); a file from before
+// 0.5.0 has none, and reads as the TUI, or the Desktop when only it is set up.
 export function parsePlugin(text) {
   var p
   try { p = JSON.parse(String(text)) } catch (e) { return null }
@@ -50,7 +55,8 @@ export function parsePlugin(text) {
   if (!isArgv(p.waiting) || !isArgv(p.attach) || !isArgv(p.setup)) return null
   if (p.tui !== null && !isArgv(p.tui)) return null
   if (p.desktop !== null && !isArgv(p.desktop)) return null
-  return { deployment: p.deployment, tui: p.tui, desktop: p.desktop, waiting: p.waiting, attach: p.attach, setup: p.setup }
+  var ui = p.ui === "desktop" && p.desktop ? "desktop" : p.ui === "tui" && p.tui ? "tui" : p.tui ? "tui" : p.desktop ? "desktop" : null
+  return { deployment: p.deployment, tui: p.tui, desktop: p.desktop, ui: ui, waiting: p.waiting, attach: p.attach, setup: p.setup }
 }
 
 // The read when the panel opens: `waiting --json`, run as argv (no shell).
@@ -90,7 +96,7 @@ export function parseWaiting(text) {
 }
 
 // The panel's rows by workspace, in the list's order: [{ title, rows:
-// [{ instance, home, label }], unknown: [text] }]. A group is a workspace,
+// [{ instance, home, label, waitingOnYou }], unknown: [text] }]. A group is a workspace,
 // or, for a deployment that could not be read (it has no workspace), that
 // deployment alone, by its path; its title is the workspace key or the
 // deployment's name. One deployment (or a read of one deployment, `listed`
@@ -98,7 +104,7 @@ export function parseWaiting(text) {
 // its deployment when its group has more than one, and its path when even
 // that would not tell two rows apart.
 export function groups(rows, listed) {
-  if (!listed) return rows.length ? [{ title: "", rows: rows.map(function(x) { return { instance: x.instance, home: x.home, label: x.instance } }), unknown: [] }] : []
+  if (!listed) return rows.length ? [{ title: "", rows: rows.map(function(x) { return { instance: x.instance, home: x.home, label: x.instance, waitingOnYou: claim(x.waitingOnYou) } }), unknown: [] }] : []
   var out = []
   var keyOf = function(d) { return d.ok && d.workspace ? "workspace " + d.workspace : "deployment " + d.path }
   var find = function(key) { for (var i = 0; i < out.length; i++) if (out[i].key === key) return out[i]; return null }
@@ -112,7 +118,7 @@ export function groups(rows, listed) {
   rows.forEach(function(x) {
     var d = listed.filter(function(y) { return y.path === x.deployment })[0]
     var g = d ? find(keyOf(d)) : null
-    if (g) g.rows.push({ instance: x.instance, home: x.home, name: d.name, path: d.path })
+    if (g) g.rows.push({ instance: x.instance, home: x.home, name: d.name, path: d.path, waitingOnYou: claim(x.waitingOnYou) })
   })
   var shown = out.filter(function(g) { return g.rows.length || g.unknown.length })
   return shown.map(function(g) {
@@ -121,7 +127,7 @@ export function groups(rows, listed) {
       title: shown.length > 1 ? g.title : "",
       rows: g.rows.map(function(x, i) {
         var clash = first.indexOf(first[i]) !== first.lastIndexOf(first[i])
-        return { instance: x.instance, home: x.home, label: clash ? x.instance + " (" + x.path + ")" : first[i] }
+        return { instance: x.instance, home: x.home, label: clash ? x.instance + " (" + x.path + ")" : first[i], waitingOnYou: x.waitingOnYou }
       }),
       unknown: g.unknown,
     }
@@ -170,6 +176,59 @@ export function isReader(peers, self) {
   return peers[0] === self
 }
 
+// The popup's rows, one list for the keyboard: each card of each group, in
+// order, with its group's title (the list's section). → [{ group, label,
+// home, waitingOnYou }].
+export function popupRows(waiting) {
+  if (!waiting || !waiting.known) return []
+  var out = []
+  waiting.groups.forEach(function(g) {
+    g.rows.forEach(function(x) { out.push({ group: g.title, label: x.label, home: x.home, waitingOnYou: x.waitingOnYou }) })
+  })
+  return out
+}
+
+// The deployments the popup could not read ("<name>: <reason>"), one line
+// each, above its cards.
+export function popupNotes(waiting) {
+  if (!waiting || !waiting.known) return []
+  var out = []
+  waiting.groups.forEach(function(g) { out = out.concat(g.unknown) })
+  return out
+}
+
+// A `waitingOnYou` as the kernel gave it ({ since, producer, reason,
+// message }, each a string or null), or null.
+export function claim(w) {
+  if (!w || typeof w !== "object") return null
+  var field = function(v) { return typeof v === "string" ? v : null }
+  return { since: field(w.since), producer: field(w.producer), reason: field(w.reason), message: field(w.message) }
+}
+
+// How long ago `since` was, at `now` (ms): "<1 min", "3 min", "2 h", "4 d";
+// "" when `since` is not a time. It is worked out once, when the read
+// answers: nothing ticks.
+export function age(since, now) {
+  var at = Date.parse(String(since || ""))
+  if (isNaN(at)) return ""
+  var min = Math.floor(Math.max(0, now - at) / 60000)
+  if (min < 1) return "<1 min"
+  if (min < 60) return min + " min"
+  if (min < 48 * 60) return Math.floor(min / 60) + " h"
+  return Math.floor(min / (24 * 60)) + " d"
+}
+
+// One card per agent waiting on you, the same in the panel and the popup:
+// its name (the label that tells it apart), the kernel's message as given
+// when it has one, then its reason, its producer and how long it has
+// waited, each as given, and the exact `since` (the tooltip). The plugin
+// words nothing of its own.
+export function card(label, w, now) {
+  var c = claim(w) || { since: null, producer: null, reason: null, message: null }
+  var meta = [c.reason, c.producer, age(c.since, now)].filter(function(x) { return !!x }).join(" \u00b7 ")
+  return { title: label, message: c.message || "", meta: meta, since: c.since || "" }
+}
+
 // The panel's commands, each a line for the bar's `run`.
 export function tuiCommand(plugin) {
   return plugin && plugin.tui ? "exec " + commandLine(plugin.tui) : ""
@@ -184,6 +243,19 @@ export function attachCommand(plugin, home) {
   return inTerminal(commandLine(plugin.attach.concat([home])))
 }
 
+// The default UI's line: the TUI or the Desktop, as setup chose; "" when
+// neither is set up.
+export function defaultCommand(plugin) {
+  if (!plugin) return ""
+  return plugin.ui === "desktop" ? desktopCommand(plugin) : tuiCommand(plugin)
+}
+
+// The popup's commands, each an argv it runs with no shell (Omarchy's
+// Util.execArgv): a session in the floating terminal, and setup.
+export function attachArgv(plugin, home) {
+  return ["omarchy-launch-floating-terminal-with-presentation", commandLine(plugin.attach.concat([home]))]
+}
+
 // Whether the viewer the panel opens takes the detach key (Alt+O).
 export function detachKey(plugin) {
   return !!plugin && plugin.attach.indexOf("--detach-key") >= 0
@@ -193,18 +265,27 @@ export function detachKey(plugin) {
 // the deployment setup is applied for, else (setup has not run) it asks for
 // the deployment first.
 export function setupCommand(plugin, setupPath) {
-  if (plugin) return inTerminal(commandLine(plugin.setup.concat(["--apply"])))
-  return inTerminal(shellQuote(setupPath) + " --apply")
+  return inTerminal(setupLine(plugin, setupPath))
 }
 
-// The icon's right click: the TUI, else setup.
+function setupLine(plugin, setupPath) {
+  return plugin ? commandLine(plugin.setup.concat(["--apply"])) : shellQuote(setupPath) + " --apply"
+}
+
+// The same, as the popup's argv.
+export function setupArgv(plugin, setupPath) {
+  return ["omarchy-launch-floating-terminal-with-presentation", setupLine(plugin, setupPath)]
+}
+
+// The icon's right click: the default UI, else setup.
 export function quickCommand(plugin, setupPath) {
-  return tuiCommand(plugin) || setupCommand(plugin, setupPath)
+  return defaultCommand(plugin) || setupCommand(plugin, setupPath)
 }
 
 // What a click on the icon does: { toggle: true } (the panel) or { line }.
 // Before setup has run (no plugin.json) either click runs the whole setup;
-// after, a left click toggles the panel and a right click opens the TUI.
+// after, a left click toggles the panel and a right click opens the default
+// UI.
 export function clickAction(plugin, setupPath, right) {
   if (!plugin) return { line: setupCommand(null, setupPath) }
   return right ? { line: quickCommand(plugin, setupPath) } : { toggle: true }

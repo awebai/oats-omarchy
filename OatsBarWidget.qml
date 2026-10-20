@@ -7,8 +7,10 @@ import qs.Commons
 import qs.Ui
 import "widget.mjs" as Widget
 
-// The OATS icon in the bar, and a panel: the agents waiting on you (a click
-// opens the session), the TUI, the Desktop, and setup. Everything it runs or
+// The OATS icon in the bar, and a panel: the agents waiting on you, one card
+// each (WaitingCard.qml, which the waiting popup draws too; a click opens the
+// session), the TUI, the Desktop, and setup. A right click on the icon opens
+// the default UI setup chose. Everything it runs or
 // reads is built by widget.mjs from setup's plugin.json; this file only displays it, runs commands through the
 // bar, and writes nothing. Without plugin.json, setup has not run: a click
 // on the icon runs the whole setup in a floating terminal instead
@@ -16,7 +18,9 @@ import "widget.mjs" as Widget
 //
 // The rows are `waiting --json` (bin/waiting.mjs), read only when the panel
 // opens, after plugin.json is read again: nothing is read in the background,
-// and the icon shows no count. The panel says it is reading until the read
+// and the icon shows no count. A card shows the kernel's message, reason,
+// producer and how long the agent has waited, as given, worked out once
+// when the read answers. The panel says it is reading until the read
 // answers. With this computer's list of deployments the read is
 // `waiting --list --json`: every listed deployment, one after another, its
 // rows grouped by workspace in the panel; one that could not be read is shown
@@ -41,6 +45,8 @@ Panel {
   property var plugin: null
   property var waiting: null
   property bool reading: false
+  // When this opening's read answered: a card's age is from then.
+  property real readAt: 0
   readonly property var rows: waiting && waiting.known ? waiting.rows : []
   readonly property var groups: waiting && waiting.known ? waiting.groups : []
   readonly property string note: waiting && waiting.known ? waiting.note : ""
@@ -101,6 +107,7 @@ Panel {
   }
 
   function receive(result) {
+    root.readAt = Date.now()
     root.waiting = result
     root.reading = false
   }
@@ -286,19 +293,26 @@ Panel {
                   elide: Text.ElideRight
                 }
 
-                Repeater {
-                  model: group.modelData.rows
+                Column {
+                  width: group.width
+                  spacing: Style.space(6)
 
-                  Button {
-                    required property var modelData
-                    width: group.width
-                    leftAlign: true
-                    text: modelData.label
-                    foreground: root.foreground
-                    fontFamily: root.fontFamily
-                    onClicked: {
-                      root.runLine(Widget.attachCommand(root.plugin, modelData.home))
-                      root.close()
+                  Repeater {
+                    model: group.modelData.rows
+
+                    WaitingCard {
+                      required property var modelData
+                      width: group.width
+                      label: modelData.label
+                      waitingOnYou: modelData.waitingOnYou
+                      readAt: root.readAt
+                      foreground: root.foreground
+                      dim: root.dim
+                      fontFamily: root.fontFamily
+                      onActivated: {
+                        root.runLine(Widget.attachCommand(root.plugin, modelData.home))
+                        root.close()
+                      }
                     }
                   }
                 }

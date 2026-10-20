@@ -2,19 +2,21 @@
   "schemaVersion": 1,
   "id": "ai.aweb.oats",
   "name": "OATS",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "author": "OATS Framework",
   "license": "MIT",
-  "description": "OATS on Omarchy: an OATS icon in the bar whose panel lists the agents waiting on you, read when you open it, and opens their sessions, the TUI and the Desktop; and a setup script for launchers, keys and an oats menu.",
+  "description": "OATS on Omarchy: an OATS icon in the bar whose panel shows the agents waiting on you as cards, read when you open it, and opens their sessions, the TUI and the Desktop; the same cards in a popup from the oats menu; and a setup script for launchers, keys, an oats menu and the default UI that OATS opens in SUPER + SPACE.",
   "kinds": [
-    "bar-widget"
+    "bar-widget",
+    "overlay"
   ],
   "entryPoints": {
-    "barWidget": "OatsBarWidget.qml"
+    "barWidget": "OatsBarWidget.qml",
+    "overlay": "OatsWaiting.qml"
   },
   "barWidget": {
     "displayName": "OATS",
-    "description": "A panel, read fresh each time it opens, that lists the agents waiting on you and opens their sessions, the OATS TUI and Desktop, and setup.",
+    "description": "A panel, read fresh each time it opens, that shows the agents waiting on you and opens their sessions, the OATS TUI and Desktop, and setup.",
     "category": "AI",
     "aliases": [
       "oats"
