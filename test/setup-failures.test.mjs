@@ -107,7 +107,7 @@ test("--check reports what a found Desktop entry runs when it is gone: its progr
     const entry = join(s.home, ".local/share/applications/existing.desktop");
     fs.mkdirSync(join(entry, ".."), { recursive: true });
     fs.writeFileSync(entry, `[Desktop Entry]\nType=Application\nName=OATS Desktop\nStartupWMClass=awebai-oats-desktop\nExec=env FOO=1 ${path}\n`);
-    assert.equal(s.run(["setup", "--apply"]).status, 0);
+    assert.equal(s.run(["setup", "--apply", "--ui", "tui"]).status, 0);
     assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
     fs.unlinkSync(path);
     const r = s.run(["setup", "--check", "--json"]);

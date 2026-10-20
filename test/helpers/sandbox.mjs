@@ -59,6 +59,11 @@ export function writeExecutable(path, text) {
 //                                       (an editor saving meanwhile)
 //   deploymentName: string
 //   menu: true | false                  Omarchy's menu definition is there ($OMARCHY_PATH)
+//   shell: false | "ok" | "unknown"     `omarchy-shell` on PATH: none (no
+//                                       shell runs), or one that logs its
+//                                       arguments to <root>/shell.log and
+//                                       answers a summon with that word (the
+//                                       popup opened, or the plugin is off)
 // The kernel stand-in answers `status --json` from <root>/status.json (and
 // <root>/status.mode: "envelope", "stderr" or "hang" for a failure) and
 // `version --json` from <root>/version.json; files a test writes. With
@@ -73,7 +78,7 @@ export function writeExecutable(path, text) {
 // or the text to return. FAKE_FLOATING_RUN=1 makes the floating terminal run
 // its command with bash -c, as the real one does.
 export function sandbox(t, options = {}) {
-  const o = { launchers: true, print: "fixture", session: false, fuse: true, tmux: true, kernel: "ok", node: false, hyprland: true, deploymentName: "deployment", menu: true, ...options };
+  const o = { launchers: true, print: "fixture", session: false, fuse: true, tmux: true, kernel: "ok", node: false, hyprland: true, deploymentName: "deployment", menu: true, shell: false, ...options };
   const root = realpathSync(mkdtempSync(join(tmpdir(), "oats-omarchy-test-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
@@ -110,6 +115,11 @@ ${logArgs("notify.log")}
 cmd="$*"
 printf '%s\\n' "$cmd" >> "${join(root, "floating.log")}"
 if [[ -n $FAKE_FLOATING_RUN ]]; then bash -c "$cmd"; fi
+exit 0
+`);
+  if (o.shell) writeExecutable(join(fakebin, "omarchy-shell"), `#!/bin/sh
+printf '%s\\n' "$*" >> "${join(root, "shell.log")}"
+[ "$2" = summon ] && echo ${o.shell}
 exit 0
 `);
 
