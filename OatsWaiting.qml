@@ -391,7 +391,7 @@ Item {
           width: parent.width
           height: visible ? implicitHeight : 0
           visible: displayModel.count > 0 && Widget.detachKey(root.plugin)
-          text: "Alt+O leaves the viewer"
+          text: Widget.detachHint(root.plugin)
           textFormat: Text.PlainText
           color: root.dim
           font.family: root.fontFamily

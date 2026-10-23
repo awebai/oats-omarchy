@@ -354,7 +354,7 @@ test("waiting opens the chosen session through Omarchy's real floating terminal:
   assert.equal(r.status, 0, r.stderr);
   const log = join(s.root, "kernel.log");
   waitFor(log, 1);
-  assert.deepEqual(JSON.parse(readFileSync(log, "utf8").trim()), ["session", "attach", "--detach-key", "M-o", "--home", home]);
+  assert.deepEqual(JSON.parse(readFileSync(log, "utf8").trim()), ["session", "attach", "--detach-key", "C-\\", "--home", home]);
 });
 
 test("the bar panel's row opens the same session through the real floating terminal, from the plugin.json setup wrote", { skip }, (t) => {
@@ -370,5 +370,5 @@ test("the bar panel's row opens the same session through the real floating termi
   assert.equal(r.status, 0, r.stderr);
   const log = join(s.root, "kernel.log");
   waitFor(log, 1);
-  assert.deepEqual(JSON.parse(readFileSync(log, "utf8").trim()), ["session", "attach", "--detach-key", "M-o", "--home", home]);
+  assert.deepEqual(JSON.parse(readFileSync(log, "utf8").trim()), ["session", "attach", "--detach-key", "C-\\", "--home", home]);
 });

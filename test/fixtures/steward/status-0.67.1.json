@@ -1,0 +1,195 @@
+{
+  "root": "/home/person/Machine/agents",
+  "agents": [
+    {
+      "schemaVersion": 2,
+      "name": "integrations-expert",
+      "description": "Cross-package provider integration — capability and hook contracts as judgement, live-rehearsal discipline, compensation reporting; builds OATS capability packages with users.",
+      "work": "directory",
+      "capabilities": {
+        "oats.authoring": {
+          "from": "package"
+        },
+        "oats.engineering-expert": {
+          "from": "package"
+        },
+        "oats.workspace-experts": {
+          "from": "here"
+        },
+        "oats.cloning": {
+          "from": "package"
+        }
+      },
+      "kind": "persistent",
+      "dir": "/home/person/Machine/agents/integrations-expert",
+      "key": "integrations-expert",
+      "soulSource": {
+        "repoKey": "github.com/person/machine",
+        "commit": "f3464b76b761654d57d4d36d53526c30628fbfa4",
+        "path": "souls/integrations-expert",
+        "current": "f3464b76b761654d57d4d36d53526c30628fbfa4",
+        "status": "current"
+      },
+      "instances": [
+        {
+          "agent": "integrations-expert",
+          "kind": "persistent",
+          "instance": "integrations-expert-omarchy-oats-standard",
+          "home": "/home/person/Machine/agents/integrations-expert/instances/integrations-expert-omarchy-oats-standard",
+          "soulDir": "/home/person/Machine/agents/integrations-expert/souls/f3464b76b761",
+          "repo": "/home/person/Machine",
+          "work": "directory",
+          "harness": "claude",
+          "model": "claude-opus-5-5",
+          "modelFrom": "soul",
+          "launchFrom": "soul",
+          "spawnOrigin": "instance",
+          "tmux": {
+            "session": "oats-agents",
+            "window": "integrations-expert-omarchy-oats-standard",
+            "socket": "/tmp/tmux-1000/oats"
+          },
+          "createdAt": "2026-10-23T07:32:25.520Z",
+          "workspace": {
+            "key": "github.com/person/machine",
+            "name": "oats",
+            "deployment": "/home/person/Machine",
+            "commit": "f3464b76b761654d57d4d36d53526c30628fbfa4",
+            "resolution": "e4d3e8f88987f7c5dd35e1ef",
+            "standalone": false,
+            "soul": {
+              "id": "github.com/awebai/oats#integrations-expert",
+              "repoKey": "github.com/person/machine",
+              "commit": "f3464b76b761654d57d4d36d53526c30628fbfa4"
+            },
+            "layers": {
+              "knowledge": {
+                "capability": "oats.okf",
+                "from": "workspace"
+              },
+              "messaging": {
+                "capability": "oats.aweb",
+                "from": "workspace"
+              },
+              "tasks": null
+            }
+          },
+          "launched": true,
+          "startedAt": "2026-10-23T07:32:25.520Z",
+          "running": true,
+          "waitingOnYou": null,
+          "soul": {
+            "repoKey": "github.com/person/machine",
+            "commit": "f3464b76b761654d57d4d36d53526c30628fbfa4",
+            "current": "f3464b76b761654d57d4d36d53526c30628fbfa4",
+            "status": "current"
+          }
+        }
+      ]
+    },
+    {
+      "schemaVersion": 2,
+      "name": "oats-machine--steward",
+      "description": "The steward of one computer: the person's front door on it",
+      "work": "directory",
+      "capabilities": {
+        "oats.machine-care": {
+          "from": "here"
+        },
+        "oats.setup": {
+          "from": "package"
+        }
+      },
+      "kind": "persistent",
+      "dir": "/home/person/Machine/agents/oats-machine--steward",
+      "key": null,
+      "soulSource": {
+        "repoKey": "github.com/awebai/oats-machine",
+        "commit": "1111111111111111111111111111111111111111",
+        "path": "oats-package/souls/steward",
+        "current": "1111111111111111111111111111111111111111",
+        "status": "current"
+      },
+      "instances": [
+        {
+          "agent": "oats-machine--steward",
+          "kind": "persistent",
+          "instance": "steward",
+          "home": "/home/person/Machine/agents/oats-machine--steward/instances/steward",
+          "soulDir": "/home/person/Machine/agents/oats-machine--steward/souls/f3464b76b761",
+          "repo": "/home/person/Machine",
+          "work": "directory",
+          "harness": "claude",
+          "model": "claude-opus-5-5",
+          "modelFrom": "soul",
+          "launchFrom": "soul",
+          "spawnOrigin": "instance",
+          "tmux": {
+            "session": "oats-agents",
+            "window": "steward",
+            "socket": "/tmp/tmux-1000/oats"
+          },
+          "createdAt": "2026-10-23T07:32:25.520Z",
+          "workspace": {
+            "key": "github.com/person/machine",
+            "name": "oats",
+            "deployment": "/home/person/Machine",
+            "commit": "f3464b76b761654d57d4d36d53526c30628fbfa4",
+            "resolution": "e4d3e8f88987f7c5dd35e1ef",
+            "standalone": false,
+            "soul": {
+              "id": "github.com/awebai/oats#oats-machine--steward",
+              "repoKey": "github.com/person/machine",
+              "commit": "f3464b76b761654d57d4d36d53526c30628fbfa4"
+            },
+            "layers": {
+              "knowledge": {
+                "capability": "oats.okf",
+                "from": "workspace"
+              },
+              "messaging": {
+                "capability": "oats.aweb",
+                "from": "workspace"
+              },
+              "tasks": null
+            }
+          },
+          "launched": true,
+          "startedAt": "2026-10-23T07:32:25.520Z",
+          "running": true,
+          "waitingOnYou": null,
+          "soul": {
+            "repoKey": "github.com/awebai/oats-machine",
+            "commit": "1111111111111111111111111111111111111111",
+            "current": "1111111111111111111111111111111111111111",
+            "status": "current"
+          }
+        }
+      ]
+    }
+  ],
+  "features": [
+    "retire-home",
+    "session-start",
+    "session-restart",
+    "launch-config",
+    "schedule",
+    "schedule-host-caps"
+  ],
+  "workspace": {
+    "reachable": true,
+    "key": "github.com/person/machine",
+    "ref": "git:github.com/person/machine",
+    "keyFrom": "workspace",
+    "standalone": false,
+    "defaultTeam": {
+      "label": "oats",
+      "team": "default:oats.aweb.ai"
+    },
+    "teams": {
+      "acme": "default:acme.aweb.ai",
+      "oats": "default:oats.aweb.ai"
+    },
+    "teamsFrom": "observed"
+  }
+}

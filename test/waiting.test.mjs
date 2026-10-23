@@ -87,7 +87,7 @@ test("a choice opens its session in the floating terminal through the shim, with
   withStatus(s, [{ name: "y", instances: [row("with space", b, W)] }]);
   const r = call(s, [], { FAKE_SELECT: "first" });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(waitFor(join(s.root, "floating.log")), `'${shimPath(s)}' 'session' 'attach' '--detach-key' 'M-o' '--home' '${b}'\n`);
+  assert.equal(waitFor(join(s.root, "floating.log")), `'${shimPath(s)}' 'session' 'attach' '--detach-key' 'C-\\' '--home' '${b}'\n`);
 });
 
 test("without the kernel feature the detach key is left out", (t) => {
@@ -121,12 +121,12 @@ test("the attach command reaches the kernel as argv through the terminal's bash 
   withStatus(s, [{ name: "y", instances: [row("with space", b, W)] }]);
   assert.equal(call(s, [], { FAKE_SELECT: "with space", FAKE_FLOATING_RUN: "1" }).status, 0);
   const log = waitFor(join(s.root, "kernel.log"));
-  assert.deepEqual(JSON.parse(log.trim()), ["session", "attach", "--detach-key", "M-o", "--home", b]);
-  assert.equal(DETACH_KEY, "M-o");
-  assert.equal(attachCommand({ shim: "/s/o ats", home: "/h/it's", detachKey: true }), `'/s/o ats' 'session' 'attach' '--detach-key' 'M-o' '--home' '/h/it'\\''s'`);
+  assert.deepEqual(JSON.parse(log.trim()), ["session", "attach", "--detach-key", "C-\\", "--home", b]);
+  assert.equal(DETACH_KEY, "C-\\");
+  assert.equal(attachCommand({ shim: "/s/o ats", home: "/h/it's", detachKey: true }), `'/s/o ats' 'session' 'attach' '--detach-key' 'C-\\' '--home' '/h/it'\\''s'`);
   assert.equal(attachCommand({ shim: "/s/oats", home: "/h", detachKey: false }), "'/s/oats' 'session' 'attach' '--home' '/h'");
   // The prefix the bar widget gets: the home goes last.
-  assert.deepEqual(attachPrefix({ shim: "/s/oats", detachKey: true }), ["/s/oats", "session", "attach", "--detach-key", "M-o", "--home"]);
+  assert.deepEqual(attachPrefix({ shim: "/s/oats", detachKey: true }), ["/s/oats", "session", "attach", "--detach-key", "C-\\", "--home"]);
   assert.deepEqual(attachPrefix({ shim: "/s/oats", detachKey: false }), ["/s/oats", "session", "attach", "--home"]);
 });
 

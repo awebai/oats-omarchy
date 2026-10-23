@@ -14,6 +14,8 @@ widget.mjs               everything the widget and the popup build or read, kept
 setup                    the command people run: a POSIX sh launcher
 bin/setup.mjs            setup's engine, which the launcher and the post-update hook run
 bin/waiting.mjs          the read of the panel and the popup (--json), and a selector of the agents waiting on you
+bin/omarchy-launch-oats  the agent launcher: a POSIX sh launcher, like setup, that runs bin/launch.mjs
+bin/launch.mjs           the launcher's engine: the steward's window, and the flow in it
 lib/                     their modules (below)
 assets/                  the icon both launcher entries use
 scripts/lint.mjs         lint
@@ -35,7 +37,8 @@ Rules the checks hold:
 - **Setup writes nothing inside its own directory.** Omarchy reloads plugin
   code when a file under `~/.config/omarchy/plugins/` changes, and the
   directory is a git checkout that updates fast-forward.
-- **Runtime code uses Node built-ins only.** The launcher is POSIX sh.
+- **Runtime code uses Node built-ins only.** The launchers (`setup`,
+  `bin/omarchy-launch-oats`) are POSIX sh.
 - **No file names a terminal emulator.** Terminal windows open through
   Omarchy's launchers (`omarchy-launch-tui`, `omarchy-launch-or-focus-tui`,
   `omarchy-launch-floating-terminal-with-presentation`), which run the user's
@@ -195,8 +198,11 @@ the deployment, shows the instances
 waiting on you in `omarchy-menu-select` (the count and the names, nothing
 else), and opens the chosen one's `oats session attach` in
 `omarchy-launch-floating-terminal-with-presentation`, with `--detach-key
-M-o` (Alt+O, OATS's leader key in the TUI and the Desktop) when the kernel
-lists `session-attach-detach-key`. With nothing to pick it
+'C-\'` (Ctrl+\, the kernel's suggested key; `DETACH_KEY`, which the
+launcher uses too) when the kernel lists `session-attach-detach-key`.
+The panel's and the popup's hint names the key `plugin.json` records
+(`widget.mjs` `detachHint`), so a `plugin.json` from before the key changed
+says Alt+O until setup is applied again. With nothing to pick it
 does not open the selector, which refuses to open empty; it sends
 `omarchy-notification-send` instead, or writes to stderr without it.
 
@@ -238,6 +244,77 @@ A deployment that could not be read is unknown on its own (`ok: false` with
 its reason) and the others still count; `ok` is false only when the list
 could not be read or no deployment could, and `note` says how to fill an
 empty list.
+
+### The agent launcher
+
+`bin/omarchy-launch-oats` runs `bin/launch.mjs` (`lib/launch.mjs`) with the
+same node lookup as `setup`. Without a node it says so on stderr and with
+`omarchy-notification-send` (else `notify-send`) when either is on PATH.
+
+- **The outer process only opens the window.** It checks that setup's shim
+  is there and that `omarchy-launch-tui` is on PATH, and makes the handoff:
+  a private directory (0700) under `$XDG_RUNTIME_DIR` (else the temporary
+  directory) that holds the prompt, if any. Then it starts
+  `omarchy-launch-tui --app-id=org.omarchy.agent <node> <plugin>/bin/launch.mjs
+  --in-terminal --claim-file <handoff>/claim [--prompt-file
+  <handoff>/prompt]` on its own, detached, with its own output as an exec
+  would give it.
+  - Neither the launcher's running nor its exit says that a window opened.
+    uwsm-app keeps it in the foreground while the window is open, or hands
+    the window to a service and ends with 0.
+  - Exactly one side claims the handoff, by creating `claim` with O_EXCL
+    (`claim`). The window claims it when it starts. The launch claims it
+    when the launcher fails or is signalled, or when no claim comes within
+    `WINDOW_START` (30 s).
+  - The window's claim is the launch's evidence that it started. It makes
+    the prompt the window's, and the window removes the handoff.
+  - The launch's claim means no window can send the prompt. The launch
+    then removes the handoff and reports the failure on stderr and in an
+    Omarchy notification.
+  - A claim that is already there, or a handoff already gone, is the other
+    side's.
+- **The window runs the flow** (`inTerminal`), so a failure shows where the
+  person is looking: one line naming the step, then it waits for Enter. The
+  steps are `version --json`, `findSteward`, `session start --home H
+  --json` (success or `E_SESSION_RUNNING` both count as started), the
+  prompt, then `session attach`. Enter is read straight from fd 0
+  (`waitForEnter`), leaving the terminal as it was for the attach.
+- **Every kernel call** goes through setup's shim (`discover.paths().shim`)
+  and runs in `waiting.mjs` `statusRead`, bounded, in a process group of
+  its own that is killed with it (`TIMEOUTS`). The exception is the
+  attach, which owns the terminal.
+- **The attach and `--inline`'s `omarchy-agent` run through `runChild`.**
+  Node cannot exec, so `runChild` gives the child the terminal. It ignores
+  SIGINT and SIGQUIT, which the terminal sends the child itself. It passes
+  SIGTERM and SIGHUP on. `bin/launch.mjs` `exit` then exits with the
+  child's status, or raises the child's signal again.
+- **`lib/steward.mjs` `findSteward`** is the only code that knows how to
+  find the steward. It reads every `ok` deployment of `oats deployments
+  --json`, or without `deployments-list` the deployment setup's state
+  records. For each one it runs `oats status --json`, with that deployment
+  as the working directory. The steward is an instance of the agent
+  `STEWARD_AGENT`, `oats-machine--steward`, the name the kernel's
+  `packageSoulAgentName` gives `oats.machine/steward`. Exactly one is
+  used. With several, they are listed and none is picked. With none, the
+  line says how to spawn one. A deployment that cannot be read is named
+  (`unread`, printed in the window, or in the reason), and never hides a
+  steward found in another.
+- **The prompt** (`--prompt`) travels in a 0600 file in the handoff,
+  passed as `--prompt-file`. It never goes in argv, which uwsm writes to the journal.
+  The window reads the file and deletes it first. `deliverPrompt` then:
+  - checks that the kernel lists `session-inspect-running` and
+    `waiting-on-you`, and sends nothing otherwise;
+  - polls `session inspect --home H --json` until `running`, at most once
+    a second and at most 20 s in all. Each read is bounded by what is left
+    of the 20 s, and an answer after it is not taken. That last read is the
+    fresh `waitingOnYou`;
+  - sends nothing to a steward waiting on the person, because a pasted
+    Enter could answer its prompt;
+  - otherwise pipes the text to `session input --home H --json` on stdin
+    (`--text-file -` would be a file named `-`).
+
+  The answer is reported as given, and an input is never sent again.
+  `--inline` passes the prompt to `omarchy-agent` as one argv element.
 
 ### The bar widget and the waiting popup
 
@@ -337,6 +414,17 @@ instance home's shim, or a mise shim that `mise which oats` resolves. Each fake
 models the real tool's refusals too (the selector never opens empty, the
 notifier needs a headline). Nothing on the host's PATH leaks in, so a test
 sees only what it set up.
+
+The launcher's tests (`test/launch.test.mjs`, `test/steward.test.mjs`) put
+setup's shim in front of `test/helpers/fake-kernel.mjs`, a stand-in for the
+CLI. It logs every call with its argv, working directory and the bytes
+`session input` read. It answers in the kernel's envelopes, and each
+command can be set to fail, to answer `E_SESSION_RUNNING`, or to hang with a
+child of its own. Its `status --json` and `deployments --json` come from
+`test/fixtures/steward`, trimmed from a real 0.67.1 CLI's output with the
+field names kept. A stand-in `omarchy-launch-tui` logs its argv, or runs the
+window's command for the end-to-end test. Nothing starts a terminal, the
+TUI, a harness or a real session.
 
 ## The Omarchy job
 

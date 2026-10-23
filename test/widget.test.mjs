@@ -174,7 +174,7 @@ function world(t) {
     desktop: ["omarchy-launch-or-focus", "awebai-oats-desktop", `uwsm-app -- '${join(odd, "app")}'`],
     ui: "tui",
     waiting: [join(odd, "node"), join(odd, "waiting.mjs"), "--dir", join(odd, "deployment")],
-    attach: [join(odd, "shim"), "session", "attach", "--detach-key", "M-o", "--home"],
+    attach: [join(odd, "shim"), "session", "attach", "--detach-key", "C-\\", "--home"],
     setup: [join(odd, "node"), join(odd, "setup.mjs"), "--dir", join(odd, "deployment")],
   };
   // The bar's run: `bash -lc <line>`; -c here, so no profile of this machine is read.
@@ -207,11 +207,19 @@ test("the panel's TUI and Desktop run the argv setup recorded, word for word", (
 test("a waiting row opens its session in the floating terminal: the home reaches the kernel as one argument", (t) => {
   const w = world(t);
   const home = join(w.odd, "instances", "with space 'and' $(quotes)");
-  assert.deepEqual(w.run(W.attachCommand(w.plugin, home)), ["shim", "session", "attach", "--detach-key", "M-o", "--home", home]);
+  assert.deepEqual(w.run(W.attachCommand(w.plugin, home)), ["shim", "session", "attach", "--detach-key", "C-\\", "--home", home]);
   assert.equal(W.detachKey(w.plugin), true);
   const without = { ...w.plugin, attach: [join(w.odd, "shim"), "session", "attach", "--home"] };
   assert.deepEqual(w.run(W.attachCommand(without, home)), ["shim", "session", "attach", "--home", home]);
-  assert.equal(W.detachKey(without), false, "no feature: no key, and no Alt+O line");
+  assert.equal(W.detachKey(without), false, "no feature: no key, and no hint");
+  assert.equal(W.detachHint(without), "");
+});
+
+test("the hint names the detach key plugin.json records: Ctrl+\\ from setup now, Alt+O from a plugin.json setup 0.6.0 wrote", (t) => {
+  const w = world(t);
+  assert.equal(W.detachHint(w.plugin), "Ctrl+\\ leaves the viewer");
+  assert.equal(W.detachHint({ ...w.plugin, attach: ["s", "session", "attach", "--detach-key", "M-o", "--home"] }), "Alt+O leaves the viewer");
+  assert.equal(W.detachHint(null), "");
 });
 
 test("setup from the panel: --apply for the recorded deployment, or the plugin's setup --apply before it has run", (t) => {
@@ -223,7 +231,7 @@ test("setup from the panel: --apply for the recorded deployment, or the plugin's
 test("the popup's commands run as argv: a session by its home, and setup", (t) => {
   const w = world(t);
   const home = join(w.odd, "instances", "with space 'and' $(quotes)");
-  assert.deepEqual(w.runArgv(W.attachArgv(w.plugin, home)), ["shim", "session", "attach", "--detach-key", "M-o", "--home", home]);
+  assert.deepEqual(w.runArgv(W.attachArgv(w.plugin, home)), ["shim", "session", "attach", "--detach-key", "C-\\", "--home", home]);
   assert.deepEqual(w.runArgv(W.setupArgv(null, join(w.odd, "setup"))), ["setup", "--apply"]);
   assert.deepEqual(w.runArgv(W.setupArgv(w.plugin, join(w.odd, "setup"))), ["node", join(w.odd, "setup.mjs"), "--dir", join(w.odd, "deployment"), "--apply"]);
 });
