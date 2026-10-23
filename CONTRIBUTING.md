@@ -252,14 +252,20 @@ same node lookup as `setup`. Without a node it says so on stderr and with
 `omarchy-notification-send` (else `notify-send`) when either is on PATH.
 
 - **The outer process only opens the window.** It checks that setup's shim
-  is there and that `omarchy-launch-tui` is on PATH. Then it starts
+  is there and that `omarchy-launch-tui` is on PATH, and makes the handoff:
+  a private directory (0700) under `$XDG_RUNTIME_DIR` (else the temporary
+  directory) that holds the prompt, if any. Then it starts
   `omarchy-launch-tui --app-id=org.omarchy.agent <node> <plugin>/bin/launch.mjs
-  --in-terminal` on its own, detached, with its own output as an exec
-  would give it. Omarchy's launcher keeps running while the window is open
-  (uwsm-app runs the terminal in a scope), so the outer process watches it
-  for `WINDOW_GRACE` (3 s): a launcher that fails within it opened nothing,
-  and one still running is the window. A failure before the window goes to
-  stderr and an Omarchy notification, and removes the prompt file.
+  --in-terminal --started-file <handoff>/started [--prompt-file
+  <handoff>/prompt]` on its own, detached, with its own output as an exec
+  would give it. Neither the launcher's running nor its exit says that a
+  window opened. uwsm-app keeps it in the foreground while the window is
+  open, or hands the window to a service and ends with 0. Only the
+  window's mark says it: the window writes `started` once it has read and
+  removed the prompt. Until the mark, the launch counts as failed when the
+  launcher ends with a failure or a signal, or when no mark comes within
+  `WINDOW_START` (30 s). The handoff is removed either way. A failure
+  before the window goes to stderr and an Omarchy notification.
 - **The window runs the flow** (`inTerminal`), so a failure shows where the
   person is looking: one line naming the step, then it waits for Enter. The
   steps are `version --json`, `findSteward`, `session start --home H
@@ -286,9 +292,8 @@ same node lookup as `setup`. Without a node it says so on stderr and with
   line says how to spawn one. A deployment that cannot be read is named
   (`unread`, printed in the window, or in the reason), and never hides a
   steward found in another.
-- **The prompt** (`--prompt`) travels in a 0600 file created new under
-  `$XDG_RUNTIME_DIR` (else the temporary directory), passed as
-  `--prompt-file`. It never goes in argv, which uwsm writes to the journal.
+- **The prompt** (`--prompt`) travels in a 0600 file in the handoff,
+  passed as `--prompt-file`. It never goes in argv, which uwsm writes to the journal.
   The window reads the file and deletes it first. `deliverPrompt` then:
   - checks that the kernel lists `session-inspect-running` and
     `waiting-on-you`, and sends nothing otherwise;

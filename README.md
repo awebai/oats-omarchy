@@ -320,8 +320,9 @@ What each failure says:
     recorded by setup;
   - `OATS is not set up here (setup's shim … is missing): run setup --apply`;
   - `omarchy-launch-tui is not on PATH: it opens the agent window`;
-  - `omarchy-launch-tui: exited with status <n>: no window opened`, after
-    the launcher's own message.
+  - `omarchy-launch-tui: exited with status <n> before the window started`,
+    after the launcher's own message;
+  - `omarchy-launch-tui: the window did not start within 30 s`.
 - **In the window,** one line naming the step, then Enter closes the window:
   - `finding the steward: no steward on this machine: spawn one with …`.
     Any deployment whose `oats status` failed is named. A steward in

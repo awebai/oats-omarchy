@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { APP_ID, deliverPrompt, launch, LAUNCH_SCRIPT, parseArgs } from "../lib/launch.mjs";
 import { DETACH_KEY } from "../lib/waiting.mjs";
@@ -35,11 +35,25 @@ function world(t, { features = ALL_FEATURES, kernel = true } = {}) {
   const run = join(s.root, "run");
   mkdirSync(run, { mode: 0o700 });
   const env = { ...s.env, XDG_RUNTIME_DIR: run };
-  // Omarchy's launcher: logs its argv; with FAKE_TUI_RUN=1 it runs the
-  // command, as the real one does in the terminal (here with no input).
+  // Omarchy's launcher: logs its argv, keeps what the prompt file held
+  // (prompt.seen, and its mode and its directory's in prompt.ls), and
+  // marks the handoff as the window does when it starts. With
+  // FAKE_TUI_RUN=1 it runs the command instead, as the real one does in
+  // the terminal (here with no input), and ends with its status.
   writeExecutable(join(s.fakebin, "omarchy-launch-tui"), `#!/bin/sh
 for a; do printf '%s\\n' "$a"; done >> "${join(s.root, "tui.log")}"
-if [ -n "\${FAKE_TUI_RUN:-}" ]; then shift; "$@" < /dev/null > "${join(s.root, "window.out")}" 2>&1; echo "exit $?" >> "${join(s.root, "window.out")}"; fi
+started=; prompt=; prev=
+for a; do
+  [ "$prev" = --started-file ] && started=$a
+  [ "$prev" = --prompt-file ] && prompt=$a
+  prev=$a
+done
+if [ -n "\${FAKE_TUI_RUN:-}" ]; then
+  shift; "$@" < /dev/null > "${join(s.root, "window.out")}" 2>&1; status=$?
+  echo "exit $status" >> "${join(s.root, "window.out")}"; exit $status
+fi
+if [ -n "$prompt" ]; then cp "$prompt" "${join(s.root, "prompt.seen")}"; ls -ln "$prompt" > "${join(s.root, "prompt.ls")}"; ls -lnd "$(dirname "$prompt")" >> "${join(s.root, "prompt.ls")}"; rm "$prompt"; fi
+[ -n "$started" ] && : > "$started"
 exit 0
 `);
   const tuiArgs = () => (existsSync(join(s.root, "tui.log")) ? readFileSync(join(s.root, "tui.log"), "utf8").split("\n").slice(0, -1) : null);
@@ -75,41 +89,47 @@ async function waitFor(check, ms = 10_000) {
 // ---------------------------------------------------------------------------
 // The window.
 
-test("no arguments: one window, omarchy-launch-tui --app-id=org.omarchy.agent <node> <plugin>/bin/launch.mjs --in-terminal", async (t) => {
+test("no arguments: one window, omarchy-launch-tui --app-id=org.omarchy.agent <node> <plugin>/bin/launch.mjs --in-terminal, and the handoff it marks", async (t) => {
   const w = world(t);
   const r = outer(w, []);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, "");
-  const argv = await waitFor(() => w.tuiArgs());
-  assert.deepEqual(argv, [`--app-id=${APP_ID}`, process.execPath, join(repo, "bin", "launch.mjs"), "--in-terminal"]);
+  const argv = w.tuiArgs();
+  assert.deepEqual(argv.slice(0, 5), [`--app-id=${APP_ID}`, process.execPath, join(repo, "bin", "launch.mjs"), "--in-terminal", "--started-file"]);
+  assert.equal(argv.length, 6);
+  assert.match(argv[5], new RegExp(`^${w.run}/oats-omarchy-launch-[^/]+/started$`), "under XDG_RUNTIME_DIR");
   assert.equal(LAUNCH_SCRIPT, join(repo, "bin", "launch.mjs"));
   assert.deepEqual(w.k.calls(), [], "the outer process runs no kernel command: the window does");
+  assert.deepEqual(readdirSync(w.run), [], "the handoff is removed once the window has marked it");
 });
 
-test("--prompt: the text reaches the window in a new 0600 file under XDG_RUNTIME_DIR, never in argv", async (t) => {
+test("--prompt: the text reaches the window in a new 0600 file in a private directory under XDG_RUNTIME_DIR, never in argv", (t) => {
   const w = world(t);
   const r = outer(w, ["--prompt", TRICKY]);
   assert.equal(r.status, 0, r.stderr);
-  const argv = await waitFor(() => w.tuiArgs());
-  assert.deepEqual(argv.slice(0, 4), [`--app-id=${APP_ID}`, process.execPath, LAUNCH_SCRIPT, "--in-terminal"]);
-  assert.equal(argv[4], "--prompt-file");
-  assert.equal(argv.length, 6);
-  const file = argv[5];
-  assert.equal(join(w.run, file.slice(w.run.length + 1)), file, "under XDG_RUNTIME_DIR");
-  assert.equal(statSync(file).mode & 0o777, 0o600);
-  assert.equal(readFileSync(file, "utf8"), TRICKY);
+  const argv = w.tuiArgs();
+  assert.deepEqual(argv.slice(0, 5), [`--app-id=${APP_ID}`, process.execPath, LAUNCH_SCRIPT, "--in-terminal", "--started-file"]);
+  assert.equal(argv[6], "--prompt-file");
+  assert.equal(argv.length, 8);
+  assert.equal(argv[7], join(argv[5], "..", "prompt"));
+  assert.match(argv[7], new RegExp(`^${w.run}/oats-omarchy-launch-[^/]+/prompt$`));
+  assert.equal(readFileSync(join(w.s.root, "prompt.seen"), "utf8"), TRICKY);
+  const [file, dir] = readFileSync(join(w.s.root, "prompt.ls"), "utf8").split("\n");
+  assert.match(file, /^-rw------- /);
+  assert.match(dir, /^drwx------ /);
   assert.ok(!argv.some((a) => a.includes("pwned")), "no part of the prompt in argv");
+  assert.deepEqual(readdirSync(w.run), []);
 });
 
-test("--prompt without XDG_RUNTIME_DIR: the file goes in the temporary directory", async (t) => {
+test("--prompt without XDG_RUNTIME_DIR: the handoff goes in the temporary directory", (t) => {
   const w = world(t);
   const tmp = join(w.s.root, "tmp");
   mkdirSync(tmp);
   const r = outer(w, ["--prompt", "hello"], { XDG_RUNTIME_DIR: "", TMPDIR: tmp });
   assert.equal(r.status, 0, r.stderr);
-  const argv = await waitFor(() => w.tuiArgs());
-  assert.equal(argv[5], join(tmp, readdirSync(tmp)[0]));
-  assert.equal(readFileSync(argv[5], "utf8"), "hello");
+  assert.match(w.tuiArgs()[7], new RegExp(`^${tmp}/oats-omarchy-launch-[^/]+/prompt$`));
+  assert.equal(readFileSync(join(w.s.root, "prompt.seen"), "utf8"), "hello");
+  assert.deepEqual(readdirSync(tmp), []);
 });
 
 test("an empty or blank --prompt, or a bad argument, is refused before any window opens", (t) => {
@@ -124,7 +144,8 @@ test("an empty or blank --prompt, or a bad argument, is refused before any windo
 });
 
 test("parseArgs: a prompt that starts with a dash is the prompt; --prompt=<text> works too", () => {
-  assert.deepEqual(parseArgs(["--prompt", "--inline"]), { inline: false, inTerminal: false, prompt: "--inline", promptFile: null });
+  assert.deepEqual(parseArgs(["--prompt", "--inline"]), { inline: false, inTerminal: false, prompt: "--inline", promptFile: null, startedFile: null });
+  assert.match(parseArgs(["--started-file", "/x"]).error, /--started-file is the window's own/);
   assert.equal(parseArgs(["--prompt=-x y"]).prompt, "-x y");
   assert.deepEqual(parseArgs(["--inline", "--in-terminal"]), { error: "--inline runs Omarchy's own agent: it takes no --in-terminal" });
   assert.match(parseArgs(["--in-terminal", "--prompt", "x"]).error, /--prompt is for the launch/);
@@ -154,29 +175,87 @@ test("before the window: no omarchy-launch-tui on PATH, exit 1, notified; a noti
   assert.equal(failing.stderr, line);
 });
 
-test("before the window: a launcher that fails says so, with its own message, notifies, and removes the prompt file", (t) => {
+// A stand-in launcher, a node script, that does `body` (with `started`
+// and `prompt`, the paths it was given, and `log(line)`).
+function launcherDoing(w, body) {
+  writeExecutable(join(w.s.fakebin, "omarchy-launch-tui"), `#!${process.execPath}
+const { appendFileSync, existsSync, readFileSync, writeFileSync } = require("node:fs");
+const argv = process.argv.slice(2);
+const after = (flag) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : null);
+const started = after("--started-file");
+const prompt = after("--prompt-file");
+const log = (line) => appendFileSync(${JSON.stringify(join(w.s.root, "launcher.log"))}, line + "\\n");
+${body}
+`);
+}
+const launcherLog = (w) => (existsSync(join(w.s.root, "launcher.log")) ? readFileSync(join(w.s.root, "launcher.log"), "utf8") : "");
+
+test("before the window: a launcher that fails at once says so after its own message, notifies, and removes the handoff", (t) => {
   const w = world(t);
   writeExecutable(join(w.s.fakebin, "omarchy-launch-tui"), "#!/bin/sh\necho 'xdg-terminal-exec: configured terminal could not start' >&2\nexit 1\n");
   const r = outer(w, ["--prompt", "hello"]);
   assert.equal(r.status, 1);
-  assert.equal(r.stderr, "xdg-terminal-exec: configured terminal could not start\nomarchy-launch-oats: omarchy-launch-tui: exited with status 1: no window opened\n");
-  assert.equal(w.notified(), "Could not open the OATS steward\nomarchy-launch-tui: exited with status 1: no window opened\n--\n");
-  assert.deepEqual(readdirSync(w.run), [], "the prompt file is gone");
+  const line = "omarchy-launch-tui: exited with status 1 before the window started: your prompt was not sent";
+  assert.equal(r.stderr, `xdg-terminal-exec: configured terminal could not start\nomarchy-launch-oats: ${line}\n`);
+  assert.equal(w.notified(), `Could not open the OATS steward\n${line}\n--\n`);
+  assert.deepEqual(readdirSync(w.run), [], "the handoff and the prompt are gone");
 });
 
-test("before the window: a launcher still running after the grace period is the open window, left to run", async (t) => {
+test("before the window: a launcher that fails later, but before the window marks the handoff, is a failure too", (t) => {
   const w = world(t);
-  const pidFile = join(w.s.root, "tui.pid");
-  writeExecutable(join(w.s.fakebin, "omarchy-launch-tui"), `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetTimeout(() => {}, 60_000);\n`);
+  launcherDoing(w, "setTimeout(() => { console.error('terminal: could not connect to the display'); process.exit(1); }, 3300);");
+  const r = outer(w, []);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /omarchy-launch-oats: omarchy-launch-tui: exited with status 1 before the window started\n$/);
+  assert.match(w.notified(), /^Could not open the OATS steward\n/);
+  assert.deepEqual(readdirSync(w.run), []);
+});
+
+test("a window that started and ended at once (detached with Ctrl+\\, status 20) is a launch that worked", (t) => {
+  const w = world(t);
+  set(w, "attach.status", "20");
+  const r = outer(w, [], { FAKE_TUI_RUN: "1" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, "");
+  assert.equal(w.notified(), "");
+  assert.equal(readFileSync(join(w.s.root, "window.out"), "utf8"), "exit 20\n");
+});
+
+test("a launcher that hands the window to a service and ends with 0: the window's mark decides", (t) => {
+  const w = world(t);
+  launcherDoing(w, `const { spawn } = require("node:child_process");
+// The service: reads the prompt, then marks the handoff, after this ends.
+const later = "setTimeout(() => { const fs = require('node:fs'); fs.rmSync(process.argv[1]); fs.writeFileSync(process.argv[2], ''); }, 500)";
+spawn(process.execPath, ["-e", later, prompt, started], { detached: true, stdio: "ignore" }).unref();
+process.exit(0);`);
+  const r = outer(w, ["--prompt", "hello"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(w.notified(), "");
+  assert.deepEqual(readdirSync(w.run), []);
+});
+
+test("a launcher still running with no mark from the window by the deadline: the window did not start; the prompt is withdrawn", async (t) => {
+  const w = world(t);
+  launcherDoing(w, "log(String(process.pid)); setTimeout(() => {}, 60_000);");
   const err = [];
-  const start = Date.now();
-  const code = await launch(["--prompt", "hello"], w.env, { err: { write: (x) => err.push(x) }, windowGraceMs: 300 });
-  assert.equal(code, 0, err.join(""));
-  assert.ok(Date.now() - start < 5_000);
-  assert.equal(readdirSync(w.run).length, 1, "the prompt file is the window's to read");
-  const pid = Number(readFileSync(pidFile, "utf8"));
-  process.kill(pid, 0);
-  process.kill(pid, "SIGKILL");
+  const code = await launch(["--prompt", "hello"], w.env, { err: { write: (x) => err.push(x) }, windowStartMs: 600 });
+  assert.equal(code, 1);
+  assert.equal(err.join(""), "omarchy-launch-oats: omarchy-launch-tui: the window did not start within 1 s: your prompt was not sent\n");
+  assert.match(w.notified(), /did not start within 1 s/);
+  assert.deepEqual(readdirSync(w.run), [], "the prompt is withdrawn");
+  process.kill(Number(launcherLog(w).trim()), "SIGKILL");
+});
+
+test("a launcher still running once the window marked the handoff is the open window, left to run", async (t) => {
+  const w = world(t);
+  launcherDoing(w, "log(String(process.pid)); setTimeout(() => { log(readFileSync(prompt, 'utf8')); require('node:fs').rmSync(prompt); writeFileSync(started, ''); }, 200); setTimeout(() => {}, 60_000);");
+  const code = await launch(["--prompt", "hello"], w.env, { err: { write: () => {} }, windowStartMs: 10_000 });
+  assert.equal(code, 0);
+  const [pid, seen] = launcherLog(w).trim().split("\n");
+  assert.equal(seen, "hello");
+  process.kill(Number(pid), 0);
+  process.kill(Number(pid), "SIGKILL");
+  assert.deepEqual(readdirSync(w.run), []);
 });
 
 test("the sh launcher: node from PATH, else the node setup recorded; with neither, stderr and a notification, exit 1", (t) => {
@@ -305,7 +384,7 @@ test("--prompt end to end: the window reads the file, deletes it, and the kernel
   const input = calls.find((c) => c.argv[1] === "input");
   assert.deepEqual(input.argv, ["session", "input", "--home", w.home, "--json"], "stdin, never --text-file");
   assert.equal(Buffer.from(input.stdin, "base64").toString("utf8"), TRICKY);
-  assert.deepEqual(readdirSync(w.run), [], "the prompt file is gone");
+  assert.deepEqual(readdirSync(w.run), [], "the prompt and the handoff are gone");
   assert.equal(readFileSync(join(w.s.root, "window.out"), "utf8"), "omarchy-launch-oats: your prompt was sent to the steward\nexit 0\n");
   assert.ok(!existsSync(join(w.s.home, "pwned")) && !existsSync(join(w.s.deployment, "pwned")) && !existsSync(join(w.s.home, "ticked")));
 });
