@@ -1151,3 +1151,44 @@ test("--only agent-key does not move the key over a full setup applied for the l
   assert.equal(stateOf(s).deployment, s.deployment);
   assert.ok(agentLines(file));
 });
+
+test("--only agent-key over its own work alone records the deployment its launcher reads, even when no file changes", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.65.0", features: ["deployments-list"] }));
+  writeFileSync(join(s.root, "deployments.json"), JSON.stringify({ deploymentsApi: 1, file: join(s.home, ".oats/config/deployments.json"), deployments: [{ path: s.deployment, name: "deployment", state: "ok" }], imports: {} }));
+  assert.equal(part(s.run([...ONLY_RUN, "--json"]), "agent-key").status, "applied");
+  assert.equal(stateOf(s).deployment, null);
+  const moved = readFileSync(file, "utf8");
+  // The same CLI without the list: the key already moved, every file current.
+  writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.65.0", features: [] }));
+  const r = s.run([...ONLY_RUN, "--dir", s.deployment, "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(r.json.result.parts.map((x) => x.status), ["already applied", "already applied", "already applied"]);
+  assert.deepEqual(r.json.result.written, []);
+  assert.equal(readFileSync(file, "utf8"), moved);
+  assert.equal(stateOf(s).deployment, s.deployment, "the state alone is rewritten");
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
+  // Nothing changes on a second run.
+  const after = snapshot(s.home);
+  assert.deepEqual(s.run([...ONLY_RUN, "--dir", s.deployment, "--json"]).json.result.written, []);
+  assert.deepEqual(snapshot(s.home), after);
+});
+
+test("--only agent-key giving the key back over its own work alone keeps the node the untouched shim and launcher run, so --check says it is gone", (t) => {
+  const s = sandbox(t, { node: true });
+  hypr(s);
+  const p = discoverPaths(s.env);
+  assert.equal(s.run(ONLY_RUN).status, 0);
+  const old = stateOf(s).node;
+  unlinkSync(old);
+  symlinkSync(process.execPath, join(s.fakebin, "node"));
+  const shim = readFileSync(p.shim, "utf8");
+  const launcher = readFileSync(p.wrapper, "utf8");
+  const r = s.run([...ONLY_RUN, "--agent-key", "omarchy", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").status, "removed");
+  assert.deepEqual([readFileSync(p.shim, "utf8"), readFileSync(p.wrapper, "utf8")], [shim, launcher]);
+  assert.equal(stateOf(s).node, old);
+  assert.ok(s.run(["setup", "--check", "--json"]).json.result.drift.includes(`the node setup recorded, ${old}, is gone: run setup --apply again`));
+});

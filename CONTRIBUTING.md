@@ -150,13 +150,17 @@ compares them with what is there, and only then writes:
   or `E_UI_REQUIRED`. The shim and the launcher are written whether or not
   the key moves now (a printed snippet runs the launcher too), except when
   the key is given back, which leaves them as they are. The plan says so
-  under `ONLY_HEADING`. Over a full setup (`fullState`: a part outside
-  `ONLY_PARTS` recorded), the apply keeps the deployment, node, plugin
-  directory, Desktop and default UI the state records, which the other
-  files were written from, so `--check` rebuilds them unchanged. Over its
-  own work alone, or no state, it records what it found. It records the
-  OATS CLI only when it plans the shim, the CLI's only user, and keeps the
-  recorded one otherwise; it adds its parts to those recorded. `--check`
+  under `ONLY_HEADING`. What it records (`onlyRecord`) comes from the files
+  that hold it. Over a full setup (`fullState`: a part outside
+  `ONLY_PARTS` recorded) it keeps the deployment, node, plugin directory,
+  Desktop and default UI the state records, which the other files were
+  written from, so `--check` rebuilds them unchanged. Over its own work
+  alone, or no state, the deployment is the one found (the launcher reads
+  it). The node and the OATS CLI are the shim's, the node and the plugin
+  directory the launcher's: recorded from what it plans there, and kept as
+  recorded when it leaves the file alone (a give-back). The state alone is
+  rewritten when that record changes, with no file to write. It adds its
+  parts to those recorded. `--check`
   expects `plugin.json` only over a full setup, since a narrowed apply
   alone leaves the bar icon offering setup. A later full `--apply` finds the
   shim and the launcher recorded and current.
