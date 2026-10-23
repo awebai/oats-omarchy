@@ -117,9 +117,10 @@ compares them with what is there, and only then writes:
   launcher): never over a file or link setup did not write, created only
   where nothing is. It runs the plugin's `bin/omarchy-install-oats`, which
   is sh, so it calls neither node nor the shim, and goes with any CLI setup
-  accepts. `--check` reports it as new in a state applied before it existed
-  (one with the shim and no installer), unless something setup did not
-  write holds the path.
+  accepts. `--check` reports it as new in a full setup state applied
+  before it existed (`fullState`, with the shim and no installer), unless
+  something setup did not write holds the path; `--only agent-key` alone
+  never writes it, and its state does not expect it.
 - The agent key's owner, `oats` or `omarchy` (`chooseAgentKey`), is
   `--agent-key`, else the one the state records as `agentKey`, else none
   (null). It moves only on an explicit pick: with none, `--apply` in a
