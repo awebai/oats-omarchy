@@ -32,7 +32,7 @@ import * as v030 from "./fixtures/v0.3.0/blocks.mjs";
 import * as v040 from "./fixtures/v0.4.0/blocks.mjs";
 import * as v050 from "./fixtures/v0.5.0/blocks.mjs";
 import * as v060 from "./fixtures/v0.6.0/blocks.mjs";
-import { sandbox, snapshot } from "./helpers/sandbox.mjs";
+import { sandbox, snapshot, withStewards } from "./helpers/sandbox.mjs";
 
 const USER_BINDINGS = '-- My bindings\no.bind("SUPER + RETURN", "Terminal", "uwsm-app -- xdg-terminal-exec")\n';
 const USER_MENU = '{\n  "mine": {"label":"Mine","action":"true"}\n}\n';
@@ -233,6 +233,7 @@ test("a v0.4.0 home whose config Hyprland refuses: the key part is skipped, the 
 // the whole candidate is verified first.
 test("--apply --agent-key oats over a v0.6.0 home adds the agent key to its key block in place, verified first; --check is then clean", (t) => {
   const s = sandbox(t);
+  withStewards(s);
   const at = home(s);
   const { oldKeys } = asOld(s, at, "0.6.0");
   const keysBefore = readFileSync(at.bindings, "utf8");
@@ -268,6 +269,7 @@ test("--apply --agent-key oats over a v0.6.0 home adds the agent key to its key 
 
 test("--remove after a v0.6.0 home's upgrade with --agent-key oats restores the home exactly as it was before setup", (t) => {
   const s = sandbox(t);
+  withStewards(s);
   const at = home(s);
   const before = snapshot(s.home);
   asOld(s, at, "0.6.0");

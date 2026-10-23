@@ -129,6 +129,10 @@ OATS's steward, or stay with Omarchy's agent?". Pass the answer as
 `--agent-key`, setup asks nothing (you have no terminal) and the key stays
 with Omarchy. When the plan's "Agent key" says it was chosen at an earlier
 `--apply`, that choice is kept: ask only if the person wants to change it.
+The key moves only when the machine has exactly one OATS steward. When the
+plan's agent-key part says it stays with Omarchy until the machine has one,
+run `setup --apply` again once the steward is spawned, after the person's
+yes as in step 6.
 
 **5. Show the plan.** Leave out `--dir <deployment>` here and in step 6
 only when both checks in step 2 hold, and `--ui <ui>` when step 4 says so.
@@ -216,6 +220,14 @@ node it recorded. The key moves only once you pick OATS:
 
 Without a terminal and without `--agent-key`, setup asks nothing and the key
 stays with Omarchy.
+
+Picking OATS moves the key only when this machine has exactly one steward
+(an instance of `oats.machine/steward`), which setup looks for each time
+`--plan` or `--apply` runs. Without one, or with several, the key stays with
+Omarchy and the plan says why. Your choice is kept, so `setup --apply` after
+spawning the steward moves the key without asking again. A key that has
+already moved stays with OATS when the steward is gone: the plan notes it,
+and the key says so when you press it.
 
 Setup writes the agent key's lines into the same marked block of your
 `bindings.lua` as SUPER + O: they unbind Omarchy's binding and bind the key

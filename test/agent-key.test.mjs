@@ -19,15 +19,17 @@ import * as keys from "../lib/keys.mjs";
 import * as menu from "../lib/menu.mjs";
 import { shellQuote } from "../lib/quote.mjs";
 import { AGENT_QUESTION, blocksFor, NOT_CHOSEN, setup, UI_QUESTION } from "../lib/setup.mjs";
-import { fixture, repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
+import { fixture, repo, sandbox, snapshot, withStewards, writeExecutable } from "./helpers/sandbox.mjs";
 
 const USER_BINDINGS = '-- My bindings\no.bind("SUPER + RETURN", "Terminal", "uwsm-app -- xdg-terminal-exec")\n';
 const MY_SUPER_O = 'o.bind("SUPER + O", "Mine", "true")\n';
 const APPLY = "Apply it? [y/N] ";
 const HINT = "Answer OATS or omarchy (Enter is OATS).\n";
 
-// The user's Lua layout under `home`: a hyprland.lua and their bindings.lua.
+// The user's Lua layout under `home`: a hyprland.lua and their bindings.lua,
+// on a machine with one steward (the tests of the steward gate change that).
 function hypr(s, text = USER_BINDINGS, { mode = 0o640, home = s.home } = {}) {
+  withStewards(s);
   const dir = join(home, ".config", "hypr");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "hyprland.lua"), 'require("hypr.bindings")\n');
@@ -563,7 +565,10 @@ test("giving the key back with the OATS CLI broken since, applied for the list, 
   const text = `${USER_BINDINGS}${MY_SUPER_O}`;
   const file = hypr(s, text);
   writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.60.0", features: ["deployments-list"] }));
+  // The list holds the deployment, whose status lists the steward.
+  writeFileSync(join(s.root, "deployments.json"), JSON.stringify({ deploymentsApi: 1, file: join(s.home, ".oats", "config", "deployments.json"), deployments: [{ path: s.deployment, name: "machine", state: "ok" }], imports: {} }));
   const first = s.run(["setup", "--apply", "--agent-key", "oats", "--json"], {}, { cwd: s.home });
+  assert.equal(part(first, "agent-key").status, "applied", part(first, "agent-key").reason);
   assert.equal(first.status, 0, first.stdout + first.stderr);
   assert.equal(stateOf(s).deployment, null);
   writeExecutable(s.cli, "#!/usr/bin/env node\nprocess.exit(1);\n");
@@ -721,4 +726,89 @@ test("--check: a recorded block with either section or both is this version's; a
   writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
   assert.deepEqual(both.run(["setup", "--check", "--json"]).json.result.drift, [`the oats key block in ${file} is from another version of setup: run setup --apply again`]);
   assert.match(both.run(["setup", "--check"]).stdout, new RegExp(`^oats-omarchy: the oats key block in ${escape(file)} is from another version of setup`));
+});
+
+// ---------------------------------------------------------------------------
+// The steward gate: the key moves to OATS only when findSteward
+// (lib/steward.mjs) finds exactly one steward, read when setup runs. The
+// recorded choice stays "oats" either way, and a key already moved stays.
+
+const NO_STEWARD = "the agent key stays with Omarchy until this machine has one steward: no steward on this machine: spawn one with `oats spawn oats.machine/steward --name steward` in the machine's deployment; run setup --apply again after spawning it";
+const agentLines = (file) => readFileSync(file, "utf8").includes(keys.AGENT_OURS);
+
+test("the steward gate: one steward, and the key moves to OATS", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  withStewards(s, ["steward"]);
+  const r = s.run(["setup", "--apply", "--agent-key", "oats", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").status, "applied");
+  assert.ok(agentLines(file));
+});
+
+test("the steward gate: no steward, the key stays with Omarchy, the choice is recorded, and the plan says why", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  withStewards(s, []);
+  const r = s.run(["setup", "--apply", "--agent-key", "oats", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(part(r, "agent-key"), { part: "agent-key", status: "skipped", reason: NO_STEWARD, paths: [] });
+  assert.equal(part(r, "keys").status, "applied", "SUPER + O is written all the same");
+  assert.equal(part(r, "launcher").status, "applied");
+  assert.ok(!agentLines(file));
+  assert.equal(stateOf(s).agentKey, "oats");
+  assert.ok(s.run(["setup", "--plan"]).stdout.includes(`  agent-key skipped: ${NO_STEWARD}\n`));
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
+});
+
+test("the steward gate: two stewards, the key stays with Omarchy, and both are named", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  withStewards(s, ["steward", "steward-2"]);
+  const r = s.run(["setup", "--apply", "--agent-key", "oats", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").status, "skipped");
+  assert.match(part(r, "agent-key").reason, /^the agent key stays with Omarchy until this machine has one steward: several stewards on this machine, and none is chosen: steward @ \S+, steward-2 @ \S+; run setup --apply again after spawning it$/);
+  assert.ok(!agentLines(file));
+  assert.equal(stateOf(s).agentKey, "oats");
+});
+
+test("the steward gate: a key already moved stays with OATS when no steward is found at a re-apply, and the plan notes it", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  assert.equal(s.run(["setup", "--apply", "--agent-key", "oats"]).status, 0);
+  const moved = readFileSync(file, "utf8");
+  withStewards(s, []);
+  const r = s.run(["setup", "--apply", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").status, "already applied");
+  assert.equal(readFileSync(file, "utf8"), moved, "section b is kept, unchanged");
+  assert.deepEqual(r.json.result.written, []);
+  assert.ok(r.json.result.notes.includes("No steward was found now (no steward on this machine: spawn one with `oats spawn oats.machine/steward --name steward` in the machine's deployment): the agent key still opens OATS, and says so when it is pressed."), r.json.result.notes.join("\n"));
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
+});
+
+test("the steward gate: a later --apply with one steward moves the key without asking again", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  withStewards(s, []);
+  assert.equal(s.run(["setup", "--apply", "--agent-key", "oats"]).status, 0);
+  assert.ok(!agentLines(file));
+  withStewards(s, ["steward"]);
+  const r = fromTerminal(s, ["--apply"], ["y"]);
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(r.asked, [APPLY], "only Apply it?: the choice is recorded");
+  assert.ok(agentLines(file));
+  assert.ok(readFileSync(file, "utf8").includes(keys.agentBindLine(wrapperOf(s))));
+});
+
+test("the steward gate: the kernel read for it fails, and the key stays with Omarchy with the kernel's reason", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  writeFileSync(join(s.root, "status.mode"), "envelope");
+  const r = s.run(["setup", "--apply", "--agent-key", "oats", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").status, "skipped");
+  assert.match(part(r, "agent-key").reason, /^the agent key stays with Omarchy until this machine has one steward: no steward on this machine: .*; not read: .*oats-lock\.json is unreadable/);
+  assert.ok(!agentLines(file));
 });

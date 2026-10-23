@@ -30,6 +30,15 @@ const MENU_DEFAULTS = `{
 // not on the PATH, because on Omarchy it holds the real launchers.
 const HOST_TOOLS = ["sh", "bash", "cat", "echo", "printf", "mkdir", "head", "env", "rm", "ls", "dirname", "cp", "grep"];
 
+// The kernel stand-in's `status --json` (run without --dir, as findSteward
+// runs it in each deployment) lists these instances of oats.machine's
+// steward agent (lib/steward.mjs STEWARD_AGENT): setup moves the agent key
+// to OATS only when it finds exactly one.
+export function withStewards(s, names = ["steward"]) {
+  const home = (name) => join(s.deployment, "agents", "oats-machine--steward", "instances", name);
+  writeFileSync(join(s.root, "status.json"), JSON.stringify({ root: join(s.deployment, "agents"), agents: [{ name: "oats-machine--steward", instances: names.map((instance) => ({ instance, home: home(instance) })) }] }));
+}
+
 export function writeExecutable(path, text) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, text);

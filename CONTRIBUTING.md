@@ -115,7 +115,18 @@ compares them with what is there, and only then writes:
   with `--check` or `--remove`, is `E_BAD_ARGS`. The state always records
   `agentKey`, and a new choice alone still rewrites it. `--plan` shows the
   choice and where it came from under "Agent key", with its lines when OATS
-  is picked.
+  is picked. One gate in `desiredParts` decides whether a choice of OATS
+  moves the key, in order: the launcher part, then the steward, then the
+  shim. The steward is `findSteward` (`lib/steward.mjs`), which must find
+  exactly one; `stewardOf` reads it for the Lua layout only, once per run
+  (memoized on the probe, as an interactive `--apply` plans more than
+  once), never in `--check`. It runs in a node of its own, since
+  `findSteward` is asynchronous and setup is not, through a temporary shim
+  with the bytes of setup's, which a first `--apply` has not written yet;
+  without the list it reads the deployment setup is applying for. Without
+  a steward the agent-key part is skipped with findSteward's reason and the
+  choice stays recorded. A key already moved keeps its lines, and the plan
+  notes that no steward was found.
 - The default UI, `tui` or `desktop` (`chooseUi` in `lib/setup.mjs`), is
   what the menu's root row "OATS" and a right click on the bar icon open.
   With one of the two set up it is that one. With both it is `--ui`, else

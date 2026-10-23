@@ -27,7 +27,7 @@ import * as files from "../lib/files.mjs";
 import * as menu from "../lib/menu.mjs";
 import { blocksFor, managedPaths } from "../lib/setup.mjs";
 import { agentBindLine } from "../lib/keys.mjs";
-import { fixture, repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
+import { fixture, repo, sandbox, snapshot, withStewards, writeExecutable } from "./helpers/sandbox.mjs";
 import * as widget from "../widget.mjs";
 import { appRow, loadMenuModel, search } from "./helpers/omarchy-search.mjs";
 
@@ -221,6 +221,7 @@ for (const [name, pick] of [
 // runs it, with bash, against the real file.
 test("the agent key: --agent-key oats writes both sections, --agent-key omarchy takes the agent key's out, --remove restores bindings.lua byte for byte", { skip }, (t) => {
   const s = omarchySandbox(t, { print: "fixture" });
+  withStewards(s);
   userHypr(s, { layout: "lua" });
   const p = discoverPaths(s.env);
   const file = managedPaths(p).keys;
@@ -280,6 +281,7 @@ test("the agent key: --agent-key oats writes both sections, --agent-key omarchy 
 // the way --remove takes it out.
 test("the agent key alone: SUPER + O refused, the agent key's section written and verified, --agent-key omarchy restores bindings.lua byte for byte", { skip }, (t) => {
   const s = omarchySandbox(t, { print: "fixture" });
+  withStewards(s);
   userHypr(s, { layout: "lua" });
   const file = managedPaths(discoverPaths(s.env)).keys;
   writeFileSync(file, `${readFileSync(file, "utf8")}hl.unbind("SUPER + O")\n`);
