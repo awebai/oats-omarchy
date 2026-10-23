@@ -463,8 +463,10 @@ It needs two things:
 - **One steward**, the soul `oats.machine/steward` (awebai/oats-machine), in
   the machine's deployment. Spawn it there with
   `oats spawn oats.machine/steward --name steward`. The steward is looked up
-  on every launch: in every deployment of this computer's list (with an
-  older OATS CLI, in the deployment setup is applied for). Nothing is
+  on every launch: first in the deployment setup is applied for, when setup
+  records one, and when that one has exactly one steward, there alone;
+  otherwise in every deployment of this computer's list (with an older OATS
+  CLI, in the deployment setup is applied for). The steward itself is never
   recorded, so a respawned steward is found again.
 
 Flags:
