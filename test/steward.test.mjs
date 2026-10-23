@@ -5,6 +5,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { paths as discoverPaths } from "../lib/discover.mjs";
+import { STATE_SCHEMA } from "../lib/state.mjs";
 import { findSteward, STEWARD_AGENT, STEWARD_KEY, stewardsIn } from "../lib/steward.mjs";
 import { ALL_FEATURES, fakeKernel, gone } from "./helpers/fake-kernel.mjs";
 import { fixture, sandbox } from "./helpers/sandbox.mjs";
@@ -160,4 +162,64 @@ for (const [what, set] of [
   const pids = readFileSync(join(w.k.k, `${cmd}.pids`), "utf8").trim().split(/\s+/).map(Number);
   assert.equal(pids.length, 2);
   assert.ok(await gone(pids), "the kernel and its child are gone");
+});
+
+// The launcher's fast path (recordedFirst): the deployment setup's state
+// records, read first; the full scan whenever that is inconclusive.
+function recorded(w, path) {
+  const dir = discoverPaths(w.s.env).stateDir;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "state.json"), JSON.stringify({ schemaVersion: STATE_SCHEMA, files: [], deployment: path }));
+}
+const statusReads = (w) => w.k.calls().filter((c) => c.argv.join(" ") === "status --json").map((c) => c.cwd);
+const listReads = (w) => w.k.calls().filter((c) => c.argv.join(" ") === "deployments --json").length;
+
+test("recordedFirst: one steward in the recorded deployment is taken from one status read, without the list or the others", async (t) => {
+  // A second steward elsewhere: the fast path does not see it (the full
+  // scan, without recordedFirst, reports both).
+  const w = world(t, { a: STATUS, b: status({ stewards: [["second", "/h/second"]] }) });
+  recorded(w, w.paths[0]);
+  assert.deepEqual(await w.find({ recordedFirst: true }), { ok: true, instance: "steward", home: STEWARD_HOME, deployment: { path: w.paths[0], name: w.paths[0] }, unread: [] });
+  assert.deepEqual(statusReads(w), [w.paths[0]]);
+  assert.equal(listReads(w), 0);
+  const full = await w.find();
+  assert.equal(full.ok, false);
+  assert.match(full.reason, /^several stewards on this machine/);
+});
+
+test("recordedFirst: none, or several, in the recorded deployment: the full scan, which reads it once", async (t) => {
+  const none = world(t, { a: status({ stewards: [] }), b: STATUS });
+  recorded(none, none.paths[0]);
+  const found = await none.find({ recordedFirst: true });
+  assert.equal(found.ok, true);
+  assert.deepEqual(found.deployment, { path: none.paths[1], name: "acme" });
+  assert.deepEqual(statusReads(none), none.paths, "the recorded one is not read again");
+  assert.equal(listReads(none), 1);
+
+  const two = world(t, { a: status({ stewards: [["one", "/h/one"], ["two", "/h/two"]] }), b: status({ stewards: [] }) });
+  recorded(two, two.paths[0]);
+  const several = await two.find({ recordedFirst: true });
+  assert.equal(several.ok, false);
+  assert.match(several.reason, /^several stewards on this machine, and none is chosen: one @ machine, two @ machine/);
+});
+
+test("recordedFirst: a recorded deployment whose status cannot be read is named by the full scan, from the one read", async (t) => {
+  const w = world(t, { a: "envelope:E_LOCK", b: STATUS });
+  recorded(w, w.paths[0]);
+  const found = await w.find({ recordedFirst: true });
+  assert.equal(found.ok, true);
+  assert.equal(found.instance, "steward");
+  assert.equal(found.unread.length, 1);
+  assert.match(found.unread[0], /E_LOCK/);
+  assert.deepEqual(statusReads(w), w.paths);
+});
+
+test("recordedFirst: no recorded deployment, or no list: as without it", async (t) => {
+  const w = world(t, { a: STATUS, b: status({ stewards: [] }) });
+  assert.equal((await w.find({ recordedFirst: true })).deployment.name, "machine", "no state: the list's name");
+  const old = world(t, { a: STATUS, features: ["session-inspect-running", "waiting-on-you"] });
+  recorded(old, old.paths[0]);
+  const found = await old.find({ recordedFirst: true });
+  assert.equal(found.ok, true);
+  assert.deepEqual(statusReads(old), [old.paths[0]], "read once, as the state's one deployment");
 });

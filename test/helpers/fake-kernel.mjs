@@ -23,6 +23,8 @@ export const ALL_FEATURES = ["deployments-list", "session-attach-detach-key", "s
 //   <cwd>/status.mode       its mode, as above
 //   inspect.json            `session inspect`'s results, one per call, the
 //                           last repeated (else running, not waiting on you)
+//   inspect.modes           `session inspect`'s modes, one per call, the last
+//                           repeated ("" answers), in place of inspect.mode
 //   inspect.delay           ms each `session inspect` takes to answer
 //   input.json              `session input`'s result (else submitted, verified)
 //   attach.status           `session attach`'s exit status (else 0), or
@@ -71,12 +73,13 @@ if (argv[0] === "session" && sub === "start" && argv.includes("--json")) {
   ok({ home, started: true });
 }
 if (argv[0] === "session" && sub === "inspect" && argv.includes("--json")) {
-  await mode(file("inspect.mode"), "inspect");
+  const n = Number(file("inspect.n") || 0);
+  writeFileSync(K + "/inspect.n", String(n + 1));
+  const modes = JSON.parse(file("inspect.modes") || "null");
+  await mode(Array.isArray(modes) ? modes[Math.min(n, modes.length - 1)] : file("inspect.mode"), "inspect");
   const delay = Number(file("inspect.delay") || 0);
   if (delay) await new Promise((r) => setTimeout(r, delay));
   const seq = JSON.parse(file("inspect.json") || "null");
-  const n = Number(file("inspect.n") || 0);
-  writeFileSync(K + "/inspect.n", String(n + 1));
   const given = Array.isArray(seq) ? seq[Math.min(n, seq.length - 1)] : {};
   ok({ home, backend: "tmux", present: true, state: "unknown", running: true, waitingOnYou: null, ...given });
 }

@@ -1,6 +1,6 @@
 {
   "name": "@awebai/oats-omarchy",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "An Omarchy plugin that makes the OATS TUI and OATS Desktop Omarchy apps; this file holds its repository tooling and version.",
   "license": "MIT",
   "type": "module",

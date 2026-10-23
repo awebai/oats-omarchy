@@ -321,8 +321,27 @@ test("--now with no terminal runs again in Omarchy's floating terminal, as omarc
   const w = world(t);
   const r = w.run(["--now", "--harness", "pi"], { extraEnv: { OMARCHY_INSTALL_OATS_TERMINAL: "" } });
   assert.equal(r.status, 0, r.out);
-  assert.equal(w.log("floating.log"), `OMARCHY_INSTALL_OATS_TERMINAL=1 '${INSTALLER}' --now --harness pi\n--\n`);
+  assert.equal(w.log("floating.log"), `OMARCHY_INSTALL_OATS_TERMINAL=1 '${INSTALLER}' --now --harness 'pi'\n--\n`);
   assert.equal(w.log("mise.log"), "", "nothing ran here");
+});
+
+test("the floating terminal's command line quotes the installer's path, whatever it holds, and the shell runs it to the same argv", (t) => {
+  const w = world(t);
+  // A copy of the installer in a plugin directory with a space, a ' and a $.
+  const plugin = join(w.root, "plug in's $HOME");
+  const self = join(plugin, "bin", "omarchy-install-oats");
+  writeExecutable(self, readFileSync(INSTALLER, "utf8"));
+  const r = spawnSync("/bin/sh", [self, "--now", "--harness", "pi"], { env: { ...w.env(), OMARCHY_INSTALL_OATS_TERMINAL: "" }, encoding: "utf8", cwd: w.home });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const line = `OMARCHY_INSTALL_OATS_TERMINAL=1 '${join(w.root, "plug in")}'\\''s $HOME/bin/omarchy-install-oats' --now --harness 'pi'`;
+  assert.equal(w.log("floating.log"), `${line}\n--\n`);
+  // What Omarchy's floating terminal then runs (bash -c "$*"): the same
+  // program, with the marker and the same arguments.
+  const argvLog = join(w.root, "argv.log");
+  writeExecutable(self, `#!/bin/sh\n{ echo "marker=$OMARCHY_INSTALL_OATS_TERMINAL"; for a; do printf '%s\\n' "$a"; done; } > '${argvLog}'\n`);
+  const ran = spawnSync("/bin/sh", ["-c", line], { env: w.env(), encoding: "utf8" });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.equal(readFileSync(argvLog, "utf8"), "marker=1\n--now\n--harness\npi\n");
 });
 
 for (const [name, set, expect, after] of [

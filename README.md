@@ -169,7 +169,7 @@ the tag, then enable it:
 
 ```bash
 omarchy plugin add https://github.com/awebai/oats-omarchy
-git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout <tag>
+git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.7.0
 omarchy plugin enable ai.aweb.oats
 ```
 
@@ -266,7 +266,7 @@ themselves. The same goes for the agent key's lines under "Agent key".
   it back.
 - **Update:** `omarchy plugin update ai.aweb.oats`, then `setup --check`.
   Updating moves a pinned checkout to the tip of the default branch.
-- **Pin a release:** `git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout <tag>`.
+- **Pin a release:** `git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.7.0`.
   Pin again after any `omarchy plugin update`.
 - **Remove:** `setup --remove` first, then `omarchy plugin remove ai.aweb.oats`.
   The other order leaves the launchers, the menu and the hook behind.
@@ -433,7 +433,7 @@ Then it asks who the agent key opens (see "The agent key").
   `omarchy update`.
 
 **Pinning a release.** The plugin is a plain git checkout:
-`git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout <tag>`. `omarchy plugin
+`git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.7.0`. `omarchy plugin
 update` fast-forwards it to the tip of the default branch, so pin again after
 an update.
 
@@ -463,8 +463,10 @@ It needs two things:
 - **One steward**, the soul `oats.machine/steward` (awebai/oats-machine), in
   the machine's deployment. Spawn it there with
   `oats spawn oats.machine/steward --name steward`. The steward is looked up
-  on every launch: in every deployment of this computer's list (with an
-  older OATS CLI, in the deployment setup is applied for). Nothing is
+  on every launch: first in the deployment setup is applied for, when setup
+  records one, and when that one has exactly one steward, there alone;
+  otherwise in every deployment of this computer's list (with an older OATS
+  CLI, in the deployment setup is applied for). The steward itself is never
   recorded, so a respawned steward is found again.
 
 Flags:
@@ -503,7 +505,10 @@ What each failure says:
 - **The prompt,** reported, and then the window attaches after Enter:
   - `the steward is waiting on you (<its message>): your prompt was not sent; attaching`;
   - `sending your prompt: <the OATS CLI's message>: your prompt was not delivered; type it yourself`;
-  - `sending your prompt: the steward was not running within 20 s: …`.
+  - `sending your prompt: the steward was not running within 20 s: …`;
+  - `sending your prompt: the steward's session could not be inspected within
+    20 s: <the OATS CLI's message>: …`, when every inspect in those 20 s
+    failed (each failure is tried again a second later).
   - On success, `your prompt was sent to the steward`. When the OATS CLI
     could not see the prompt arrive, the line adds that it is not sent
     again.
@@ -511,11 +516,14 @@ What each failure says:
 The plan and its progress are tracked in
 [awebai/oats#1311](https://github.com/awebai/oats/issues/1311).
 
-Status: v0.6.0 is released. It is v0.3.0 with the waiting cards and a
-default UI, which the one OATS row in SUPER + SPACE opens beside the
-OATS TUI and OATS Desktop launchers; v0.4.0's picker and soul spawning
-are gone.
+Status: v0.7.0 is released. It is v0.6.0 with OATS as the standard on
+Omarchy: `omarchy-launch-oats`, which opens this machine's steward; the
+agent key, SUPER + SHIFT + CTRL + A, which opens it too once you pick OATS
+(`setup --apply --only agent-key`, or the OATS row in Omarchy's Default
+Agent menu); `omarchy-install-oats`, which installs what is missing and
+hands its found-list to an onboarding agent; and `Ctrl+\` to leave a
+session's viewer.
 `omarchy plugin add` installs the tip of the default branch; to stay on
-v0.6.0, pin it as described under "Pinning a release".
+v0.7.0, pin it as described under "Pinning a release".
 
 Developing it: [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -346,14 +346,32 @@ ensure() {
   esac
 }
 
+# $1 as one shell word, for the shell that runs a command line: in single
+# quotes, each ' as '\'' (close, an escaped quote, reopen).
+sh_quote() {
+  q_rest=$1 q_out=''
+  while :; do
+    case $q_rest in
+      *"'"*)
+        q_out=$q_out${q_rest%%"'"*}"'\\''"
+        q_rest=${q_rest#*"'"}
+        ;;
+      *) break ;;
+    esac
+  done
+  printf "'%s%s'" "$q_out" "$q_rest"
+}
+
 # Started from the menu or a key, with no terminal: the same, again, in
-# Omarchy's floating terminal, as omarchy-default-agent does.
+# Omarchy's floating terminal, as omarchy-default-agent does. That terminal
+# runs its arguments as one command line (bash -c), so each word is quoted.
 in_terminal() {
   [ -t 0 ] && [ -t 1 ] && return 0
   [ -n "${OMARCHY_INSTALL_OATS_TERMINAL:-}" ] && return 0
   if floating=$(command -v omarchy-launch-floating-terminal-with-presentation 2>/dev/null); then
-    case $self in *"'"*) printf '%s: %s\n' "$NAME" "its path holds a single quote: $self" >&2; exit 1 ;; esac
-    exec "$floating" "OMARCHY_INSTALL_OATS_TERMINAL=1 '$self' --now${harness:+ --harness $harness}"
+    line="OMARCHY_INSTALL_OATS_TERMINAL=1 $(sh_quote "$self") --now"
+    [ -z "$harness" ] || line="$line --harness $(sh_quote "$harness")"
+    exec "$floating" "$line"
   fi
   printf '%s: %s\n' "$NAME" "--now needs a terminal: the onboarding agent runs in it" >&2
   exit 2

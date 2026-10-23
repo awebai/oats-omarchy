@@ -16,6 +16,7 @@ bin/setup.mjs            setup's engine, which the launcher and the post-update 
 bin/waiting.mjs          the read of the panel and the popup (--json), and a selector of the agents waiting on you
 bin/omarchy-launch-oats  the agent launcher: a POSIX sh launcher, like setup, that runs bin/launch.mjs
 bin/launch.mjs           the launcher's engine: the steward's window, and the flow in it
+bin/steward.mjs          setup's steward lookup (lookUpSteward), in a node of its own
 bin/omarchy-install-oats the installer (POSIX sh, Omarchy's --check|--now contract): OATS on this machine,
                          then the onboarding agent
 bin/install.mjs          the installer's node half: the steward line and the found-list handoff
@@ -441,6 +442,13 @@ same node lookup as `setup`. Without a node it says so on stderr and with
   line says how to spawn one. A deployment that cannot be read is named
   (`unread`, printed in the window, or in the reason), and never hides a
   steward found in another.
+  - The launcher passes `recordedFirst`: with the list, the deployment
+    setup's state records (`--dir`) is read first, and when its status lists
+    exactly one steward that one is used, with no list read and no other
+    status read. Anything else falls back to the full scan, which reuses
+    that read. The fast path can miss a second steward in another
+    deployment; setup's agent-key gate (one steward per machine) and the
+    README make that acceptable. Setup's own lookup always scans.
 - **The prompt** (`--prompt`) travels in a 0600 file in the handoff,
   passed as `--prompt-file`. It never goes in argv, which uwsm writes to the journal.
   The window reads the file and deletes it first. `deliverPrompt` then:
@@ -448,8 +456,10 @@ same node lookup as `setup`. Without a node it says so on stderr and with
     `waiting-on-you`, and sends nothing otherwise;
   - polls `session inspect --home H --json` until `running`, at most once
     a second and at most 20 s in all. Each read is bounded by what is left
-    of the 20 s, and an answer after it is not taken. That last read is the
-    fresh `waitingOnYou`;
+    of the 20 s, and an answer after it is not taken. A failed read (an
+    error envelope, a non-zero exit, a read that timed out) is tried again
+    after the poll interval until the 20 s are up, which then name the last
+    failure. That last read is the fresh `waitingOnYou`;
   - sends nothing to a steward waiting on the person, because a pasted
     Enter could answer its prompt;
   - otherwise pipes the text to `session input --home H --json` on stdin

@@ -830,6 +830,15 @@ test("the steward lookup stops at its budget: its reason, and the hanging kernel
   try { assert.deepEqual(alive(), [], "the kernel read and its child are gone"); } finally { for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } } }
 });
 
+// The lookup is bin/steward.mjs, a file of its own (linted, and run above);
+// setup is its only caller, and without its request it says so.
+test("bin/steward.mjs without setup's request refuses, exit 2", () => {
+  const r = spawnSync(process.execPath, [join(repo, "bin", "steward.mjs")], { env: { PATH: process.env.PATH }, encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.equal(r.stderr, "steward.mjs: setup runs it, with its request in OATS_OMARCHY_STEWARD\n");
+  assert.equal(r.stdout, "");
+});
+
 // ---------------------------------------------------------------------------
 // --only agent-key: what picking OATS for the agent key changes, and nothing
 // else. The Default Agent row runs it; a person types it. SUPER + O, the
