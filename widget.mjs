@@ -256,9 +256,21 @@ export function attachArgv(plugin, home) {
   return ["omarchy-launch-floating-terminal-with-presentation", commandLine(plugin.attach.concat([home]))]
 }
 
-// Whether the viewer the panel opens takes the detach key (Alt+O).
+// Whether the viewer the panel opens takes a detach key.
 export function detachKey(plugin) {
   return !!plugin && plugin.attach.indexOf("--detach-key") >= 0
+}
+
+// The line under the rows that names the detach key, from the key
+// plugin.json records, so it stays right until setup is applied again:
+// "C-\" (what setup records) is "Ctrl+\", and "M-o" (what setup recorded
+// up to 0.6.0) "Alt+O". "" without a key.
+export function detachHint(plugin) {
+  if (!detachKey(plugin)) return ""
+  var key = String(plugin.attach[plugin.attach.indexOf("--detach-key") + 1] || "")
+  var m = /^([CM])-(.)$/.exec(key)
+  var name = m ? (m[1] === "C" ? "Ctrl+" : "Alt+") + m[2].toUpperCase() : key
+  return name + " leaves the viewer"
 }
 
 // setup --apply in the floating terminal: it shows the plan and asks. For

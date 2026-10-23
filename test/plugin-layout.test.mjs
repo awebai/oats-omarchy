@@ -38,9 +38,11 @@ test("no OATS capability is left: no manifests, no skill, no kernel environment,
 });
 
 test("the layout: setup, bin/, lib/ and assets/ at the root, no symlink anywhere (Omarchy's validator refuses them)", () => {
-  for (const path of ["setup", "bin/setup.mjs", "bin/waiting.mjs", "lib/setup.mjs", "assets/oats-256.png"]) assert.ok(existsSync(join(repo, path)), path);
-  assert.match(readFileSync(join(repo, "setup"), "utf8"), /^#!\/bin\/sh\n/);
-  assert.equal(lstatSync(join(repo, "setup")).mode & 0o111, 0o111, "setup is executable");
+  for (const path of ["setup", "bin/setup.mjs", "bin/waiting.mjs", "bin/omarchy-launch-oats", "bin/launch.mjs", "lib/setup.mjs", "assets/oats-256.png"]) assert.ok(existsSync(join(repo, path)), path);
+  for (const launcher of ["setup", "bin/omarchy-launch-oats"]) {
+    assert.match(readFileSync(join(repo, launcher), "utf8"), /^#!\/bin\/sh\n/);
+    assert.equal(lstatSync(join(repo, launcher)).mode & 0o111, 0o111, `${launcher} is executable`);
+  }
   assert.deepEqual(files(repo).filter((f) => lstatSync(f).isSymbolicLink()).map((f) => relative(repo, f)), []);
 });
 

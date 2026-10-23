@@ -124,7 +124,7 @@ for (const screen of [400, 900]) test(`a list taller than the panel scrolls; the
   const w = world(t, { screen });
   const rows = Array.from({ length: 50 }, (_, i) => ({ instance: `agent-${i}`, home: `/h/${i}` }));
   const read = w.exe("rows.sh", `#!/bin/sh\ncat <<'E'\n${JSON.stringify({ ok: true, count: 50, rows })}\nE\n`);
-  w.plugin({ tui: ["t"], desktop: ["d"], waiting: ["/bin/sh", read], attach: ["s", "--detach-key", "M-o", "--home"] });
+  w.plugin({ tui: ["t"], desktop: ["d"], waiting: ["/bin/sh", read], attach: ["s", "--detach-key", "C-\\", "--home"] });
   const [report] = w.play(scene(`
   Timer { interval: 500; running: true; onTriggered: scene.w.open() }
   Timer { interval: 3000; running: true; onTriggered: {
@@ -145,12 +145,12 @@ for (const screen of [400, 900]) test(`a list taller than the panel scrolls; the
   const { reading, card, flick, texts } = report.value;
   assert.equal(reading, false, "the read answered");
   assert.ok(flick && flick.interactive && flick.height < flick.contentHeight && flick.height > 0, JSON.stringify(flick));
-  for (const label of ["Alt+O leaves the viewer", "Open OATS TUI", "Open OATS Desktop", "Set up keys and launchers", "agent-0"]) {
+  for (const label of ["Ctrl+\\ leaves the viewer", "Open OATS TUI", "Open OATS Desktop", "Set up keys and launchers", "agent-0"]) {
     assert.equal(texts[label], true, `${label} is inside the ${card}px card`);
   }
   assert.equal(texts["agent-49"], false, "the last rows are scrolled out of view, not pushed out of the card");
   // Beyond the instance names: the button labels and the hint.
-  const allowed = ["OATS", "Alt+O leaves the viewer", "Open OATS TUI", "Open OATS Desktop", "Set up keys and launchers"];
+  const allowed = ["OATS", "Ctrl+\\ leaves the viewer", "Open OATS TUI", "Open OATS Desktop", "Set up keys and launchers"];
   for (const word of Object.keys(texts).filter((x) => !/^agent-\d+$/.test(x))) assert.ok(allowed.includes(word), word);
 });
 
@@ -384,6 +384,7 @@ function reader(w, result, delay = 0) {
 test("the popup reads only when it opens and says so; it shows the panel's cards; Up/Down and Ctrl+J/K move; Enter opens the session as argv", { skip }, (t) => {
   const w = world(t);
   const r = reader(w, LISTED, 1);
+  // A plugin.json setup 0.6.0 wrote, with Alt+O: the hint names the key it records.
   w.plugin({ deployment: null, attach: ["s", "--detach-key", "M-o", "--home"], waiting: ["/bin/sh", r.read, "--list"] });
   const records = w.play(popupScene(`
   Process { id: reads; command: ["/bin/sh", "-c", ${JSON.stringify(r.count)}]; stdout: StdioCollector { waitForEnd: true; onStreamFinished: scene.probe("reads", Number(text.trim())) } }

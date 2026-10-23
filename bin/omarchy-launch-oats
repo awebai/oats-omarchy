@@ -1,0 +1,29 @@
+#!/bin/sh
+# omarchy-launch-oats: this machine's OATS steward in an agent window, as
+# omarchy-agent opens the default harness (see bin/launch.mjs):
+#   omarchy-launch-oats [--prompt <text>] [--inline]
+# It runs bin/launch.mjs with node from PATH, else with the node the last
+# setup --apply recorded, as ./setup does. Without either it says so on
+# stderr and in a notification: a keypress never fails unexplained.
+set -u
+unset CDPATH
+dir=$(cd -- "$(dirname -- "$0")/.." && pwd -P) || exit 1
+node=$(command -v node 2>/dev/null) || node=
+if [ -z "$node" ]; then
+  case ${XDG_STATE_HOME:-} in
+    /*) state=$XDG_STATE_HOME ;;
+    *) state=${HOME:-}/.local/state ;;
+  esac
+  if [ -r "$state/oats-omarchy/node" ]; then IFS= read -r node < "$state/oats-omarchy/node" || node=; fi
+fi
+if [ -z "$node" ] || [ ! -x "$node" ]; then
+  message="Node.js is needed: install it so that node is on your PATH, or run the plugin's setup --apply"
+  echo "omarchy-launch-oats: $message" >&2
+  if command -v omarchy-notification-send >/dev/null 2>&1; then
+    omarchy-notification-send "Could not open the OATS steward" "$message" >/dev/null 2>&1 || :
+  elif command -v notify-send >/dev/null 2>&1; then
+    notify-send "Could not open the OATS steward" "$message" >/dev/null 2>&1 || :
+  fi
+  exit 1
+fi
+exec "$node" "$dir/bin/launch.mjs" "$@"

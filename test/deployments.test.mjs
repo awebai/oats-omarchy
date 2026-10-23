@@ -164,7 +164,7 @@ test("the menu with --list: labels by workspace, the chosen session in its deplo
   assert.deepEqual(calls(s, "select.log"), [["Waiting on you (2)", "alpha (github.com/acme/one)", "alpha (github.com/acme/two)"]]);
   const end = Date.now() + 10_000;
   while (!existsSync(join(s.root, "floating.log")) && Date.now() < end) await new Promise((r) => setTimeout(r, 25));
-  assert.match(readFileSync(join(s.root, "floating.log"), "utf8"), /session' 'attach' '--detach-key' 'M-o' '--home' '\/h\/alpha-b'/);
+  assert.match(readFileSync(join(s.root, "floating.log"), "utf8"), /session' 'attach' '--detach-key' 'C-\\' '--home' '\/h\/alpha-b'/);
 
   writeFileSync(join(b, "status.mode"), "envelope");
   writeFileSync(join(a, "status.json"), JSON.stringify({ root: a, agents: [], workspace: {} }));

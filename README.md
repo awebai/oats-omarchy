@@ -239,10 +239,13 @@ until you pass another `--ui`, also when it was passed with one set up.
   deployment that could not be read is shown as such, and the others are
   still listed. The TUI and the Desktop open on their own list of
   deployments.
-- **Alt+O.** While you're attached to an agent from the panel or the popup,
-  Alt+O leaves the viewer, so it never reaches a harness that binds Alt+O
-  itself. It needs an OATS CLI with a detach key (`oats version --json`
-  lists `session-attach-detach-key`).
+- **`Ctrl+\`.** While you're attached to an agent from the panel, the popup
+  or `omarchy-launch-oats`, `Ctrl+\` leaves the viewer, and the agent keeps
+  running. It is the kernel's suggested detach key, and no harness binds
+  it. It needs an OATS CLI with a detach key (`oats version --json` lists
+  `session-attach-detach-key`). Up to v0.6.0 the key was Alt+O: until you
+  run `setup --apply` again, the panel and the popup keep using Alt+O, and
+  their hint says so.
 - **Finding the deployment.** With the list, setup is for every listed
   deployment and needs none: `--dir` only checks that a deployment is
   listed, and an empty list makes the plan say how to fill it (run any
@@ -274,6 +277,64 @@ them behind. The hook then says so, and adding the plugin again and running
 
 **From a clone.** `setup` runs the same from any clone. The files it writes
 then point at that clone, and the plan says so.
+
+## The agent launcher
+
+`omarchy-launch-oats` opens this machine's OATS steward the way Omarchy's
+`omarchy-agent` opens the default coding agent. It is one window, through
+`omarchy-launch-tui --app-id=org.omarchy.agent`, so it shares the agent
+windows' class for Omarchy's window rules and themes. In that window it
+finds the steward, starts it when it is stopped, and attaches to its
+session. `Ctrl+\` leaves the viewer, and the steward keeps running. The
+command is `bin/omarchy-launch-oats` in the plugin's directory.
+
+It needs two things:
+
+- **Setup applied** (`setup --apply`). The launcher runs the OATS CLI
+  setup recorded, never `oats` from your PATH.
+- **One steward**, the soul `oats.machine/steward` (awebai/oats-machine), in
+  the machine's deployment. Spawn it there with
+  `oats spawn oats.machine/steward --name steward`. The steward is looked up
+  on every launch: in every deployment of this computer's list (with an
+  older OATS CLI, in the deployment setup is applied for). Nothing is
+  recorded, so a respawned steward is found again.
+
+Flags:
+
+- **`--prompt <text>`** is your own turn in the steward's session, as if you
+  typed it. It is sent once the steward runs, and never twice. A steward
+  that is waiting on you (a permission prompt or a question) gets nothing,
+  since the Enter could answer it. The window says so, and you type it
+  yourself. A steward in the middle of a turn gets it as typed input, and
+  its harness handles that as it handles typing during a turn. The OATS
+  CLI cannot tell that state apart. The text reaches the window in a file
+  only you can read, deleted once read, never on a command line.
+- **`--inline`** runs Omarchy's own default agent in this terminal instead
+  (`omarchy-agent --inline`, with `--prompt` passed on), without OATS.
+
+What each failure says:
+
+- **Before the window opens,** on stderr and in a notification, then exit
+  status 1:
+  - `Node.js is needed: …`, when there is no `node` on PATH and none
+    recorded by setup;
+  - `OATS is not set up here (setup's shim … is missing): run setup --apply`;
+  - `omarchy-launch-tui is not on PATH: it opens the agent window`.
+- **In the window,** one line naming the step, then Enter closes the window:
+  - `finding the steward: no steward on this machine: spawn one with …`.
+    The line also names any deployment whose `oats status` failed. A steward
+    in another deployment is still found.
+  - `finding the steward: several stewards on this machine, and none is
+    chosen: …`, which lists each one as `instance @ deployment`;
+  - `starting the steward (<home>): <the OATS CLI's message>`;
+  - `attaching: …`.
+- **The prompt,** reported, and then the window attaches after Enter:
+  - `the steward is waiting on you (<its message>): your prompt was not sent; attaching`;
+  - `sending your prompt: <the OATS CLI's message>: your prompt was not delivered; type it yourself`;
+  - `sending your prompt: the steward was not running within 20 s: …`.
+  - On success, `your prompt was sent to the steward`. When the OATS CLI
+    could not see the prompt arrive, the line adds that it is not sent
+    again.
 
 The plan and its progress are tracked in
 [awebai/oats#1311](https://github.com/awebai/oats/issues/1311).

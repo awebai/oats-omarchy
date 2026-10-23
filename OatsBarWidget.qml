@@ -344,7 +344,7 @@ Panel {
           Text {
             visible: root.rows.length > 0 && Widget.detachKey(root.plugin)
             width: parent.width
-            text: "Alt+O leaves the viewer"
+            text: Widget.detachHint(root.plugin)
             textFormat: Text.PlainText
             color: root.dim
             font.family: root.fontFamily

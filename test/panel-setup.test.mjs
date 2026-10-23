@@ -30,7 +30,7 @@ test("--apply writes plugin.json: the key's and the menu's commands as argv; --r
   assert.deepEqual(plugin.tui, files.tuiArgv({ shimPath: p.shim, deployment: s.deployment }));
   assert.equal(plugin.desktop, null, "no Desktop found");
   assert.equal(plugin.ui, "tui", "the only UI set up is the default");
-  assert.deepEqual(plugin.attach, [p.shim, "session", "attach", "--detach-key", "M-o", "--home"]);
+  assert.deepEqual(plugin.attach, [p.shim, "session", "attach", "--detach-key", "C-\\", "--home"]);
   const node = plugin.waiting[0];
   assert.deepEqual(plugin.waiting, [node, `${PLUGIN_DIR}/bin/waiting.mjs`, "--dir", s.deployment]);
   assert.deepEqual(plugin.setup, [node, `${PLUGIN_DIR}/bin/setup.mjs`, "--dir", s.deployment]);
@@ -57,7 +57,7 @@ test("a re-apply picks up a CLI that gained or lost the detach key; --check repo
   assert.deepEqual(readPlugin(s).attach, [shim, "session", "attach", "--home"]);
   rmSync(join(s.root, "version.json"));
   assert.equal(s.run(["setup", "--apply"]).status, 0);
-  assert.deepEqual(readPlugin(s).attach, [shim, "session", "attach", "--detach-key", "M-o", "--home"]);
+  assert.deepEqual(readPlugin(s).attach, [shim, "session", "attach", "--detach-key", "C-\\", "--home"]);
 
   rmSync(pluginPath(s));
   assert.ok(s.run(["setup", "--check", "--json"]).json.result.drift.includes(`the bar widget's ${pluginPath(s)} is missing: run setup --apply again`));
