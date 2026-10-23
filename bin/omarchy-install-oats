@@ -99,7 +99,7 @@ first_version() { grep -oE '[0-9]+(\.[0-9]+)+[0-9A-Za-z.+-]*' | head -n 1; }
 # T_MISE_AT is the version mise installs and upgrades to: node's LTS line,
 # else the latest.
 spec() {
-  T_NPM= T_MISE= T_PAC= T_MIN= T_MISE_AT=latest
+  T_NPM='' T_MISE='' T_PAC='' T_MIN='' T_MISE_AT=latest
   case $1 in
     node) T_MISE=node T_PAC=nodejs T_MIN=$NODE_MIN T_MISE_AT=lts ;;
     tmux) T_PAC=tmux ;;
@@ -178,7 +178,7 @@ user_install() {
 # and T_NOTE (why, for old and unusable).
 detect() {
   spec "$1"
-  T_STATE=missing T_VERSION= T_ORIGIN= T_PATH= T_NOTE=
+  T_STATE=missing T_VERSION='' T_ORIGIN='' T_PATH='' T_NOTE=''
   T_CMD=$(command -v "$1" 2>/dev/null) || T_CMD=
   case $T_CMD in /*) ;; *) T_CMD= ;; esac
   [ -n "$T_CMD" ] || return 0
@@ -304,7 +304,14 @@ fail() {
 # state, tab-separated (bin/install.mjs parseTools).
 record() {
   rec=$(printf '%s\t%s\t%s\t%s\t%s' "$1" "${T_VERSION:--}" "${T_ORIGIN:--}" "${T_PATH:--}" "$2")
-  eval "REC_$3=\$rec"
+  case $3 in
+    node) REC_node=$rec ;;
+    tmux) REC_tmux=$rec ;;
+    aw) REC_aw=$rec ;;
+    oats) REC_oats=$rec ;;
+    harness) REC_harness=$rec ;;
+    plugin) REC_plugin=$rec ;;
+  esac
 }
 
 need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is not on PATH: $2"; }
@@ -381,7 +388,7 @@ channel() {
   else
     claude_here "$h" plugin marketplace add "$MARKETPLACE_SOURCE" || fail "claude plugin marketplace add $MARKETPLACE_SOURCE exited with status $?"
   fi
-  T_VERSION= T_ORIGIN=claude-plugin T_PATH=
+  T_VERSION='' T_ORIGIN=claude-plugin T_PATH=''
   case $(channel_state "$h" "$n") in
     enabled)
       say "found $CHANNEL: using it"
@@ -414,7 +421,7 @@ now() {
     refuse "--now needs --harness claude|codex|pi without a terminal to ask in"
   fi
   in_terminal
-  REC_node= REC_tmux= REC_aw= REC_oats= REC_harness= REC_plugin=
+  REC_node='' REC_tmux='' REC_aw='' REC_oats='' REC_harness='' REC_plugin=''
 
   step 1 harness "the harness your agents run on"
   choose_harness
