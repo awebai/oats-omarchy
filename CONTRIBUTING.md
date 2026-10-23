@@ -111,6 +111,15 @@ compares them with what is there, and only then writes:
   deletes it only when it is empty. The launcher goes only with the shim: it
   is ready only when the shim part is, so the agent key's lines are written
   only when something calls the shim (another part, or the submap's lines).
+- The installer part writes `~/.local/bin/omarchy-install-oats`
+  (`discover.paths` `installer`; `files.installer`, mode 0755) the same way,
+  through the same check (`wrapperCheck`, which `launcherCheck` calls for the
+  launcher): never over a file or link setup did not write, created only
+  where nothing is. It runs the plugin's `bin/omarchy-install-oats`, which
+  is sh, so it calls neither node nor the shim, and goes with any CLI setup
+  accepts. `--check` reports it as new in a state applied before it existed
+  (one with the shim and no installer), unless something setup did not
+  write holds the path.
 - The agent key's owner, `oats` or `omarchy` (`chooseAgentKey`), is
   `--agent-key`, else the one the state records as `agentKey`, else none
   (null). It moves only on an explicit pick: with none, `--apply` in a
@@ -484,7 +493,8 @@ not exist yet) and the handoff.
   is never enabled or installed over.
 - **The handoff.** `--now`'s last step writes the found-list
   (`docs/found-list.md`; a deployment whose status cannot be read stops
-  it, so an `ok` deployment's `steward: false` is never a guess) and prints the prompt: `lib/onboarding-prompt.txt`
+  it, so a `steward: false` is never a guess; a deployment that is not `ok` has
+  `steward: null`) and prints the prompt: `lib/onboarding-prompt.txt`
   with its placeholders filled (`renderPrompt`). The prompt states facts
   only (the skill, the harness, the plugin, the found-list); the bootstrap's
   steps are getting-started's, and the test holds a list of command names it

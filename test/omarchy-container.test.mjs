@@ -117,7 +117,7 @@ test("Lua layout, no Desktop: plan, apply, the real post-update hook, check, rem
   const before = snapshot(s.home);
   const p = plan(s);
   assert.equal(p.found.launchPath.source, "minimal", "no user bus in the container");
-  assert.deepEqual(p.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "skipped"], ["hook", "will apply"], ["launcher", "will apply"], ["menu", "will apply"], ["keys", "skipped"], ["agent-key", "skipped"]]);
+  assert.deepEqual(p.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "skipped"], ["hook", "will apply"], ["launcher", "will apply"], ["installer", "will apply"], ["menu", "will apply"], ["keys", "skipped"], ["agent-key", "skipped"]]);
   assert.equal(p.agentKey.choice, null, "no terminal and no --agent-key: the agent key stays with Omarchy");
   assert.equal(p.found.menu.defaults, join(OMARCHY, "default", "omarchy", "omarchy-menu.jsonc"));
   assert.equal(p.keys.status, "unchecked", "--print without Hyprland");
@@ -249,6 +249,8 @@ test("the agent key: --agent-key oats writes both sections, --agent-key omarchy 
   // The launcher the agent key runs, by the node and plugin setup recorded.
   assert.equal(readFileSync(p.wrapper, "utf8"), files.launcher({ node: stateOf(s).node, pluginDir: stateOf(s).pluginDir }));
   assert.equal(statSync(p.wrapper).mode & 0o777, 0o755);
+  assert.equal(readFileSync(p.installer, "utf8"), files.installer({ pluginDir: stateOf(s).pluginDir }));
+  assert.equal(statSync(p.installer).mode & 0o777, 0o755);
   let v = verifyConfig(s);
   assert.equal(v.status, 0, v.stdout + v.stderr);
   assert.equal(checked(), 0, "the Default Agent row shows OATS as checked");

@@ -123,7 +123,9 @@ for (const [name, what, arrange] of foreign) {
     const w = wrapperOf(s);
     mkdirSync(binDir(s), { recursive: true });
     arrange(s, w);
-    const before = snapshot(binDir(s));
+    // The installer setup writes beside it is the installer part's.
+    const mine = () => snapshot(binDir(s), { exclude: [files.INSTALLER_NAME] });
+    const before = mine();
     const reason = `${w} is ${what} setup did not write, and setup never replaces it: move it away, then run setup again`;
 
     const plan = s.run(["setup", "--plan", "--agent-key", "oats", "--json"]);
@@ -138,14 +140,14 @@ for (const [name, what, arrange] of foreign) {
     assert.equal(part(r, "launcher").status, "skipped");
     assert.equal(part(r, "agent-key").status, "skipped");
     assert.ok(!r.json.result.written.includes(w));
-    assert.deepEqual(snapshot(binDir(s)), before, "bytes, mode and link target untouched");
+    assert.deepEqual(mine(), before, "bytes, mode and link target untouched");
     const text = readFileSync(file, "utf8");
     assert.ok(text.includes(bindings.START) && !text.includes(bindings.AGENT_START), "the block holds the SUPER + O section alone");
     assert.ok(!stateOf(s).files.some((f) => f.role === "launcher"));
     assert.ok(!stateOf(s).dirs.includes(binDir(s)));
 
     assert.equal(s.run(["setup", "--remove"]).status, 0);
-    assert.deepEqual(snapshot(binDir(s)), before, "--remove leaves it too");
+    assert.deepEqual(snapshot(binDir(s)), before, "--remove leaves it too, and takes the installer out");
   });
 }
 

@@ -187,7 +187,11 @@ test("--now with everything there: six steps, each found and used, then the onbo
   const list = found(w);
   assert.equal(prompt, renderPrompt({ skill: list.gettingStartedSkill, hostname: hostname(), harness: "claude", pluginDir: repo, pluginVersion: list.plugin.version, foundList: join(w.home, ".local", "state", "oats-omarchy", "found.json") }));
   for (const name of BOOTSTRAP) assert.ok(!prompt.includes(name), name);
-  assert.deepEqual(list.deployments, [{ dir: a, name: "merak", steward: true }, { dir: join(w.root, "Work", "acme"), name: "acme", steward: false }]);
+  assert.deepEqual(list.deployments, [
+    { dir: a, name: "merak", state: "ok", steward: true },
+    { dir: join(w.root, "Work", "acme"), name: "acme", state: "ok", steward: false },
+    { dir: join(w.root, "Gone", "old"), name: "old", state: "missing", steward: null },
+  ]);
 });
 
 test("--now installs what is missing with mise, says so, and the found-list says installed", (t) => {
@@ -388,7 +392,8 @@ test("the found-list: the shape docs/found-list.md fixes, written 0600, with a d
   assert.deepEqual(list.tools.map((x) => x.name), ["node", "tmux", "aw", "oats", "claude", "aweb-channel@awebai-marketplace"]);
   assert.equal(list.tools[3].path, join(w.npm, "lib", "node_modules", "@awebai", "oats", "bin", "oats.mjs"));
   assert.deepEqual(list.awIdentity, { dir: join(w.home, "Work", ".aw"), alias: "root", address: null, role: "deployment-root" });
-  for (const d of list.deployments) assert.deepEqual(Object.keys(d), ["dir", "name", "steward"]);
+  for (const d of list.deployments) assert.deepEqual(Object.keys(d), ["dir", "name", "state", "steward"]);
+  for (const d of list.deployments) assert.equal(d.steward === null, d.state !== "ok", "steward is read for ok deployments only");
 });
 
 // ---------------------------------------------------------------------------
@@ -406,7 +411,8 @@ test("the onboarding prompt names facts only: none of the bootstrap's commands, 
   // the agent key is the person's to move.
   assert.ok(prompt.includes("Never run the plugin's setup with --apply or --remove"));
   assert.ok(prompt.includes("/p/setup --plan and /p/setup --check"));
-  assert.ok(prompt.includes("Setup › Default Agent › OATS") && prompt.includes("/p/setup --apply --only agent-key"));
+  // The typed command first: the menu row exists only once setup has run.
+  assert.ok(prompt.includes("tell them to type /p/setup --apply --only agent-key in a terminal, or, once setup has added it, to choose Setup › Default Agent › OATS"));
   assert.doesNotMatch(prompt, /consent/);
 });
 

@@ -35,7 +35,8 @@ One JSON object, with no secrets:
   ],
   "awIdentity": { "dir": "/home/u/Work/.aw", "alias": "merak", "address": "juan.aweb.ai/merak", "role": "work" },
   "deployments": [
-    { "dir": "/home/u/Agents/merak", "name": "merak", "steward": true }
+    { "dir": "/home/u/Agents/merak", "name": "merak", "state": "ok", "steward": true },
+    { "dir": "/home/u/Work/old", "name": "old", "state": "missing", "steward": null }
   ]
 }
 ```
@@ -62,14 +63,15 @@ One JSON object, with no secrets:
     a directory above it holds `oats-local.yaml`, it is `deployment-root`
     instead, and getting-started must never use it as an agent's identity.
     No other `.aw` is listed.
-- **`deployments[]`** is `oats deployments --json` as listed. `steward` is
-  true when the deployment's `oats status --json` lists an instance of the
-  steward's agent (`lib/steward.mjs` `isStewardAgent`: the agent row whose
-  `key` is `oats.machine/steward`, or, on a row without a key, the agent
-  named `oats-machine--steward`); false for a deployment that is not `ok`.
-  When an `ok` deployment's status cannot be read, no found-list is written
-  and the installer stops, naming it: for an `ok` deployment, `steward:
-  false` always means its status was read.
+- **`deployments[]`** is `oats deployments --json` as listed, each with its
+  `state` as the kernel's list gives it. For an `ok` deployment, `steward` is
+  true when its `oats status --json` lists an instance of the steward's agent
+  (`lib/steward.mjs` `isStewardAgent`: the agent row whose `key` is
+  `oats.machine/steward`, or, on a row without a key, the agent named
+  `oats-machine--steward`), and false when it lists none. For any other
+  state the status is not read, and `steward` is null. When an `ok`
+  deployment's status cannot be read, no found-list is written and the
+  installer stops, naming it: a `steward: false` was always read.
 
 ## Versioning
 

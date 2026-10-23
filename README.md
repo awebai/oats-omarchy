@@ -22,7 +22,8 @@ SUPER + SHIFT + CTRL + A, goes into the same block and opens the machine's
 steward through `omarchy-launch-oats`, a launcher setup writes to
 `~/.local/bin`. Picking it with `setup --apply --only agent-key`, or the
 OATS row in Omarchy's Default Agent menu, changes nothing else (see "The
-agent key"). `--remove` restores exactly what was
+agent key"). Setup also puts the installer there, `omarchy-install-oats`
+(see "Install OATS on this machine"). `--remove` restores exactly what was
 there before.
 
 ## Install OATS on this machine
@@ -64,7 +65,8 @@ steps, one line each:
    applies the plugin's setup, which stays yours to run. Claude asks you
    once to confirm loading the aweb channel.
 
-Run it again at any time: what is done is found and skipped.
+Run it again at any time: what is done is found and skipped. Once setup has
+run, it is on your PATH as `omarchy-install-oats`.
 `omarchy-install-oats --check` only looks: one line each for node, tmux, aw,
 the OATS CLI and the steward, and it exits 0 only when OATS is ready here.
 
