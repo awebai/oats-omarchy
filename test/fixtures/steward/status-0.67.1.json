@@ -4,7 +4,7 @@
     {
       "schemaVersion": 2,
       "name": "integrations-expert",
-      "description": "Cross-package provider integration — capability and hook contracts as judgement, live-rehearsal discipline, compensation reporting; builds OATS capability packages with users.",
+      "description": "Cross-package provider integration \u2014 capability and hook contracts as judgement, live-rehearsal discipline, compensation reporting; builds OATS capability packages with users.",
       "work": "directory",
       "capabilities": {
         "oats.authoring": {
@@ -102,7 +102,7 @@
       },
       "kind": "persistent",
       "dir": "/home/person/Machine/agents/oats-machine--steward",
-      "key": null,
+      "key": "oats.machine/steward",
       "soulSource": {
         "repoKey": "github.com/awebai/oats-machine",
         "commit": "1111111111111111111111111111111111111111",

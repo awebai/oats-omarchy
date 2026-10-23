@@ -55,6 +55,7 @@ const statePath = (s) => join(discoverPaths(s.env).stateDir, "state.json");
 const pluginPath = (s) => join(discoverPaths(s.env).stateDir, "plugin.json");
 const part = (r, name) => r.json.result.parts.find((x) => x.part === name);
 const wrapperPath = (s) => discoverPaths(s.env).wrapper;
+const newInstaller = (s) => `the installer ${discoverPaths(s.env).installer} is new in this version of setup and not applied yet: run setup --apply again`;
 const newParts = (s) => `the launcher ${wrapperPath(s)} and the agent key are new in this version of setup and not applied yet (the agent key stays with Omarchy until you pick OATS): run setup --apply again`;
 // The agent key's section of the key block, written out rather than taken
 // from lib/keys.mjs, so a change to what setup writes shows here.
@@ -70,8 +71,8 @@ const hyprCalls = (s) => { try { return readFileSync(join(s.root, "hyprland.log"
 // plugin.json put back as that version wrote them, and the state recording
 // those, as that version's did (no default UI chosen; no `ui` before
 // v0.5.0, and never an `agentKey`). No version before this one wrote the
-// launcher: it goes, with its record, and so does ~/.local/bin when this
-// --apply created it.
+// launcher or the installer: they go, with their records, and so does
+// ~/.local/bin when this --apply created it.
 function asOld(s, at, version) {
   const old = VERSIONS[version];
   assert.equal(s.run(["setup", "--apply"]).status, 0);
@@ -96,14 +97,17 @@ function asOld(s, at, version) {
   entry.digest = digest(oldEntry);
   const launcher = state.files.find((f) => f.role === "launcher");
   assert.equal(launcher.path, p.wrapper);
+  const installer = state.files.find((f) => f.role === "installer");
+  assert.equal(installer.path, p.installer);
   unlinkSync(launcher.path);
+  unlinkSync(installer.path);
   const bin = dirname(launcher.path);
   if (state.dirs.includes(bin)) rmdirSync(bin);
   const oldState = {
     ...state,
-    files: state.files.filter((f) => f !== launcher),
+    files: state.files.filter((f) => f !== launcher && f !== installer),
     dirs: state.dirs.filter((d) => d !== bin),
-    parts: state.parts.filter((x) => x !== "launcher"),
+    parts: state.parts.filter((x) => x !== "launcher" && x !== "installer"),
     version,
   };
   delete oldState.agentKey;
@@ -130,6 +134,7 @@ for (const version of Object.keys(VERSIONS)) {
       `the oats menu in ${at.menu} is from another version of setup: run setup --apply again`,
       ...(keysChange ? [`the oats key block in ${at.bindings} is from another version of setup: run setup --apply again`] : []),
       ...(entryChange ? [`the TUI's launcher entry ${entry} is from another version of setup: run setup --apply again`] : []),
+      newInstaller(s),
       newParts(s),
     ].sort());
     // The post-update hook prints the same lines (text mode).

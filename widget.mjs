@@ -274,14 +274,25 @@ export function detachHint(plugin) {
 }
 
 // setup --apply in the floating terminal: it shows the plan and asks. For
-// the deployment setup is applied for, else (setup has not run) it asks for
-// the deployment first.
+// the deployment setup is applied for. Before setup has run, the line first
+// asks `omarchy-install-oats --check` whether OATS is ready on this machine:
+// when it is, setup runs and asks for the deployment; when it is not, the
+// installer runs (--now), so a machine without OATS gets it from the icon.
+// The check is part of the line, so it runs once per click and never
+// otherwise.
 export function setupCommand(plugin, setupPath) {
   return inTerminal(setupLine(plugin, setupPath))
 }
 
+// The installer, beside setup in the plugin's directory.
+export function installerPath(setupPath) {
+  return String(setupPath).replace(/\/setup$/, "/bin/omarchy-install-oats")
+}
+
 function setupLine(plugin, setupPath) {
-  return plugin ? commandLine(plugin.setup.concat(["--apply"])) : shellQuote(setupPath) + " --apply"
+  if (plugin) return commandLine(plugin.setup.concat(["--apply"]))
+  var install = shellQuote(installerPath(setupPath))
+  return "if " + install + " --check >/dev/null 2>&1; then " + shellQuote(setupPath) + " --apply; else " + install + " --now; fi"
 }
 
 // The same, as the popup's argv.
@@ -295,7 +306,8 @@ export function quickCommand(plugin, setupPath) {
 }
 
 // What a click on the icon does: { toggle: true } (the panel) or { line }.
-// Before setup has run (no plugin.json) either click runs the whole setup;
+// Before setup has run (no plugin.json) either click runs the whole setup,
+// or the installer when OATS is not ready (setupCommand);
 // after, a left click toggles the panel and a right click opens the default
 // UI.
 export function clickAction(plugin, setupPath, right) {

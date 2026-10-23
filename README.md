@@ -22,8 +22,66 @@ SUPER + SHIFT + CTRL + A, goes into the same block and opens the machine's
 steward through `omarchy-launch-oats`, a launcher setup writes to
 `~/.local/bin`. Picking it with `setup --apply --only agent-key`, or the
 OATS row in Omarchy's Default Agent menu, changes nothing else (see "The
-agent key"). `--remove` restores exactly what was
+agent key"). Setup also puts the installer there, `omarchy-install-oats`
+(see "Install OATS on this machine"). `--remove` restores exactly what was
 there before.
+
+## Install OATS on this machine
+
+On an Omarchy machine without OATS, the plugin installs it. Add the plugin
+(pinned to a release, as "Pinning a release" below shows), then run its
+installer in a terminal:
+
+```bash
+omarchy plugin add https://github.com/awebai/oats-omarchy --enable --yes
+~/.config/omarchy/plugins/ai.aweb.oats/bin/omarchy-install-oats --now
+```
+
+Before setup has run, a click on the OATS icon does the same when OATS is
+not installed yet.
+
+It uses what is already on the machine: a tool on your PATH at or above its
+minimum is used as it is, never replaced, and never shadowed by a second
+copy. It installs only what is missing, and a tool that is too old stops it
+with the command that upgrades it the way it was installed. It runs six
+steps, one line each:
+
+1. **The harness** your agents run on. It asks "Which harness should your
+   agents run on?", offering claude, codex or pi with Omarchy's default agent
+   first; Enter takes that one.
+2. **Node.js (22 or later), the harness and tmux.** Node and the harness are
+   installed with mise, as Omarchy installs agents. tmux is a system package:
+   `omarchy-pkg-add` installs it and asks for your password.
+3. **aw**, the aweb CLI (1.36.33 or later), with mise.
+4. **The OATS CLI** (0.67.1 or later), with mise.
+5. **Claude's aweb channel plugin**, with claude only: its marketplace and
+   the plugin, each when it is absent. A copy you disabled stays disabled:
+   it stops with the command that enables it.
+6. **The onboarding agent.** It writes what it found to
+   `~/.local/state/oats-omarchy/found.json` ([the found-list](docs/found-list.md)),
+   then starts the harness in `~/Work` with a prompt that points it at
+   OATS's getting-started skill and at that list. The agent sets up the
+   rest: the workspace, its identities and this machine's steward. It never
+   applies the plugin's setup, which stays yours to run. Claude asks you
+   once to confirm loading the aweb channel.
+
+Run it again at any time: what is done is found and skipped. Once setup has
+run, it is on your PATH as `omarchy-install-oats`.
+`omarchy-install-oats --check` only looks: one line each for node, tmux, aw,
+the OATS CLI and the steward, and it exits 0 only when OATS is ready here.
+
+**With a coding agent.** You have no terminal to answer in, so pass the
+harness the person chose; ask them which one first, and tell them that
+tmux, when it is missing, asks for their password:
+
+```bash
+~/.config/omarchy/plugins/ai.aweb.oats/bin/omarchy-install-oats --check --harness claude
+~/.config/omarchy/plugins/ai.aweb.oats/bin/omarchy-install-oats --now --harness claude
+```
+
+Without a terminal, `--now` opens Omarchy's floating terminal and runs
+there, because the onboarding agent runs in it; without `--harness` it is
+refused.
 
 ## Installing with a coding agent
 
@@ -321,7 +379,9 @@ Then it asks who the agent key opens (see "The agent key").
 - **Before setup has run**, a click on the icon (its tooltip says "OATS:
   click to set up") runs the whole setup in a floating terminal: it asks for
   the deployment (not with the list), shows the plan and asks before
-  applying it.
+  applying it. When OATS is not installed on the machine yet
+  (`omarchy-install-oats --check` fails, asked once per click), the click
+  runs the installer instead (see "Install OATS on this machine").
 - **Its panel** (a left click, once setup has run) reads the agents waiting
   on you each time it opens, and says so while it reads. An agent is listed
   when the kernel says it is waiting on you; for the others the kernel makes

@@ -16,6 +16,11 @@ bin/setup.mjs            setup's engine, which the launcher and the post-update 
 bin/waiting.mjs          the read of the panel and the popup (--json), and a selector of the agents waiting on you
 bin/omarchy-launch-oats  the agent launcher: a POSIX sh launcher, like setup, that runs bin/launch.mjs
 bin/launch.mjs           the launcher's engine: the steward's window, and the flow in it
+bin/omarchy-install-oats the installer (POSIX sh, Omarchy's --check|--now contract): OATS on this machine,
+                         then the onboarding agent
+bin/install.mjs          the installer's node half: the steward line and the found-list handoff
+lib/onboarding-prompt.txt the onboarding agent's prompt, with {{placeholders}}
+docs/found-list.md       what the installer hands the onboarding agent (schemaVersion 1)
 lib/                     their modules (below)
 assets/                  the icon both launcher entries use
 scripts/lint.mjs         lint
@@ -39,7 +44,8 @@ Rules the checks hold:
   code when a file under `~/.config/omarchy/plugins/` changes, and the
   directory is a git checkout that updates fast-forward.
 - **Runtime code uses Node built-ins only.** The launchers (`setup`,
-  `bin/omarchy-launch-oats`) are POSIX sh.
+  `bin/omarchy-launch-oats`) and the installer (`bin/omarchy-install-oats`)
+  are POSIX sh.
 - **No file names a terminal emulator.** Terminal windows open through
   Omarchy's launchers (`omarchy-launch-tui`, `omarchy-launch-or-focus-tui`,
   `omarchy-launch-floating-terminal-with-presentation`), which run the user's
@@ -105,6 +111,16 @@ compares them with what is there, and only then writes:
   deletes it only when it is empty. The launcher goes only with the shim: it
   is ready only when the shim part is, so the agent key's lines are written
   only when something calls the shim (another part, or the submap's lines).
+- The installer part writes `~/.local/bin/omarchy-install-oats`
+  (`discover.paths` `installer`; `files.installer`, mode 0755) the same way,
+  through the same check (`wrapperCheck`, which `launcherCheck` calls for the
+  launcher): never over a file or link setup did not write, created only
+  where nothing is. It runs the plugin's `bin/omarchy-install-oats`, which
+  is sh, so it calls neither node nor the shim, and goes with any CLI setup
+  accepts. `--check` reports it as new in a full setup state applied
+  before it existed (`fullState`, with the shim and no installer), unless
+  something setup did not write holds the path; `--only agent-key` alone
+  never writes it, and its state does not expect it.
 - The agent key's owner, `oats` or `omarchy` (`chooseAgentKey`), is
   `--agent-key`, else the one the state records as `agentKey`, else none
   (null). It moves only on an explicit pick: with none, `--apply` in a
@@ -415,9 +431,12 @@ same node lookup as `setup`. Without a node it says so on stderr and with
   find the steward. It reads every `ok` deployment of `oats deployments
   --json`, or without `deployments-list` the deployment setup's state
   records. For each one it runs `oats status --json`, with that deployment
-  as the working directory. The steward is an instance of the agent
-  `STEWARD_AGENT`, `oats-machine--steward`, the name the kernel's
-  `packageSoulAgentName` gives `oats.machine/steward`. Exactly one is
+  as the working directory. The steward is an instance of the steward
+  soul's agent (`isStewardAgent`): the agent row whose `key` is
+  `STEWARD_KEY`, `oats.machine/steward` (desktop-cli-api's key on soul and
+  agent rows); a row without a key is matched by its name, `STEWARD_AGENT`,
+  `oats-machine--steward`, the name the kernel's `packageSoulAgentName`
+  gives that soul. Exactly one is
   used. With several, they are listed and none is picked. With none, the
   line says how to spawn one. A deployment that cannot be read is named
   (`unread`, printed in the window, or in the reason), and never hides a
@@ -438,6 +457,68 @@ same node lookup as `setup`. Without a node it says so on stderr and with
 
   The answer is reported as given, and an input is never sent again.
   `--inline` passes the prompt to `omarchy-agent` as one argv element.
+
+### The installer
+
+`bin/omarchy-install-oats` makes an Omarchy machine an OATS machine, with
+the contract of Omarchy's own agent installers: `--check` exits 0 only when
+OATS is ready, `--now` installs, and the `omarchy:` header comments describe
+it. It is POSIX sh, because it runs before node may exist; node does only
+what needs it, through `bin/install.mjs` (`lib/install.mjs`): the steward
+line (`findSteward` through the `oats` it found, since setup's shim does
+not exist yet) and the handoff.
+
+- **Found first.** `detect` resolves each tool on PATH (`readlink -f`; a
+  mise shim through `mise which`), names its origin from the resolved path
+  (`origin_of`: mise's npm installs are under `node_modules` too, so they
+  are told apart first), and asks its version without running anything
+  else. A tool at or above its minimum is used as it is; one below stops
+  the run with `upgrade_of`'s command for its origin (an npm install under
+  another prefix than `npm prefix -g` gets `--prefix`). Nothing is replaced,
+  and nothing is installed in front of the person's own copy. Only a missing
+  tool is installed: with `mise use -g`, and tmux with `omarchy-pkg-add`.
+- **Omarchy's lazy wrappers.** `~/.local/bin/{claude,codex,pi}` may be
+  Omarchy's wrapper, which runs `mise use -g` on first use. `user_install`
+  is omarchy-default-agent's rule for telling it from the person's own
+  install; a wrapper counts only when mise has the agent, and it is never
+  run.
+- **An instance's shim** (`*/.oats/bin/oats`) is not the CLI, on PATH or
+  behind a link: the installer refuses it without running it, as setup
+  does.
+- **Claude's channel plugin** is read from `claude plugin list --json`,
+  run in `~/Work` (in HOME before `~/Work` exists), since `enabled` is the
+  merged settings of the directory claude runs in; then node
+  (`channelState`) picks the copy that applies: a user-scoped one counts, a project or local one
+  only when it is `~/Work`'s, since the list names other projects' copies
+  too. A disabled copy stops the run with the command that enables it; it
+  is never enabled or installed over.
+- **The handoff.** `--now`'s last step writes the found-list
+  (`docs/found-list.md`; a deployment whose status cannot be read stops
+  it, so a `steward: false` is never a guess; a deployment that is not `ok` has
+  `steward: null`) and prints the prompt: `lib/onboarding-prompt.txt`
+  with its placeholders filled (`renderPrompt`). The prompt states facts
+  only (the skill, the harness, the plugin, the found-list); the bootstrap's
+  steps are getting-started's, and the test holds a list of command names it
+  must not contain. `aw whoami` runs in `~/Work` only when `~/Work/.aw`
+  exists, without any `AWEB_*` or `AW_*` variable, so an agent session's own
+  identity never answers for it. The harness then replaces the installer
+  (`exec`) in `~/Work`, the prompt one argv element, with
+  `omarchy-agent`'s unattended flags.
+- **No terminal.** From the menu or a key, `--now` runs itself again in
+  Omarchy's floating terminal, marked with `OMARCHY_INSTALL_OATS_TERMINAL=1`
+  (which the tests set to run inline). Without `--harness` there it is
+  refused first, since nobody can be asked.
+- **The bar icon.** Before setup has run, the icon's set-up line
+  (`widget.mjs` `setupCommand`) asks `--check` first, inside the line, so it
+  runs once per click and never otherwise, and runs the installer instead of
+  setup when it fails.
+
+`test/install.test.mjs` runs the installer on a temporary machine: a HOME,
+XDG directories and a PATH of stand-ins laid out the way each origin is
+(mise installs and its shims, an npm prefix, `~/.local/bin`, nvm, a link
+into `/usr`, an instance's shim), each logging what it was asked and
+modelling refusals. The stand-in `mise use -g` lays out an install only
+when it runs. No real install, mise or harness runs.
 
 ### The bar widget and the waiting popup
 

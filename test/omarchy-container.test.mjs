@@ -30,6 +30,7 @@ import { agentBindLine } from "../lib/keys.mjs";
 import { fixture, repo, sandbox, snapshot, withStewards, writeExecutable } from "./helpers/sandbox.mjs";
 import * as widget from "../widget.mjs";
 import { appRow, loadMenuModel, search } from "./helpers/omarchy-search.mjs";
+import { found as foundList, harnessRun, miseInstalls, stepLines, world as installWorld } from "./helpers/install-world.mjs";
 
 const enabled = process.env.OATS_OMARCHY_CONTAINER === "1";
 const OMARCHY = process.env.OMARCHY_PATH || "/usr/share/omarchy";
@@ -116,7 +117,7 @@ test("Lua layout, no Desktop: plan, apply, the real post-update hook, check, rem
   const before = snapshot(s.home);
   const p = plan(s);
   assert.equal(p.found.launchPath.source, "minimal", "no user bus in the container");
-  assert.deepEqual(p.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "skipped"], ["hook", "will apply"], ["launcher", "will apply"], ["menu", "will apply"], ["keys", "skipped"], ["agent-key", "skipped"]]);
+  assert.deepEqual(p.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "skipped"], ["hook", "will apply"], ["launcher", "will apply"], ["installer", "will apply"], ["menu", "will apply"], ["keys", "skipped"], ["agent-key", "skipped"]]);
   assert.equal(p.agentKey.choice, null, "no terminal and no --agent-key: the agent key stays with Omarchy");
   assert.equal(p.found.menu.defaults, join(OMARCHY, "default", "omarchy", "omarchy-menu.jsonc"));
   assert.equal(p.keys.status, "unchecked", "--print without Hyprland");
@@ -248,6 +249,8 @@ test("the agent key: --agent-key oats writes both sections, --agent-key omarchy 
   // The launcher the agent key runs, by the node and plugin setup recorded.
   assert.equal(readFileSync(p.wrapper, "utf8"), files.launcher({ node: stateOf(s).node, pluginDir: stateOf(s).pluginDir }));
   assert.equal(statSync(p.wrapper).mode & 0o777, 0o755);
+  assert.equal(readFileSync(p.installer, "utf8"), files.installer({ pluginDir: stateOf(s).pluginDir }));
+  assert.equal(statSync(p.installer).mode & 0o777, 0o755);
   let v = verifyConfig(s);
   assert.equal(v.status, 0, v.stdout + v.stderr);
   assert.equal(checked(), 0, "the Default Agent row shows OATS as checked");
@@ -603,4 +606,39 @@ test("the bar panel's row opens the same session through the real floating termi
   const log = join(s.root, "kernel.log");
   waitFor(log, 1);
   assert.deepEqual(JSON.parse(readFileSync(log, "utf8").trim()), ["session", "attach", "--detach-key", "C-\\", "--home", home]);
+});
+
+// The installer with the real Omarchy commands (omarchy-version among them),
+// the container's own sh, coreutils and node (pacman's), and stand-ins for
+// everything that installs: mise, omarchy-pkg-add, aw, the OATS CLI and the
+// harness (test/helpers/install-world.mjs). Nothing is installed.
+test("the installer: --check is not ready without aw and the OATS CLI; --now --harness pi runs its six steps and starts pi in ~/Work with the prompt", { skip }, (t) => {
+  const w = installWorld(t, { system: [join(OMARCHY, "bin"), "/usr/bin", "/bin"] });
+  // tmux, when the container has none: what omarchy-pkg-add would put on PATH.
+  writeFileSync(join(w.root, "pkg-plan"), `printf '#!/bin/sh\\necho "tmux 3.5a"\\n' > '${join(w.other, "tmux")}'\nchmod 755 '${join(w.other, "tmux")}'\n`);
+  const check = w.run(["--check"]);
+  assert.equal(check.status, 1, check.out);
+  assert.match(check.stdout, /^node: found \S+ \(pacman\)$/m);
+  assert.match(check.stdout, /^aw: missing$/m);
+  assert.match(check.stdout, /^oats: missing$/m);
+  assert.match(check.stdout, /^steward: missing: node and the OATS CLI are needed to look for it$/m);
+
+  miseInstalls(w, "pi", "pi", "0.40.1");
+  miseInstalls(w, "aw", "npm:@awebai/aw", "1.36.47");
+  miseInstalls(w, "oats", "npm:@awebai/oats", "0.67.1");
+  const r = w.run(["--now", "--harness", "pi"]);
+  process.stdout.write(r.out.replace(/^/gm, "# "));
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(stepLines(r.stdout).map((l) => l.match(/^omarchy-install-oats: step \d\/6/)[0]), [1, 2, 3, 4, 5, 6].map((n) => `omarchy-install-oats: step ${n}/6`));
+  assert.match(r.stdout, /^omarchy-install-oats: step 5\/6: skipped: /m);
+  assert.match(r.stdout, /^omarchy-install-oats: installed oats 0\.67\.1 \(mise\)$/m);
+  const h = harnessRun(w);
+  assert.equal(h.cwd, join(w.home, "Work"));
+  assert.equal(h.argv.length, 1, "the prompt, one argv element");
+  const list = foundList(w);
+  assert.ok(h.argv[0].includes(join(w.home, ".local", "state", "oats-omarchy", "found.json")));
+  assert.ok(h.argv[0].includes(list.gettingStartedSkill));
+  const version = spawnSync("omarchy-version", [], { env: w.env(), encoding: "utf8" }).stdout.trim().split(/\s+/)[0] || null;
+  assert.equal(list.machine.omarchyVersion, version);
+  assert.deepEqual(list.tools.map((x) => x.name), ["node", "tmux", "aw", "oats", "pi"]);
 });
