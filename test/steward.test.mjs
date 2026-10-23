@@ -59,7 +59,7 @@ test("stewardsIn: the steward agent's instances only, not an instance named stew
 test("one steward in the list's deployments: its home, and the deployment it is in; status runs in each deployment", async (t) => {
   const w = world(t, { a: STATUS, b: status({ stewards: [] }) });
   const found = await w.find();
-  assert.deepEqual(found, { ok: true, instance: "steward", home: STEWARD_HOME, deployment: { path: w.paths[0], name: "machine" } });
+  assert.deepEqual(found, { ok: true, instance: "steward", home: STEWARD_HOME, deployment: { path: w.paths[0], name: "machine" }, unread: [] });
   const calls = w.k.calls();
   assert.deepEqual(calls.map((c) => c.argv.join(" ")), ["version --json", "deployments --json", "status --json", "status --json"]);
   assert.deepEqual(calls.slice(2).map((c) => c.cwd), w.paths);
@@ -74,12 +74,15 @@ test("no steward: how to spawn one; a deployment that could not be read is named
   assert.match(r.reason, /^no steward on this machine: spawn one with .*; not read: acme \(.*\/work\/acme\): the kernel refused status \(E_LOCK\)$/);
 });
 
-test("a deployment whose status fails does not hide a steward found in another one", async (t) => {
-  const w = world(t, { a: "stderr", b: status({ stewards: [["steward", "/h/acme/steward"]] }) });
+test("a deployment whose status fails does not hide a steward found in another one, and is named", async (t) => {
+  const w = world(t, { a: "envelope:E_LOCK", b: status({ stewards: [["steward", "/h/acme/steward"]] }) });
   const r = await w.find();
   assert.equal(r.ok, true);
   assert.equal(r.home, "/h/acme/steward");
   assert.equal(r.deployment.name, "acme");
+  assert.deepEqual(r.unread, [`machine (${w.paths[0]}): the kernel refused status (E_LOCK)`]);
+  const several = world(t, { a: "envelope:E_LOCK", b: status({ stewards: [["steward", "/h/1"], ["steward-2", "/h/2"]] }) });
+  assert.deepEqual(await several.find(), { ok: false, reason: `several stewards on this machine, and none is chosen: steward @ acme, steward-2 @ acme; not read: machine (${several.paths[0]}): the kernel refused status (E_LOCK)` });
 });
 
 test("several stewards, in one deployment or two: listed, and none is picked", async (t) => {
@@ -109,7 +112,7 @@ test("a kernel without deployments-list: the deployment setup's state records, e
   const stateDir = join(w.s.env.XDG_STATE_HOME, "oats-omarchy");
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(join(stateDir, "state.json"), JSON.stringify({ schemaVersion: 1, deployment: w.paths[0], files: [] }));
-  assert.deepEqual(await w.find(), { ok: true, instance: "steward", home: STEWARD_HOME, deployment: { path: w.paths[0], name: w.paths[0] } });
+  assert.deepEqual(await w.find(), { ok: true, instance: "steward", home: STEWARD_HOME, deployment: { path: w.paths[0], name: w.paths[0] }, unread: [] });
   assert.ok(!w.k.calls().some((c) => c.argv[0] === "deployments"), "the list is not asked for");
 });
 

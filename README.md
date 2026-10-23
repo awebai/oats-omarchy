@@ -319,11 +319,14 @@ What each failure says:
   - `Node.js is needed: …`, when there is no `node` on PATH and none
     recorded by setup;
   - `OATS is not set up here (setup's shim … is missing): run setup --apply`;
-  - `omarchy-launch-tui is not on PATH: it opens the agent window`.
+  - `omarchy-launch-tui is not on PATH: it opens the agent window`;
+  - `omarchy-launch-tui: exited with status <n>: no window opened`, after
+    the launcher's own message.
 - **In the window,** one line naming the step, then Enter closes the window:
   - `finding the steward: no steward on this machine: spawn one with …`.
-    The line also names any deployment whose `oats status` failed. A steward
-    in another deployment is still found.
+    Any deployment whose `oats status` failed is named. A steward in
+    another deployment is still opened, after a line naming the one that
+    could not be read.
   - `finding the steward: several stewards on this machine, and none is
     chosen: …`, which lists each one as `instance @ deployment`;
   - `starting the steward (<home>): <the OATS CLI's message>`;

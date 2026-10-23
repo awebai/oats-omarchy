@@ -154,6 +154,31 @@ test("before the window: no omarchy-launch-tui on PATH, exit 1, notified; a noti
   assert.equal(failing.stderr, line);
 });
 
+test("before the window: a launcher that fails says so, with its own message, notifies, and removes the prompt file", (t) => {
+  const w = world(t);
+  writeExecutable(join(w.s.fakebin, "omarchy-launch-tui"), "#!/bin/sh\necho 'xdg-terminal-exec: configured terminal could not start' >&2\nexit 1\n");
+  const r = outer(w, ["--prompt", "hello"]);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "xdg-terminal-exec: configured terminal could not start\nomarchy-launch-oats: omarchy-launch-tui: exited with status 1: no window opened\n");
+  assert.equal(w.notified(), "Could not open the OATS steward\nomarchy-launch-tui: exited with status 1: no window opened\n--\n");
+  assert.deepEqual(readdirSync(w.run), [], "the prompt file is gone");
+});
+
+test("before the window: a launcher still running after the grace period is the open window, left to run", async (t) => {
+  const w = world(t);
+  const pidFile = join(w.s.root, "tui.pid");
+  writeExecutable(join(w.s.fakebin, "omarchy-launch-tui"), `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetTimeout(() => {}, 60_000);\n`);
+  const err = [];
+  const start = Date.now();
+  const code = await launch(["--prompt", "hello"], w.env, { err: { write: (x) => err.push(x) }, windowGraceMs: 300 });
+  assert.equal(code, 0, err.join(""));
+  assert.ok(Date.now() - start < 5_000);
+  assert.equal(readdirSync(w.run).length, 1, "the prompt file is the window's to read");
+  const pid = Number(readFileSync(pidFile, "utf8"));
+  process.kill(pid, 0);
+  process.kill(pid, "SIGKILL");
+});
+
 test("the sh launcher: node from PATH, else the node setup recorded; with neither, stderr and a notification, exit 1", (t) => {
   const w = world(t);
   const bin = join(w.s.root, "bin-no-node");
@@ -238,6 +263,19 @@ test("in the window: no steward, several, a shim gone and a CLI gone each name t
   r = await inner(cliGone);
   assert.match(r.err, /^omarchy-launch-oats: finding the steward: oats version --json failed: node:internal.*Cannot find module/);
   assert.equal(r.pauses, 1);
+});
+
+test("in the window: a deployment that could not be read is named, and the steward found in another is opened", async (t) => {
+  const w = world(t);
+  const broken = join(w.s.root, "broken");
+  mkdirSync(broken);
+  writeFileSync(join(broken, "status.mode"), "envelope:E_LOCK");
+  writeFileSync(join(w.k.k, "deployments.json"), JSON.stringify({ deploymentsApi: 1, file: "/h/.oats/config/deployments.json", deployments: [{ path: broken, name: "broken", state: "ok" }, { path: w.s.deployment, name: "machine", state: "ok" }], imports: {} }));
+  const r = await inner(w);
+  assert.equal(r.code, 0);
+  assert.equal(r.err, `omarchy-launch-oats: finding the steward: not read: broken (${broken}): the kernel refused status (E_LOCK)\n`);
+  assert.equal(r.pauses, 0);
+  assert.deepEqual(argvs(w).at(-1), ["session", "attach", "--detach-key", "C-\\", "--home", w.home]);
 });
 
 test("in the window: the attach's own exit status passes on (20 is the detach key), a failure says so and waits", async (t) => {

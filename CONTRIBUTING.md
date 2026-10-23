@@ -254,8 +254,12 @@ same node lookup as `setup`. Without a node it says so on stderr and with
 - **The outer process only opens the window.** It checks that setup's shim
   is there and that `omarchy-launch-tui` is on PATH. Then it starts
   `omarchy-launch-tui --app-id=org.omarchy.agent <node> <plugin>/bin/launch.mjs
-  --in-terminal` on its own, detached, and exits. A failure before the
-  window goes to stderr and an Omarchy notification.
+  --in-terminal` on its own, detached, with its own output as an exec
+  would give it. Omarchy's launcher keeps running while the window is open
+  (uwsm-app runs the terminal in a scope), so the outer process watches it
+  for `WINDOW_GRACE` (3 s): a launcher that fails within it opened nothing,
+  and one still running is the window. A failure before the window goes to
+  stderr and an Omarchy notification, and removes the prompt file.
 - **The window runs the flow** (`inTerminal`), so a failure shows where the
   person is looking: one line naming the step, then it waits for Enter. The
   steps are `version --json`, `findSteward`, `session start --home H
@@ -279,8 +283,9 @@ same node lookup as `setup`. Without a node it says so on stderr and with
   `STEWARD_AGENT`, `oats-machine--steward`, the name the kernel's
   `packageSoulAgentName` gives `oats.machine/steward`. Exactly one is
   used. With several, they are listed and none is picked. With none, the
-  line says how to spawn one. A deployment that cannot be read is named,
-  and never hides a steward found in another.
+  line says how to spawn one. A deployment that cannot be read is named
+  (`unread`, printed in the window, or in the reason), and never hides a
+  steward found in another.
 - **The prompt** (`--prompt`) travels in a 0600 file created new under
   `$XDG_RUNTIME_DIR` (else the temporary directory), passed as
   `--prompt-file`. It never goes in argv, which uwsm writes to the journal.
