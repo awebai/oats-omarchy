@@ -296,6 +296,22 @@ test("in the window: a handoff the launch already claimed is left alone, and its
   assert.equal(readFileSync(join(handoff, "claim"), "utf8"), "launch\n");
 });
 
+test("in the window: a --claim-file passed by hand in a directory that is not a handoff leaves that directory alone", async (t) => {
+  const w = world(t);
+  const mine = join(w.s.root, "documents");
+  mkdirSync(mine);
+  writeFileSync(join(mine, "keep.txt"), "mine");
+  writeFileSync(join(mine, "prompt"), "hello");
+  const r = await inner(w, ["--claim-file", join(mine, "claim"), "--prompt-file", join(mine, "prompt")]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(readdirSync(mine).sort(), ["claim", "keep.txt"], "only the prompt it read is removed");
+  const lookalike = join(w.run, "oats-omarchy-launch-x");
+  mkdirSync(lookalike);
+  writeFileSync(join(lookalike, "keep.txt"), "mine");
+  await inner(w, ["--claim-file", join(lookalike, "claim")]);
+  assert.deepEqual(readdirSync(lookalike).sort(), ["claim", "keep.txt"]);
+});
+
 test("the sh launcher: node from PATH, else the node setup recorded; with neither, stderr and a notification, exit 1", (t) => {
   const w = world(t);
   const bin = join(w.s.root, "bin-no-node");
