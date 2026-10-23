@@ -18,7 +18,7 @@ import { fixture, repo, writeExecutable } from "./sandbox.mjs";
 
 export const INSTALLER = join(repo, "bin", "omarchy-install-oats");
 export const STATUS = JSON.parse(readFileSync(fixture("steward", "status-0.67.1.json"), "utf8"));
-const HOST_TOOLS = ["sh", "grep", "head", "readlink", "dirname", "basename", "mkdir", "cat", "env", "rm", "ln", "mv", "tr", "sort", "printf", "chmod"];
+const HOST_TOOLS = ["sh", "grep", "head", "readlink", "dirname", "basename", "mkdir", "cat", "env", "rm", "ln", "mv", "tr", "sort", "printf", "chmod", "sed"];
 const NPM_PKG = { aw: "@awebai/aw", oats: "@awebai/oats", claude: "@anthropic-ai/claude-code", codex: "@openai/codex", pi: "@mariozechner/pi-coding-agent" };
 const MISE_DIR = { node: "node", tmux: "tmux", aw: "npm-awebai-aw", oats: "npm-awebai-oats", claude: "claude", codex: "codex", pi: "pi" };
 
@@ -96,8 +96,16 @@ case "$1" in
   plugin)
     [ -f "$c/no-plugin" ] && { echo "error: unknown command 'plugin'" >&2; exit 1; }
     ${logArgs("claude-plugin.log")}
+    echo "$PWD" >> '${join(root, "claude-plugin.cwd")}'
     case "$2 $3" in
-      "list --json") cat "$c/plugins.json" 2>/dev/null || echo '[]' ;;
+      # enabled is the merged settings of the directory it runs in: a
+      # project's .claude/settings.json can turn the plugin off there.
+      "list --json")
+        if grep -q '"aweb-channel@awebai-marketplace": *false' .claude/settings.json 2>/dev/null; then
+          sed 's/"enabled": true/"enabled": false/' "$c/plugins.json" 2>/dev/null || echo '[]'
+        else
+          cat "$c/plugins.json" 2>/dev/null || echo '[]'
+        fi ;;
       "marketplace list") cat "$c/marketplaces.json" 2>/dev/null || echo '[]' ;;
       "marketplace add") [ -f "$c/fail-marketplace" ] && { echo "failed to clone $4" >&2; exit 1; }; echo '[{"name":"awebai-marketplace","source":"github","repo":"awebai/claude-plugins"}]' > "$c/marketplaces.json" ;;
       "install aweb-channel@awebai-marketplace") printf '%s\\n' '[' '  {' '    "id": "aweb-channel@awebai-marketplace",' '    "version": "1.7.11",' '    "scope": "user",' '    "enabled": true' '  }' ']' > "$c/plugins.json" ;;
@@ -176,8 +184,8 @@ esac
     writeFileSync(join(root, "mise", "plan", key), outcome === "fail" ? `echo "mise ERROR failed to install ${spec}: network unreachable" >&2\nexit 1\n` : "exit 0\n");
   }
 
-  const run = (args, { input = "", extraEnv = {} } = {}) => {
-    const r = spawnSync("/bin/sh", [INSTALLER, ...args], { env: { ...env(), ...extraEnv }, input, encoding: "utf8", timeout: 60_000, cwd: home });
+  const run = (args, { input = "", extraEnv = {}, cwd = home } = {}) => {
+    const r = spawnSync("/bin/sh", [INSTALLER, ...args], { env: { ...env(), ...extraEnv }, input, encoding: "utf8", timeout: 60_000, cwd });
     return { status: r.status, stdout: r.stdout, stderr: r.stderr, out: r.stdout + r.stderr };
   };
   return { root, home, bin, other, npm, miseData, shims, localBin, kernel, env, log, put, planMise, run, setDefaultAgent };

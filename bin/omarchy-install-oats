@@ -31,7 +31,7 @@ STEPS=6
 CHANNEL=aweb-channel@awebai-marketplace
 MARKETPLACE=awebai-marketplace
 MARKETPLACE_SOURCE=awebai/claude-plugins
-DISABLED="it is installed and disabled; enable it with: claude plugin enable $CHANNEL"
+DISABLED="it is installed and disabled for ~/Work; enable it with: cd ~/Work && claude plugin enable $CHANNEL"
 
 dir=$(cd -- "$(dirname -- "$0")" && pwd -P) || exit 1
 plugin=$(cd -- "$dir/.." && pwd -P) || exit 1
@@ -217,14 +217,23 @@ detect() {
   fi
 }
 
-# Claude's plugin commands: present when `claude plugin list --json` answers
-# a list (an older claude has no plugin subcommand).
-has_plugins() { "$1" plugin list --json 2>/dev/null | grep -q '^\['; }
-# The channel plugin for a session in ~/Work, as `claude plugin list --json`
-# lists it (bin/install.mjs channel): enabled, disabled or absent. A copy
-# installed for another project is absent here. $1 claude, $2 node.
-channel_state() { "$1" plugin list --json 2>/dev/null | "$2" "$plugin/bin/install.mjs" channel --dir "$HOME/Work"; }
-marketplace_present() { "$1" plugin marketplace list --json 2>/dev/null | grep -q "\"name\": *\"$MARKETPLACE\""; }
+# Claude's plugin commands run where the onboarding session will: in
+# ~/Work, or in HOME while there is no ~/Work yet (HOME's own .claude is the
+# user's settings, so no project's settings apply), never in the caller's
+# directory. `enabled` is the merged settings of the directory claude runs
+# in. $1 is claude.
+claude_here() (
+  if [ -d "$HOME/Work" ]; then cd "$HOME/Work"; else cd "$HOME"; fi || exit 1
+  "$@"
+)
+# Present when `claude plugin list --json` answers a list (an older claude
+# has no plugin subcommand).
+has_plugins() { claude_here "$1" plugin list --json 2>/dev/null | grep -q '^\['; }
+# The channel plugin for that session (bin/install.mjs channel): enabled,
+# disabled or absent. A copy installed for another project is absent.
+# $1 claude, $2 node.
+channel_state() { claude_here "$1" plugin list --json 2>/dev/null | "$2" "$plugin/bin/install.mjs" channel --dir "$HOME/Work"; }
+marketplace_present() { claude_here "$1" plugin marketplace list --json 2>/dev/null | grep -q "\"name\": *\"$MARKETPLACE\""; }
 
 # ---------------------------------------------------------------------------
 # --check
@@ -370,7 +379,7 @@ channel() {
   if marketplace_present "$h"; then
     say "found the $MARKETPLACE marketplace: using it"
   else
-    "$h" plugin marketplace add "$MARKETPLACE_SOURCE" || fail "claude plugin marketplace add $MARKETPLACE_SOURCE exited with status $?"
+    claude_here "$h" plugin marketplace add "$MARKETPLACE_SOURCE" || fail "claude plugin marketplace add $MARKETPLACE_SOURCE exited with status $?"
   fi
   T_VERSION= T_ORIGIN=claude-plugin T_PATH=
   case $(channel_state "$h" "$n") in
@@ -380,7 +389,7 @@ channel() {
       ;;
     disabled) fail "$CHANNEL $DISABLED" ;;
     *)
-      "$h" plugin install "$CHANNEL" || fail "claude plugin install $CHANNEL exited with status $?"
+      claude_here "$h" plugin install "$CHANNEL" || fail "claude plugin install $CHANNEL exited with status $?"
       [ "$(channel_state "$h" "$n")" = enabled ] || fail "claude plugin install $CHANNEL did not install it"
       record "$CHANNEL" installed plugin
       ;;

@@ -475,14 +475,16 @@ not exist yet) and the handoff.
 - **An instance's shim** (`*/.oats/bin/oats`) is not the CLI, on PATH or
   behind a link: the installer refuses it without running it, as setup
   does.
-- **Claude's channel plugin** is read from `claude plugin list --json` by
-  node (`channelState`): a user-scoped copy counts, a project or local one
+- **Claude's channel plugin** is read from `claude plugin list --json`,
+  run in `~/Work` (in HOME before `~/Work` exists), since `enabled` is the
+  merged settings of the directory claude runs in; then node
+  (`channelState`) picks the copy that applies: a user-scoped one counts, a project or local one
   only when it is `~/Work`'s, since the list names other projects' copies
   too. A disabled copy stops the run with the command that enables it; it
   is never enabled or installed over.
 - **The handoff.** `--now`'s last step writes the found-list
   (`docs/found-list.md`; a deployment whose status cannot be read stops
-  it, so `steward: false` is never a guess) and prints the prompt: `lib/onboarding-prompt.txt`
+  it, so an `ok` deployment's `steward: false` is never a guess) and prints the prompt: `lib/onboarding-prompt.txt`
   with its placeholders filled (`renderPrompt`). The prompt states facts
   only (the skill, the harness, the plugin, the found-list); the bootstrap's
   steps are getting-started's, and the test holds a list of command names it

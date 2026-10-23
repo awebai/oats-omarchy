@@ -249,7 +249,39 @@ test("--now: a channel plugin installed for another project is not this session'
   const c = own.run(["--check", "--harness", "claude"]);
   assert.match(c.stdout, /^aweb-channel@awebai-marketplace: found \(claude-plugin\)$/m);
   withChannel(own, { enabled: false });
-  assert.match(own.run(["--check", "--harness", "claude"]).stdout, /^aweb-channel@awebai-marketplace: not usable: it is installed and disabled; enable it with: claude plugin enable aweb-channel@awebai-marketplace$/m);
+  assert.match(own.run(["--check", "--harness", "claude"]).stdout, /^aweb-channel@awebai-marketplace: not usable: it is installed and disabled for ~\/Work; enable it with: cd ~\/Work && claude plugin enable aweb-channel@awebai-marketplace$/m);
+});
+
+test("Claude's plugins are read where the onboarding session runs, ~/Work, never in the caller's directory", (t) => {
+  const disable = (dir) => { mkdirSync(join(dir, ".claude"), { recursive: true }); writeFileSync(join(dir, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "aweb-channel@awebai-marketplace": false } }, null, 2)); };
+  // Disabled in ~/Work, enabled where the installer is started: a stop.
+  const w = world(t);
+  ALL(w);
+  withChannel(w);
+  disable(join(w.home, "Work"));
+  let r = w.run(["--now", "--harness", "claude"]);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.stderr, /step 5 \(channel\) failed: aweb-channel@awebai-marketplace it is installed and disabled for ~\/Work/);
+  assert.ok(!existsSync(join(w.root, "harness.json")));
+  assert.match(w.run(["--check", "--harness", "claude"]).stdout, /^aweb-channel@awebai-marketplace: not usable: /m);
+  // Enabled in ~/Work, disabled in the caller's project: used.
+  const v = world(t);
+  ALL(v);
+  withChannel(v);
+  const project = join(v.root, "project");
+  disable(project);
+  mkdirSync(join(v.home, "Work"));
+  r = v.run(["--now", "--harness", "claude"], { cwd: project });
+  assert.equal(r.status, 0, r.out);
+  assert.equal(found(v).tools.at(-1).state, "found");
+  assert.deepEqual([...new Set(v.log("claude-plugin.cwd").trim().split("\n"))], [join(v.home, "Work")]);
+  // No ~/Work yet: HOME, which holds no project's settings.
+  const u = world(t);
+  ALL(u);
+  withChannel(u);
+  u.run(["--check", "--harness", "claude"], { cwd: project });
+  assert.deepEqual([...new Set(u.log("claude-plugin.cwd").trim().split("\n"))], [u.home]);
+  assert.ok(!existsSync(join(u.home, "Work")), "--check creates nothing");
 });
 
 test("--now run again skips every step that is done and still starts the onboarding agent", (t) => {
@@ -299,7 +331,7 @@ for (const [name, set, expect, after] of [
   ["step 4 (oats): an instance's shim", (w) => { ALL(w); rmSync(join(w.npm, "bin", "oats")); w.put("oats", "shim", "0.67.1"); }, /^omarchy-install-oats: step 4 \(oats\) failed: .*\.oats\/bin\/oats is an instance home's shim/m],
   ["step 5 (channel): claude has no plugin command", (w) => { ALL(w); writeFileSync(join(w.root, "claude", "no-plugin"), ""); }, /^omarchy-install-oats: step 5 \(channel\) failed: claude 2\.1\.308 has no plugin command; upgrade: upgrade it the way you installed it$/m],
   ["step 5 (channel): the marketplace cannot be added", (w) => { ALL(w); writeFileSync(join(w.root, "claude", "fail-marketplace"), ""); }, /failed to clone awebai\/claude-plugins\nomarchy-install-oats: step 5 \(channel\) failed: claude plugin marketplace add awebai\/claude-plugins exited with status 1$/m],
-  ["step 5 (channel): the plugin is installed and disabled, and stays so", (w) => { ALL(w); withChannel(w, { enabled: false }); }, /^omarchy-install-oats: step 5 \(channel\) failed: aweb-channel@awebai-marketplace it is installed and disabled; enable it with: claude plugin enable aweb-channel@awebai-marketplace$/m,
+  ["step 5 (channel): the plugin is installed and disabled, and stays so", (w) => { ALL(w); withChannel(w, { enabled: false }); }, /^omarchy-install-oats: step 5 \(channel\) failed: aweb-channel@awebai-marketplace it is installed and disabled for ~\/Work; enable it with: cd ~\/Work && claude plugin enable aweb-channel@awebai-marketplace$/m,
     (w) => assert.ok(!w.log("claude-plugin.log").includes("install\n"), "not installed again")],
   ["step 6 (onboarding): a deployment whose status cannot be read is not a deployment without a steward", (w) => { ALL(w); withChannel(w); const { a } = deployments(w); writeFileSync(join(a, "status.mode"), "envelope:E_LOCK"); }, /^the deployment merak \(.*\/Agents\/merak\) could not be read: oats status --json: the kernel refused status \(E_LOCK\)\nomarchy-install-oats: step 6 \(onboarding\) failed: the found-list could not be written$/m,
     (w) => assert.ok(!existsSync(join(w.home, ".local", "state", "oats-omarchy", "found.json")), "no found-list")],
