@@ -247,13 +247,22 @@ const clicks = scene(`
     scene.probe("right", { opened: scene.w.opened })
   } }`, 3);
 
+// Before setup, the set-up line asks the plugin's installer --check, then
+// runs setup or the installer (widget.test.mjs runs it), quoted as the
+// widget quotes it.
+const setupLine = (w) => {
+  const plugin = join(w.root, "cfg", "plugin");
+  const install = W.shellQuote(join(plugin, "bin", "omarchy-install-oats"));
+  return `if ${install} --check >/dev/null 2>&1; then ${W.shellQuote(join(plugin, "setup"))} --apply; else ${install} --now; fi`;
+};
+
 // The set-up line holds the installer's --check (widget.test.mjs runs it):
 // the bar runs it once per click, and nothing at all before a click.
 test("before setup, a left or right click on the icon runs the whole setup, checking first whether OATS is installed; the tooltip says so", { skip }, (t) => {
   const w = world(t);
   const records = w.play(clicks).map((r) => [r.what, r.value]);
   const setup = W.setupCommand(null, join(w.root, "cfg", "plugin", "setup"));
-  assert.match(setup, /omarchy-install-oats' --check .*'--apply; else .*omarchy-install-oats' --now; fi'$/);
+  assert.equal(setup, `exec omarchy-launch-floating-terminal-with-presentation ${W.shellQuote(setupLine(w))}`);
   assert.deepEqual(records, [
     ["tooltip", "OATS: click to set up"],
     ["run", setup], ["left", { opened: false }],
@@ -451,7 +460,6 @@ test("before setup the popup offers setup only, and reads nothing", { skip }, (t
   const [none] = by("none");
   assert.ok(none.texts.includes("OATS is not set up here yet: Enter runs setup."), JSON.stringify(none.texts));
   assert.ok(!none.texts.some((x) => /^No agent|^Reading/.test(x)), JSON.stringify(none.texts));
-  assert.deepEqual(by("exec"), [W.setupArgv(null, join(w.root, "cfg", "plugin", "setup"))]);
-  assert.match(by("exec")[0][1], /^if '.*\/cfg\/plugin\/bin\/omarchy-install-oats' --check /);
+  assert.deepEqual(by("exec"), [["omarchy-launch-floating-terminal-with-presentation", setupLine(w)]]);
   assert.equal(existsSync(join(w.root, "reads.log")), false);
 });
