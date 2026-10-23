@@ -60,8 +60,9 @@ steps, one line each:
    `~/.local/state/oats-omarchy/found.json` ([the found-list](docs/found-list.md)),
    then starts the harness in `~/Work` with a prompt that points it at
    OATS's getting-started skill and at that list. The agent sets up the
-   rest: the workspace, its identities and this machine's steward. Claude
-   asks you once to confirm loading the aweb channel.
+   rest: the workspace, its identities and this machine's steward. It never
+   applies the plugin's setup, which stays yours to run. Claude asks you
+   once to confirm loading the aweb channel.
 
 Run it again at any time: what is done is found and skipped.
 `omarchy-install-oats --check` only looks: one line each for node, tmux, aw,

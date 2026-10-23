@@ -370,6 +370,12 @@ test("the onboarding prompt names facts only: none of the bootstrap's commands, 
   assert.ok(prompt.includes("/s/SKILL.md") && prompt.includes("/f/found.json") && prompt.includes("/p, version 0.7.0"));
   assert.ok(!/\{\{/.test(prompt));
   assert.throws(() => renderPrompt({}, "{{nope}}"), /unknown placeholder \{\{nope\}\}/);
+  // The agent never applies setup (auto mode refuses it as persistence):
+  // the agent key is the person's to move.
+  assert.ok(prompt.includes("Never run the plugin's setup with --apply or --remove"));
+  assert.ok(prompt.includes("/p/setup --plan and /p/setup --check"));
+  assert.ok(prompt.includes("Setup › Default Agent › OATS") && prompt.includes("/p/setup --apply --only agent-key"));
+  assert.doesNotMatch(prompt, /consent/);
 });
 
 test("handoff: a hostname with a quote reaches the found-list and the prompt as it is", async (t) => {
