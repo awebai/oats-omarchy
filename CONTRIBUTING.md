@@ -20,9 +20,10 @@ lib/                     their modules (below)
 assets/                  the icon both launcher entries use
 scripts/lint.mjs         lint
 test/                    node:test suites; test/fixtures holds their inputs (with
-                         test/fixtures/v0.3.0 and v0.4.0 those versions' own blocks,
-                         for the upgrade, and test/fixtures/omarchy-4.0.4 Omarchy's
-                         MenuModel.js and the root of its menu, for the search,
+                         test/fixtures/v0.3.0, v0.4.0, v0.5.0 and v0.6.0 those
+                         versions' own blocks, for the upgrade, and
+                         test/fixtures/omarchy-4.0.4 Omarchy's MenuModel.js and
+                         the root of its menu, for the search,
                          from basecamp/omarchy's 4.0.4 release under its MIT
                          notice, LICENSE there),
                          test/helpers/sandbox.mjs the temporary machine they run on
@@ -72,9 +73,10 @@ compares them with what is there, and only then writes:
 
   Everything setup writes runs by those recorded absolute paths, never by
   PATH: the shim (node and CLI), the bar widget's read (node and
-  `bin/waiting.mjs`) and the post-update hook (node and `bin/setup.mjs
-  --check`). `--check` reports any of them gone or moved. It also finds the
-  Omarchy launchers on the
+  `bin/waiting.mjs`), the post-update hook (node and `bin/setup.mjs
+  --check`) and the launcher (node and `bin/launch.mjs`), which the agent
+  key binds by its own absolute path. `--check` reports any of them gone or
+  moved. It also finds the Omarchy launchers on the
   session's PATH (`systemctl --user show-environment`, else the process
   PATH), the Hyprland layout, the Desktop (a flag, an existing launcher
   entry, then an AppImage; its standard install is
@@ -85,7 +87,31 @@ compares them with what is there, and only then writes:
   `omarchy menu keybindings --print` reports.
 - `lib/keys.mjs` turns that report into the key and its snippet. The
   SUPER + O submap binds T and D (each only when that part applies) and O
-  (Omarchy's pop-out), each also with SUPER held.
+  (Omarchy's pop-out), each also with SUPER held. It also has the agent
+  key's lines (`agentLua`, and `agentConf` for the hyprlang snippet):
+  `hl.unbind` of SUPER + SHIFT + CTRL + A, which Omarchy binds to
+  `omarchy-agent --pick` ("Agent"), and a bind described "OATS agent" to
+  the launcher; `agentBindLine` is that bind line alone.
+- The launcher part writes `~/.local/bin/omarchy-launch-oats`
+  (`discover.paths` `wrapper`; `files.launcher`, mode 0755), which is on
+  Omarchy's session PATH after `/usr/share/omarchy/bin`, so its name never
+  shadows one of Omarchy's. Unlike the shim and the entries, a file or link
+  there that setup has no record of is never backed up or replaced: the part
+  is skipped with the reason (`launcherCheck`). A missing `~/.local/bin` is
+  created and recorded like any directory setup creates, so `--remove`
+  deletes it only when it is empty. The launcher goes only with the shim: it
+  is ready only when the shim part is.
+- The agent key's owner, `oats` or `omarchy` (`chooseAgentKey`), is
+  `--agent-key`, else the one the state records as `agentKey`, else none
+  (null). It moves only on an explicit pick: with none, `--apply` in a
+  terminal asks (`AGENT_QUESTION`, Enter is OATS; `askAgentKeyFirst`) after
+  the UI question, `--yes` or not; without a terminal it asks nothing,
+  refuses nothing and leaves the key with Omarchy (the part's reason is
+  `NOT_CHOSEN`). An `--agent-key` other than `oats` or `omarchy`, or one
+  with `--check` or `--remove`, is `E_BAD_ARGS`. The state always records
+  `agentKey`, and a new choice alone still rewrites it. `--plan` shows the
+  choice and where it came from under "Agent key", with its lines when OATS
+  is picked.
 - The default UI, `tui` or `desktop` (`chooseUi` in `lib/setup.mjs`), is
   what the menu's root row "OATS" and a right click on the bar icon open.
   With one of the two set up it is that one. With both it is `--ui`, else
@@ -100,15 +126,31 @@ compares them with what is there, and only then writes:
   not undo it; a `--ui` that changes only the state still writes it. A
   state from before 0.5.0 has none, and with both set up `--check` reports
   "default UI not chosen".
-- `lib/bindings.mjs` is the key block: the Lua snippet between marker
-  comments, appended to the end of `~/.config/hypr/bindings.lua` after a
-  blank line. Setup writes it only for the Lua layout, and only when every
-  effective SUPER + O action (from `--print`) is Omarchy's stock pop-out,
-  the user's `bindings.lua` does not bind SUPER + O, and no user submap is
-  named `oats`. A re-apply that changes the block checks the same things
-  outside it, allowing only the OATS entry the block itself binds.
-  Otherwise the part is skipped with the reason, and the snippet is
-  printed. The file is backed up whole. `--remove` restores the backup only
+- `lib/bindings.mjs` is the key block: Lua between marker comments,
+  appended to the end of `~/.config/hypr/bindings.lua` after a blank line.
+  It has up to two sections, the SUPER + O submap and then the agent key's
+  lines (which start with `AGENT_START`); `composeBlock` joins them,
+  `sections` splits a recorded block. Setup writes it only for the Lua
+  layout, and checks each section on its own (`keysEdit`): the submap only
+  when every effective SUPER + O action (from `--print`) is Omarchy's stock
+  pop-out, the user's `bindings.lua` does not bind SUPER + O, and no user
+  submap is named `oats` (`keysRefusal`); the agent key only when it is
+  picked, the launcher part is ready, every effective SUPER + SHIFT + CTRL +
+  A action is Omarchy's stock "Agent", and the user's `bindings.lua`
+  neither binds nor unbinds it (`agentKeyRefusal`, which mirrors
+  `keysRefusal`; both find the user's own call with `bindsCombo`). A
+  re-apply that changes a section checks the same things outside the
+  block, allowing only what the block itself binds ("OATS agent" for the
+  agent key); a section the recorded block holds unchanged is not checked
+  again. A section that fails is skipped alone with the reason, and its
+  snippet is printed; the other is still written. A recorded section whose
+  update fails stays as it was recorded. When the agent key is given back
+  (`--agent-key omarchy`) its section is dropped, and a block left empty is
+  taken out the way `--remove` takes it out (the backup back whole, else
+  the block's bytes alone), its record dropped and its backup deleted once
+  the state is written. Hyprland verifies the whole candidate file, both
+  sections, after the confirmation; a removal is not verified. The file is
+  backed up whole. `--remove` restores the backup only
   when the file is byte-identical to what `--apply` wrote and the user had
   not edited it before a re-apply rewrote the block (the record's
   `restorable`); otherwise it takes out the block's bytes alone, leaving the
@@ -143,8 +185,20 @@ compares them with what is there, and only then writes:
   lists `session-attach-detach-key`, so a re-apply picks up a CLI that
   gained it.
 - `lib/menu.mjs` is the menu block: one root row, `oats-ui`, labelled OATS,
-  which runs the default UI's launch command. With neither UI set up there
-  is no row, and the menu part is skipped. Omarchy 4.0.4's search
+  which runs the default UI's launch command, and the Default Agent row,
+  `setup.default.agent.oats` (`AGENT_ID`), labelled OATS, which Omarchy puts
+  under its own Setup > Defaults > Agent by its dotted id. That row is there
+  whenever the block is, whoever has the agent key, since it is where the
+  person picks OATS. Its `checked` (`agentChecked`) is a `grep -qxF` of
+  `agentBindLine` in `bindings.lua`: it reads the file Hyprland loads, so it
+  cannot disagree with the live binding, and a block changed by hand is
+  what `--check` reports, since setup records the block's bytes. Its action
+  (`agentPick`) runs `setup --apply --agent-key oats`, by the recorded node
+  and plugin, in `omarchy-launch-floating-terminal-with-presentation`,
+  where the plan shows and setup asks, and then the launcher only when that
+  check passes. Both ids are in `IDS`, so a user's own row with one of them
+  is refused. With neither UI set up there is no block, and the menu part
+  is skipped. Omarchy 4.0.4's search
   (`MenuModel.js` `searchScore`) ranks an exact label at the root above any
   other match, and `Menu.qml` lists root rows before deeper ones, the app
   launchers among those. The launcher entries are named OATS TUI and OATS
@@ -169,13 +223,20 @@ compares them with what is there, and only then writes:
   every row of the block as written.
 - `--check` rebuilds the menu and key blocks this version would write from
   what the state records (`blocksFor`, the same function the plan uses), so
-  a block another version wrote (v0.3.0's and v0.5.0's menu, v0.4.0's menu
-  and key block) is reported as "from another version of setup: run setup
-  --apply again". So is the TUI's launcher entry, rebuilt the same way,
-  which v0.3.0 to v0.5.0 named OATS. `--apply` then swaps only those
+  a block another version wrote (v0.3.0's, v0.5.0's and v0.6.0's menu,
+  v0.4.0's menu and key block) is reported as "from another version of
+  setup: run setup --apply again". So is the TUI's launcher entry, rebuilt
+  the same way, which v0.3.0 to v0.5.0 named OATS. A recorded key block
+  made of this version's sections, either one or both, is not: a section
+  skipped by its checks is not drift. A state with no `agentKey` (v0.6.0
+  and older) gets one more line, that the launcher and the agent key are
+  new in this version and not applied yet, and that the agent key stays
+  with Omarchy until the person picks OATS. `--apply` then swaps only those
   blocks, a key block verified as a new one is, and rewrites the entry.
-  `test/upgrade.test.mjs` starts from v0.3.0's, v0.4.0's and v0.5.0's own
-  blocks and entry (`test/fixtures/v0.3.0`, `v0.4.0` and `v0.5.0`).
+  v0.6.0's key block is this version's SUPER + O section alone, so without
+  `--agent-key` it stays as it is. `test/upgrade.test.mjs` starts from
+  v0.3.0's, v0.4.0's, v0.5.0's and v0.6.0's own blocks and entry
+  (`test/fixtures/v0.3.0`, `v0.4.0`, `v0.5.0` and `v0.6.0`).
 - `lib/state.mjs` writes atomically and keeps the state file under
   `$XDG_STATE_HOME/oats-omarchy`: every file written, its digest, what was
   there before (backed up beside it) and the directories setup created; for
@@ -443,10 +504,13 @@ CI's `omarchy` job runs in a pinned `archlinux:base` container:
   node and the CLI stand-in on PATH, against the real Omarchy: its launchers,
   through `gio launch` and `sh -c`, its hook runner, `--verify-config` on
   the user's whole configuration with the printed snippet added, the key
-  block written, refused and removed with the real Hyprland, Omarchy's
+  block written, refused and removed with the real Hyprland, the block with
+  each of its sections alone and both, the agent key picked, given back and
+  removed with `bindings.lua` checked byte for byte, Omarchy's
   own `MenuModel.js` reading the menu block (it is plain functions, so it
-  runs as a script in a `vm` context) and ranking the default UI's row first
-  in a search over its whole menu, and `bin/waiting.mjs` opening a
+  runs as a script in a `vm` context), the Default Agent row under
+  Omarchy's real Setup > Defaults > Agent included, and ranking the
+  default UI's row first in a search over its whole menu, and `bin/waiting.mjs` opening a
   session through the real floating terminal, as does the bar panel's row.
   Only the selector is a fake: the real one needs a running Omarchy shell.
 - `test/widget-qml.test.mjs` (as `ci`, with `OATS_OMARCHY_CONTAINER=1`) loads
@@ -463,7 +527,10 @@ Wayland compositor with a GPU render node, Hyprland stops at start
 beside those. So nothing that needs `hyprctl` (for example
 `omarchy menu keybindings --print`) runs against a live Hyprland in CI.
 Tests serve `--print` from captured output in `test/fixtures/print/`, taken
-from a machine with Omarchy's default bindings.
+from a machine with Omarchy's default bindings. That output does not change
+when setup writes its block, so CI cannot read back from `--print` that the
+agent key runs "OATS agent", or "Agent" again once it is given back: the
+container test checks the block's bytes and `--verify-config` instead.
 
 ## Testing on a desktop machine
 

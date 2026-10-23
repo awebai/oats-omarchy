@@ -1,5 +1,6 @@
 // Typing "oats" in SUPER + SPACE: the default UI is the first row, and the
-// only other OATS rows are the two launchers, each named for its UI. Ranked by
+// only other OATS rows are the two launchers, each named for its UI, and the
+// OATS row under Setup > Default Agent, which picks OATS for the agent key. Ranked by
 // Omarchy 4.0.4's own search code (test/fixtures/omarchy-4.0.4/MenuModel.js,
 // vendored unchanged and pinned below) over the root of its menu and the
 // block setup writes, with the app launchers installed, OATS's own two among
@@ -26,7 +27,16 @@ const MODEL = fixture("omarchy-4.0.4", "MenuModel.js");
 // omarchy 4.0.4-1 package. Re-vendor by copying that file from a newer
 // package unchanged, then set this and check the ranking still holds.
 const DIGEST = "ff6b265ca477d0d04297b0d9a5d9715960069db6da44603160d329e087e55fd8";
-const DEFAULTS = readFileSync(fixture("omarchy-4.0.4", "omarchy-menu-root.jsonc"), "utf8");
+// The fixture holds the root and one child of each submenu; the Default
+// Agent row's parents are added from the same file (Omarchy 4.0.4's
+// setup.default and setup.default.agent, icons left out), with one of
+// Omarchy's own agent rows beside it, so the row sits where Omarchy puts it.
+const DEFAULT_AGENT = [
+  '  "setup.default": {"label":"Defaults","aliases":["default","defaults"]},',
+  '  "setup.default.agent": {"label":"Agent","title":"Default Agent"},',
+  '  "setup.default.agent.claude": {"label":"Claude","checked":"true","action":"true"},',
+].join("\n");
+const DEFAULTS = readFileSync(fixture("omarchy-4.0.4", "omarchy-menu-root.jsonc"), "utf8").replace(/\}\s*$/, `${DEFAULT_AGENT}\n}\n`);
 const QUERIES = ["o", "oa", "oat", "oats", "OATS"];
 
 // The launchers OATS installs (their entries' Name), and others whose names
@@ -71,8 +81,15 @@ for (const ui of ["tui", "desktop"]) {
       for (const id of ["apps.org.oats.tui", "apps.awebai-oats-desktop"]) assert.ok(ids.indexOf(id) > 0, `${query}: ${id} in ${ids}`);
       // Nothing else of OATS's: no submenu, no rows of one.
       assert.deepEqual(ids.filter((id) => id === "oats" || id.startsWith("oats.")), [], `${query}: ${ids}`);
-      // Each row says which UI it opens; only the default UI's is labelled OATS.
-      assert.deepEqual(rows.filter((x) => x.label === "OATS").map((x) => x.itemId), ["oats-ui"], query);
+      // Each row says which UI it opens; the default UI's is the root row
+      // labelled OATS. The Default Agent row, labelled OATS too, is in the
+      // block and in the rows the search shows, under Setup > Default Agent:
+      // a row deeper than the root, so it comes after every root row.
+      assert.ok(items[menu.AGENT_ID], "the block holds the Default Agent row");
+      assert.deepEqual(rows.filter((x) => x.label === "OATS").map((x) => x.itemId), ["oats-ui", menu.AGENT_ID], query);
+      const agent = rows.find((x) => x.itemId === menu.AGENT_ID);
+      assert.equal(agent.path, "Setup › Defaults › Agent › OATS", query);
+      assert.equal(agent.action, items[menu.AGENT_ID].action, query);
     }
   });
 }

@@ -281,8 +281,9 @@ test("setup with the list: no deployment needed; the launchers, the menu and the
   assert.equal(W.readTimeoutMs(plugin), 120000);
   assert.deepEqual(W.readArgv(plugin), [node, `${PLUGIN_DIR}/bin/waiting.mjs`, "--list", "--json"]);
   const items = menu.omarchyParse(readFileSync(p.menuFile, "utf8")).items;
-  assert.deepEqual(Object.keys(items), ["oats-ui"]);
+  assert.deepEqual(Object.keys(items), ["oats-ui", menu.AGENT_ID]);
   assert.equal(items["oats-ui"].action, plugin.desktop.map(shellWord).join(" "));
+  assert.doesNotMatch(items[menu.AGENT_ID].action, /--dir/, "the Default Agent row's setup uses the list too");
   assert.doesNotMatch(readFileSync(join(p.applications, "org.oats.tui.desktop"), "utf8"), /--dir/);
   assert.doesNotMatch(readFileSync(join(p.applications, "awebai-oats-desktop.desktop"), "utf8"), /--dir/);
   const hook = readFileSync(join(s.home, ".config/omarchy/hooks/post-update.d/oats-omarchy.hook"), "utf8");

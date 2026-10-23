@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import * as menu from "../lib/menu.mjs";
 import { shellWord } from "../lib/quote.mjs";
-import { setup, UI_QUESTION } from "../lib/setup.mjs";
+import { AGENT_QUESTION, setup, UI_QUESTION } from "../lib/setup.mjs";
 import { parsePlugin } from "../widget.mjs";
 import { sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
@@ -29,13 +29,22 @@ const pluginOf = (s) => JSON.parse(readFileSync(join(discoverPaths(s.env).stateD
 const itemsOf = (s) => menu.omarchyParse(readFileSync(discoverPaths(s.env).menuFile, "utf8")).items;
 
 // setup() in this process, as from a terminal: the answers are given in
-// turn; what it printed and each question asked come back.
+// turn; what it printed and each question asked come back. With no agent key
+// recorded, --apply also asks the agent-key question, after the UI question:
+// these tests answer it "omarchy", which leaves the key with Omarchy. The
+// answer is echoed with its newline, as a terminal shows it.
 function fromTerminal(s, args, answers) {
   let out = "";
   const asked = [];
   const queue = [...answers];
   const write = { write: (x) => { out += x; } };
-  const status = setup([...args, "--dir", s.deployment], s.env, write, write, { interactive: true, ask: () => { asked.push(out.slice(out.lastIndexOf("\n") + 1)); return queue.shift() ?? ""; } });
+  const ask = () => {
+    asked.push(out.slice(out.lastIndexOf("\n") + 1));
+    const answer = queue.shift() ?? "";
+    out += `${answer}\n`;
+    return answer;
+  };
+  const status = setup([...args, "--dir", s.deployment], s.env, write, write, { interactive: true, ask });
   return { status, out, asked };
 }
 
@@ -69,12 +78,14 @@ for (const ui of ["tui", "desktop"]) {
 test("both set up, no --ui, in a terminal: --apply asks which opens first; Enter is the TUI", (t) => {
   const s = sandbox(t);
   withDesktop(s);
-  const r = fromTerminal(s, ["--apply"], ["", "y"]);
+  const r = fromTerminal(s, ["--apply"], ["", "omarchy", "y"]);
   assert.equal(r.status, 0, r.out);
-  assert.deepEqual(r.asked, [UI_QUESTION, "Apply it? [y/N] "]);
+  assert.deepEqual(r.asked, [UI_QUESTION, AGENT_QUESTION, "Apply it? [y/N] "]);
   assert.equal(UI_QUESTION, "Open which OATS first: TUI or Desktop? [TUI/desktop] ");
   assert.match(r.out, /\nDefault UI\n {2}the TUI \(your answer\)/, "the plan it shows has the answer");
+  assert.match(r.out, /\nAgent key\n {2}Omarchy's agent \(your answer\)/, "and the agent key's");
   assert.equal(stateOf(s).ui, "tui");
+  assert.equal(stateOf(s).agentKey, "omarchy");
   // Asked again only when no choice is recorded.
   const again = fromTerminal(s, ["--apply"], ["y"]);
   assert.deepEqual(again.asked, ["Apply it? [y/N] "]);
@@ -83,9 +94,9 @@ test("both set up, no --ui, in a terminal: --apply asks which opens first; Enter
 test("--yes in a terminal still asks which opens first; it answers only Apply it?", (t) => {
   const s = sandbox(t);
   withDesktop(s);
-  const r = fromTerminal(s, ["--apply", "--yes"], ["desktop"]);
+  const r = fromTerminal(s, ["--apply", "--yes"], ["desktop", "omarchy"]);
   assert.equal(r.status, 0, r.out);
-  assert.deepEqual(r.asked, [UI_QUESTION]);
+  assert.deepEqual(r.asked, [UI_QUESTION, AGENT_QUESTION]);
   assert.equal(stateOf(s).ui, "desktop");
   assert.equal(itemsOf(s)["oats-ui"].action, pluginOf(s).desktop.map(shellWord).join(" "));
 });
@@ -93,15 +104,15 @@ test("--yes in a terminal still asks which opens first; it answers only Apply it
 test("the question takes TUI or Desktop in any case, and asks again for anything else; n still aborts", (t) => {
   const s = sandbox(t);
   withDesktop(s);
-  const r = fromTerminal(s, ["--apply"], ["web", "DESKTOP", "y"]);
+  const r = fromTerminal(s, ["--apply"], ["web", "DESKTOP", "omarchy", "y"]);
   assert.equal(r.status, 0, r.out);
-  assert.deepEqual(r.asked, [UI_QUESTION, UI_QUESTION, "Apply it? [y/N] "]);
+  assert.deepEqual(r.asked, [UI_QUESTION, UI_QUESTION, AGENT_QUESTION, "Apply it? [y/N] "]);
   assert.ok(r.out.includes("Answer TUI or Desktop (Enter is TUI).\n"));
   assert.equal(stateOf(s).ui, "desktop");
   const fresh = sandbox(t);
   withDesktop(fresh);
   const before = snapshot(fresh.home);
-  const no = fromTerminal(fresh, ["--apply"], ["d", "n"]);
+  const no = fromTerminal(fresh, ["--apply"], ["d", "omarchy", "n"]);
   assert.equal(no.status, 1);
   assert.match(no.out, /aborted: nothing was changed/);
   assert.deepEqual(snapshot(fresh.home), before);
@@ -135,9 +146,9 @@ test("both set up, no --ui, no terminal: --apply refuses with E_UI_REQUIRED, say
 
 test("only one set up: it is the default, nothing is asked, and no choice is recorded; the other found later asks", (t) => {
   const s = sandbox(t);
-  const r = fromTerminal(s, ["--apply"], ["y"]);
+  const r = fromTerminal(s, ["--apply"], ["omarchy", "y"]);
   assert.equal(r.status, 0, r.out);
-  assert.deepEqual(r.asked, ["Apply it? [y/N] "]);
+  assert.deepEqual(r.asked, [AGENT_QUESTION, "Apply it? [y/N] "], "no UI question");
   assert.match(r.out, /\nDefault UI\n {2}the TUI \(the only one set up\)/);
   assert.equal(stateOf(s).ui, null);
   assert.equal(pluginOf(s).ui, "tui");
@@ -151,7 +162,7 @@ test("only one set up: it is the default, nothing is asked, and no choice is rec
   withDesktop(s);
   assert.equal(s.run(["setup", "--apply", "--json"]).json.error.code, "E_UI_REQUIRED");
   const asked = fromTerminal(s, ["--apply"], ["desktop", "y"]);
-  assert.deepEqual(asked.asked, [UI_QUESTION, "Apply it? [y/N] "]);
+  assert.deepEqual(asked.asked, [UI_QUESTION, "Apply it? [y/N] "], "the agent key's answer is recorded: not asked again");
   assert.equal(stateOf(s).ui, "desktop");
 });
 
@@ -161,9 +172,10 @@ test("--ui with one set up is recorded and kept: the other found later asks noth
   assert.equal(stateOf(s).ui, "tui");
   assert.match(s.run(["setup", "--plan", "--ui", "tui"]).stdout, /\nDefault UI\n {2}the TUI \(--ui\)/);
   withDesktop(s);
-  const r = fromTerminal(s, ["--apply"], ["y"]);
+  // The first --apply had no terminal: no agent key is recorded, so it is asked.
+  const r = fromTerminal(s, ["--apply"], ["omarchy", "y"]);
   assert.equal(r.status, 0, r.out);
-  assert.deepEqual(r.asked, ["Apply it? [y/N] "]);
+  assert.deepEqual(r.asked, [AGENT_QUESTION, "Apply it? [y/N] "], "no UI question");
   assert.match(r.out, /\nDefault UI\n {2}the TUI \(chosen at an earlier --apply\)/);
   assert.equal(stateOf(s).ui, "tui");
   assert.equal(s.run(["setup", "--apply", "--json"]).status, 0, "no terminal: the recorded choice stands");

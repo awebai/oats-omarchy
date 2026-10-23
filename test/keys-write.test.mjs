@@ -9,7 +9,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, w
 import { join } from "node:path";
 import * as bindings from "../lib/bindings.mjs";
 import { paths as discoverPaths } from "../lib/discover.mjs";
-import { setup } from "../lib/setup.mjs";
+import { AGENT_QUESTION, setup } from "../lib/setup.mjs";
 import { verifyBindings } from "../lib/verify.mjs";
 import { fixture, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
@@ -286,19 +286,21 @@ test("--apply and --remove ask in a terminal and refuse without one unless --yes
   }
   assert.deepEqual(snapshot(s.home), before, "nothing was written");
 
-  const direct = (args, answer) => {
+  // The answers in turn: an --apply with no agent key recorded asks for it
+  // first; "omarchy" leaves the key block to SUPER + O.
+  const direct = (args, ...answers) => {
     let out = "";
     let asked = 0;
-    const status = setup([...args, "--dir", s.deployment], s.env, { write: (x) => { out += x; } }, { write: (x) => { out += x; } }, { interactive: true, ask: () => { asked += 1; return answer; } });
+    const status = setup([...args, "--dir", s.deployment], s.env, { write: (x) => { out += x; } }, { write: (x) => { out += x; } }, { interactive: true, ask: () => { asked += 1; return answers.shift() ?? ""; } });
     return { status, out, asked };
   };
-  const no = direct(["--apply"], "n");
-  assert.deepEqual([no.status, no.asked], [1, 1]);
-  assert.match(no.out, /^setup --plan \(nothing was written\)/);
+  const no = direct(["--apply"], "omarchy", "n");
+  assert.deepEqual([no.status, no.asked], [1, 2]);
+  assert.ok(no.out.startsWith(`${AGENT_QUESTION}setup --plan (nothing was written)\n`), "the agent key, then the plan");
   assert.match(no.out, /Apply it\? \[y\/N\] setup: aborted: nothing was changed\n$/);
   assert.deepEqual(snapshot(s.home), before);
 
-  const yes = direct(["--apply"], "y");
+  const yes = direct(["--apply"], "omarchy", "y");
   assert.equal(yes.status, 0, yes.out);
   assert.ok(readFileSync(file, "utf8").includes(bindings.START));
   assert.equal(s.run(["setup", "--remove"], {}, { yes: false }).status, 1, "--remove refuses too");
@@ -315,7 +317,8 @@ test("an interactive --apply verifies once, after the answer: a change made whil
   const file = hypr(s);
   let out = "";
   let callsWhenAsked = null;
-  const direct = (sb, ask) => setup(["--apply", "--dir", sb.deployment], sb.env, { write: (x) => { out += x; } }, { write: (x) => { out += x; } }, { interactive: true, ask });
+  // `ask` answers Apply it?; the agent key's question, asked first, gets "omarchy".
+  const direct = (sb, ask) => setup(["--apply", "--dir", sb.deployment], sb.env, { write: (x) => { out += x; } }, { write: (x) => { out += x; } }, { interactive: true, ask: () => (out.endsWith(AGENT_QUESTION) ? "omarchy" : ask()) });
   assert.equal(direct(s, () => { callsWhenAsked = hyprCalls(s).length; return "y"; }), 0);
   assert.equal(callsWhenAsked, 0, "the plan shown before the question runs no Hyprland");
   assert.match(out, /Once you confirm, and before it writes the key block, setup runs Hyprland --verify-config/);
