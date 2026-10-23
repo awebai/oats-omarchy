@@ -54,6 +54,7 @@ async function mode(m, cmd) {
   return m;
 }
 const version = JSON.parse(file("version.json") || JSON.stringify({ schemaVersion: 1, name: "@awebai/oats", version: "0.67.1", features: ${JSON.stringify(ALL_FEATURES)} }));
+if (argv.join(" ") === "--version") { console.log("@awebai/oats " + version.version + " (desktop API v1)"); process.exit(0); }
 if (argv.join(" ") === "version --json") { await mode(file("version.mode"), "version"); console.log(JSON.stringify(version)); process.exit(0); }
 if (argv.join(" ") === "deployments --json") {
   if (!version.features?.includes("deployments-list")) fail("E_UNKNOWN_COMMAND", "unknown command: deployments");

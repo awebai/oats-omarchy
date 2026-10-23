@@ -168,6 +168,10 @@ function world(t) {
   // As Omarchy 4.0.4's launcher does: its arguments are one bash command line.
   exe(join(bin, "omarchy-launch-floating-terminal-with-presentation"), `#!/bin/bash\ncmd="$*"\nexec bash -c "$cmd"\n`);
   for (const name of ["shim", "node", "setup"]) exe(join(odd, name), logger(name));
+  // The installer beside setup: it logs, and --check answers ready (exit 0)
+  // unless the test wrote another status to <dir>/check-status.
+  mkdirSync(join(odd, "bin"));
+  exe(join(odd, "bin", "omarchy-install-oats"), `${logger("omarchy-install-oats")}[ "$1" = --check ] && exit "$(cat '${join(dir, "check-status")}' 2>/dev/null || echo 0)"\nexit 0\n`);
   const plugin = {
     deployment: join(odd, "deployment"),
     tui: ["omarchy-launch-or-focus-tui", "--app-id=org.oats.tui", `'${join(odd, "shim")}'`, "tui"],
@@ -193,8 +197,14 @@ function world(t) {
     assert.ok(!existsSync(join(dir, "pwned")), "a path was not run as a command");
     return readFileSync(log, "utf8").split("\n").slice(0, -1);
   };
-  return { dir, odd, plugin, run, runArgv };
+  const ready = (yes) => writeFileSync(join(dir, "check-status"), yes ? "0" : "1");
+  return { dir, odd, plugin, run, runArgv, ready };
 }
+
+// Before setup has run, a set-up line asks the installer --check once, then
+// runs setup (OATS is ready) or the installer (it is not).
+const SETUP = ["omarchy-install-oats", "--check", "setup", "--apply"];
+const INSTALL = ["omarchy-install-oats", "--check", "omarchy-install-oats", "--now"];
 
 test("the panel's TUI and Desktop run the argv setup recorded, word for word", (t) => {
   const w = world(t);
@@ -222,27 +232,36 @@ test("the hint names the detach key plugin.json records: Ctrl+\\ from setup now,
   assert.equal(W.detachHint(null), "");
 });
 
-test("setup from the panel: --apply for the recorded deployment, or the plugin's setup --apply before it has run", (t) => {
+test("setup from the panel: --apply for the recorded deployment; before it has run, setup when OATS is ready, else the installer", (t) => {
   const w = world(t);
   assert.deepEqual(w.run(W.setupCommand(w.plugin, join(w.odd, "setup"))), ["node", join(w.odd, "setup.mjs"), "--dir", join(w.odd, "deployment"), "--apply"]);
-  assert.deepEqual(w.run(W.setupCommand(null, join(w.odd, "setup"))), ["setup", "--apply"]);
+  assert.doesNotMatch(W.setupCommand(w.plugin, join(w.odd, "setup")), /omarchy-install-oats/, "after setup, no check");
+  assert.deepEqual(w.run(W.setupCommand(null, join(w.odd, "setup"))), SETUP);
+  w.ready(false);
+  assert.deepEqual(w.run(W.setupCommand(null, join(w.odd, "setup"))), INSTALL);
+  assert.equal(W.installerPath("/p/ai.aweb.oats/setup"), "/p/ai.aweb.oats/bin/omarchy-install-oats");
 });
 
 test("the popup's commands run as argv: a session by its home, and setup", (t) => {
   const w = world(t);
   const home = join(w.odd, "instances", "with space 'and' $(quotes)");
   assert.deepEqual(w.runArgv(W.attachArgv(w.plugin, home)), ["shim", "session", "attach", "--detach-key", "C-\\", "--home", home]);
-  assert.deepEqual(w.runArgv(W.setupArgv(null, join(w.odd, "setup"))), ["setup", "--apply"]);
+  assert.deepEqual(w.runArgv(W.setupArgv(null, join(w.odd, "setup"))), SETUP);
+  w.ready(false);
+  assert.deepEqual(w.runArgv(W.setupArgv(null, join(w.odd, "setup"))), INSTALL);
   assert.deepEqual(w.runArgv(W.setupArgv(w.plugin, join(w.odd, "setup"))), ["node", join(w.odd, "setup.mjs"), "--dir", join(w.odd, "deployment"), "--apply"]);
 });
 
-test("the icon's clicks and tooltip: before setup either click runs the whole setup; after, left toggles the panel and right opens the default UI", (t) => {
+test("the icon's clicks and tooltip: before setup either click runs the whole setup, or the installer when OATS is not ready, asking --check once per click; after, left toggles the panel and right opens the default UI", (t) => {
   const w = world(t);
   const setup = join(w.odd, "setup");
-  for (const right of [false, true]) {
-    const action = W.clickAction(null, setup, right);
-    assert.deepEqual(Object.keys(action), ["line"]);
-    assert.deepEqual(w.run(action.line), ["setup", "--apply"], right ? "right" : "left");
+  for (const [ready, expect] of [[true, SETUP], [false, INSTALL]]) {
+    w.ready(ready);
+    for (const right of [false, true]) {
+      const action = W.clickAction(null, setup, right);
+      assert.deepEqual(Object.keys(action), ["line"]);
+      assert.deepEqual(w.run(action.line), expect, right ? "right" : "left");
+    }
   }
   assert.equal(W.tooltip(null), "OATS: click to set up");
   assert.deepEqual(W.clickAction(w.plugin, setup, false), { toggle: true });
@@ -258,6 +277,6 @@ test("the icon's right click: the default UI setup chose, the only one set up, e
   assert.deepEqual(w.run(W.quickCommand(read({ ...w.plugin, ui: "desktop" }), setup)), w.plugin.desktop);
   assert.deepEqual(w.run(W.quickCommand(read({ ...w.plugin, ui: "tui", tui: null }), setup)), w.plugin.desktop, "the Desktop alone");
   assert.deepEqual(w.run(W.quickCommand(read({ ...w.plugin, ui: null, tui: null, desktop: null }), setup))[0], "node");
-  assert.deepEqual(w.run(W.quickCommand(null, setup)), ["setup", "--apply"]);
+  assert.deepEqual(w.run(W.quickCommand(null, setup)), SETUP);
   assert.equal(W.defaultCommand(null), "");
 });

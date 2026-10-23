@@ -13,7 +13,8 @@ import "widget.mjs" as Widget
 // the default UI setup chose. Everything it runs or
 // reads is built by widget.mjs from setup's plugin.json; this file only displays it, runs commands through the
 // bar, and writes nothing. Without plugin.json, setup has not run: a click
-// on the icon runs the whole setup in a floating terminal instead
+// on the icon runs the whole setup in a floating terminal instead, or the
+// installer (bin/omarchy-install-oats) when OATS is not installed yet
 // (widget.mjs clickAction), and the tooltip says so.
 //
 // The rows are `waiting --json` (bin/waiting.mjs), read only when the panel

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { findSteward, STEWARD_AGENT, stewardsIn } from "../lib/steward.mjs";
+import { findSteward, STEWARD_AGENT, STEWARD_KEY, stewardsIn } from "../lib/steward.mjs";
 import { ALL_FEATURES, fakeKernel, gone } from "./helpers/fake-kernel.mjs";
 import { fixture, sandbox } from "./helpers/sandbox.mjs";
 
@@ -53,6 +53,24 @@ test("stewardsIn: the steward agent's instances only, not an instance named stew
   assert.deepEqual(stewardsIn(JSON.stringify(status({ extra: [decoy] }))), [{ instance: "steward", home: STEWARD_HOME }]);
   assert.deepEqual(stewardsIn(JSON.stringify(status({ stewards: [] }))), []);
   assert.throws(() => stewardsIn(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_LOCK", message: "oats-lock.json is unreadable" } })), /oats-lock.json is unreadable/);
+});
+
+test("stewardsIn: the agent row's soul key decides when it has one; its name only when the key is absent or null", () => {
+  const steward = STATUS.agents.find((a) => a.name === STEWARD_AGENT);
+  assert.equal(steward.key, STEWARD_KEY, "the fixture's row carries the real key");
+  const instance = { ...steward.instances[0], instance: "other", home: "/h/other" };
+  // A row named like the steward's agent whose key is another soul: never taken.
+  const decoy = { ...steward, key: "acme.tools/steward", instances: [instance] };
+  assert.deepEqual(stewardsIn(JSON.stringify({ ...STATUS, agents: [STATUS.agents[0], decoy] })), []);
+  // Without a key (null, or absent from an older kernel), the name decides.
+  for (const key of [null, undefined]) {
+    const row = { ...steward, instances: [instance] };
+    if (key === null) row.key = null; else delete row.key;
+    assert.deepEqual(stewardsIn(JSON.stringify({ ...STATUS, agents: [row] })), [{ instance: "other", home: "/h/other" }], String(key));
+  }
+  // The key is matched even under another agent name.
+  const renamed = { ...steward, name: "something-else", instances: [instance] };
+  assert.deepEqual(stewardsIn(JSON.stringify({ ...STATUS, agents: [renamed] })), [{ instance: "other", home: "/h/other" }]);
   assert.throws(() => stewardsIn("{}"), /no agents list/);
 });
 

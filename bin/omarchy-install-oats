@@ -1,0 +1,431 @@
+#!/bin/sh
+# omarchy:summary=Make this machine an OATS machine: install what is missing, then start an onboarding agent
+# omarchy:args=[--check|--now] [--harness claude|codex|pi]
+# omarchy:requires-sudo=true
+#
+# The contract of Omarchy's own agent installers (omarchy-install-openclaw-cli):
+# --check exits 0 only when OATS is ready here, and --now installs. --now
+# then hands over to the onboarding agent: the chosen harness, in ~/Work,
+# with lib/onboarding-prompt.txt, which follows OATS's getting-started. The
+# workspace, its identities and the steward are that agent's, never this
+# script's.
+#
+# Found first: a tool already on PATH at or above its minimum is used as it
+# is, never replaced and never shadowed by a second copy (a `mise use -g`
+# in front of the person's own install). Only what is missing is installed:
+# with mise, as Omarchy installs agents, and tmux with omarchy-pkg-add, which
+# asks for sudo (hence requires-sudo). A tool below its minimum stops the
+# run with the upgrade command for how it was installed. The only file it
+# writes is the found-list, and no identity or Claude setting but the aweb
+# channel plugin when it is absent. Node is needed only for the steward
+# check and the found-list (bin/install.mjs), so --check and the start of
+# --now run without it.
+set -u
+unset CDPATH
+
+NAME=omarchy-install-oats
+NODE_MIN=22
+AW_MIN=1.36.33
+OATS_MIN=0.67.1
+STEPS=6
+CHANNEL=aweb-channel@awebai-marketplace
+MARKETPLACE=awebai-marketplace
+MARKETPLACE_SOURCE=awebai/claude-plugins
+
+dir=$(cd -- "$(dirname -- "$0")" && pwd -P) || exit 1
+plugin=$(cd -- "$dir/.." && pwd -P) || exit 1
+self=$dir/$(basename -- "$0")
+mise_data=${MISE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}
+
+usage() {
+  cat <<'USAGE'
+usage: omarchy-install-oats [--check | --now] [--harness claude|codex|pi]
+
+  Makes this Omarchy machine an OATS machine.
+
+  --check   says what is there, one line each (node, tmux, aw, oats, the
+            steward; the harness and Claude's aweb channel plugin with
+            --harness), and exits 0 only when OATS is ready
+  --now     installs what is missing, then starts the onboarding agent: the
+            harness in ~/Work, to follow OATS's getting-started (the default)
+  --harness the harness the agents run on; without it, --now asks
+USAGE
+}
+
+say() { printf '%s: %s\n' "$NAME" "$*"; }
+refuse() { printf '%s: %s\n' "$NAME" "$1" >&2; usage >&2; exit 2; }
+
+mode=--now
+harness=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --check | --now) mode=$1 ;;
+    --harness)
+      [ $# -ge 2 ] || refuse "--harness needs a value"
+      harness=$2
+      shift
+      ;;
+    --harness=*) harness=${1#--harness=} ;;
+    -h | --help) usage; exit 0 ;;
+    *) refuse "unknown argument: $1" ;;
+  esac
+  shift
+done
+case $harness in
+  '' | claude | codex | pi) ;;
+  *) refuse "--harness must be claude, codex or pi, not $harness" ;;
+esac
+
+# $1 >= $2, comparing the leading digits of up to three dotted parts.
+ver_ge() {
+  a=$1. b=$2.
+  for _ in 1 2 3; do
+    x=${a%%.*} y=${b%%.*}
+    x=${x%%[!0-9]*} y=${y%%[!0-9]*}
+    x=${x:-0} y=${y:-0}
+    [ "$x" -gt "$y" ] && return 0
+    [ "$x" -lt "$y" ] && return 1
+    a=${a#*.} b=${b#*.}
+    [ -n "$a" ] || a=0.
+    [ -n "$b" ] || b=0.
+  done
+  return 0
+}
+
+first_version() { grep -oE '[0-9]+(\.[0-9]+)+[0-9A-Za-z.+-]*' | head -n 1; }
+
+# What each tool is called by npm, mise and pacman, and its minimum.
+spec() {
+  T_NPM= T_MISE= T_PAC= T_MIN=
+  case $1 in
+    node) T_MISE=node T_PAC=nodejs T_MIN=$NODE_MIN ;;
+    tmux) T_PAC=tmux ;;
+    aw) T_NPM=@awebai/aw T_MISE=npm:@awebai/aw T_MIN=$AW_MIN ;;
+    oats) T_NPM=@awebai/oats T_MISE=npm:@awebai/oats T_MIN=$OATS_MIN ;;
+    claude) T_NPM=@anthropic-ai/claude-code T_MISE=claude ;;
+    codex) T_NPM=@openai/codex T_MISE=codex ;;
+    pi) T_MISE=pi ;;
+  esac
+}
+
+version_of() {
+  case $1 in
+    tmux) "$2" -V ;;
+    aw) "$2" version ;;
+    *) "$2" --version ;;
+  esac 2>/dev/null | first_version
+}
+
+# The real path behind a command; a mise shim is resolved to what mise runs.
+resolve() {
+  r=$(readlink -f -- "$2" 2>/dev/null) || r=$2
+  if [ "${r##*/}" = mise ] && w=$(mise which "$1" 2>/dev/null); then
+    r=$(readlink -f -- "$w" 2>/dev/null) || r=$w
+  fi
+  printf '%s\n' "$r"
+}
+
+# Where a tool comes from, by its resolved path (and the command's own path
+# for ~/.local/bin). mise's npm backend keeps packages under node_modules
+# too, so it is told apart first.
+origin_of() {
+  case $2 in
+    "$mise_data"/installs/npm-*) echo mise; return ;;
+    */lib/node_modules/*) echo npm-global; return ;;
+    "$mise_data"/installs/*) echo mise; return ;;
+    /usr/* | /bin/*) echo pacman; return ;;
+    "${NVM_DIR:-$HOME/.nvm}"/*) echo nvm; return ;;
+  esac
+  case $1 in
+    "$HOME"/.local/bin/*) echo local-bin; return ;;
+  esac
+  echo other
+}
+
+# The upgrade command for how it was installed: origin, resolved path.
+upgrade_of() {
+  case $1 in
+    npm-global)
+      if [ -z "$T_NPM" ]; then echo "upgrade it the way you installed it"; return; fi
+      prefix=${2%%/lib/node_modules/*}
+      if [ "$prefix" = "$(npm prefix -g 2>/dev/null)" ]; then
+        echo "npm install -g $T_NPM@latest"
+      else
+        echo "npm install -g --prefix $prefix $T_NPM@latest"
+      fi
+      ;;
+    mise) echo "mise use -g $T_MISE@latest" ;;
+    pacman)
+      if [ -n "$T_PAC" ]; then echo "sudo pacman -Syu $T_PAC"; else echo "upgrade it the way you installed it"; fi
+      ;;
+    *) echo "upgrade it the way you installed it" ;;
+  esac
+}
+
+# Omarchy's lazy-install wrapper rule, as omarchy-default-agent's
+# user_install has it: anything at ~/.local/bin/<agent> other than Omarchy's
+# own wrapper (a script that runs `mise use -g` on first use) is the
+# person's own install, such as a symlink their installer left.
+user_install() {
+  [ -x "$HOME/.local/bin/$1" ] && { [ -L "$HOME/.local/bin/$1" ] || ! grep -q '^mise use -g' "$HOME/.local/bin/$1"; }
+}
+
+# Looks for a tool on PATH. → T_STATE found | missing | old | unusable, with
+# T_VERSION, T_ORIGIN, T_CMD (the command to run), T_PATH (its real path)
+# and T_NOTE (why, for old and unusable).
+detect() {
+  spec "$1"
+  T_STATE=missing T_VERSION= T_ORIGIN= T_PATH= T_NOTE=
+  T_CMD=$(command -v "$1" 2>/dev/null) || T_CMD=
+  case $T_CMD in /*) ;; *) T_CMD= ;; esac
+  [ -n "$T_CMD" ] || return 0
+  case $1 in
+    claude | codex | pi)
+      # Omarchy's wrapper installs nothing until it runs: it counts only
+      # once mise has the agent, and it is never run to ask its version.
+      if [ "$T_CMD" = "$HOME/.local/bin/$1" ] && ! user_install "$1"; then
+        T_CMD=$(mise which "$1" 2>/dev/null) || T_CMD=
+        [ -n "$T_CMD" ] || return 0
+      fi
+      ;;
+    oats)
+      case $T_CMD in
+        */.oats/bin/oats)
+          T_STATE=unusable T_PATH=$T_CMD
+          T_NOTE="$T_CMD is an instance home's shim, not the installed OATS CLI: run $NAME outside an agent session"
+          return 0
+          ;;
+      esac
+      ;;
+  esac
+  T_PATH=$(resolve "$1" "$T_CMD")
+  T_ORIGIN=$(origin_of "$T_CMD" "$T_PATH")
+  T_VERSION=$(version_of "$1" "$T_CMD")
+  if [ -z "$T_VERSION" ]; then
+    T_STATE=unusable T_NOTE="$T_CMD did not say its version"
+  elif [ -n "$T_MIN" ] && ! ver_ge "$T_VERSION" "$T_MIN"; then
+    T_STATE=old T_NOTE="$T_VERSION < $T_MIN; upgrade: $(upgrade_of "$T_ORIGIN" "$T_PATH")"
+  else
+    T_STATE=found
+  fi
+}
+
+# Claude's plugin commands: present when `claude plugin list --json` answers
+# a list (an older claude has no plugin subcommand).
+has_plugins() { "$1" plugin list --json 2>/dev/null | grep -q '^\['; }
+channel_present() { "$1" plugin list --json 2>/dev/null | grep -q "\"id\": *\"$CHANNEL\""; }
+marketplace_present() { "$1" plugin marketplace list --json 2>/dev/null | grep -q "\"name\": *\"$MARKETPLACE\""; }
+
+# ---------------------------------------------------------------------------
+# --check
+
+check() {
+  ready=0
+  item() { printf '%s: %s\n' "$1" "$2"; }
+  reported() {
+    case $T_STATE in
+      found) item "$1" "found $T_VERSION ($T_ORIGIN)" ;;
+      missing) item "$1" missing; ready=1 ;;
+      old) item "$1" "too old: $T_NOTE"; ready=1 ;;
+      unusable) item "$1" "not usable: $T_NOTE"; ready=1 ;;
+    esac
+  }
+  detect node; reported node
+  node_cmd=; [ "$T_STATE" = found ] && node_cmd=$T_CMD
+  detect tmux; reported tmux
+  detect aw; reported aw
+  oats_path=
+  if [ -z "$node_cmd" ]; then
+    item oats "missing: node is needed to run it"; ready=1
+  else
+    detect oats; reported oats
+    [ "$T_STATE" = found ] && oats_path=$T_PATH
+  fi
+  if [ -n "$oats_path" ]; then
+    line=$("$node_cmd" "$plugin/bin/install.mjs" steward --oats "$oats_path" 2>&1) || ready=1
+    item steward "$line"
+  else
+    item steward "missing: node and the OATS CLI are needed to look for it"; ready=1
+  fi
+  if [ -n "$harness" ]; then
+    detect "$harness"; reported "$harness"
+    if [ "$harness" = claude ] && [ "$T_STATE" = found ]; then
+      if ! has_plugins "$T_CMD"; then
+        item "$CHANNEL" "too old: claude $T_VERSION has no plugin command; upgrade: $(upgrade_of "$T_ORIGIN" "$T_PATH")"; ready=1
+      elif channel_present "$T_CMD"; then
+        item "$CHANNEL" "found (claude-plugin)"
+      else
+        item "$CHANNEL" missing; ready=1
+      fi
+    elif [ "$harness" = claude ]; then
+      item "$CHANNEL" "missing: claude is needed to install it"; ready=1
+    fi
+  fi
+  exit $ready
+}
+
+# ---------------------------------------------------------------------------
+# --now
+
+STEP=0 STEP_NAME=
+step() {
+  STEP=$1 STEP_NAME=$2
+  say "step $1/$STEPS: $3"
+}
+fail() {
+  printf '%s: step %s (%s) failed: %s\n' "$NAME" "$STEP" "$STEP_NAME" "$1" >&2
+  exit 1
+}
+
+# What the found-list's tools[] gets, by tool: name, version, origin, path,
+# state, tab-separated (bin/install.mjs parseTools).
+record() {
+  rec=$(printf '%s\t%s\t%s\t%s\t%s' "$1" "${T_VERSION:--}" "${T_ORIGIN:--}" "${T_PATH:--}" "$2")
+  eval "REC_$3=\$rec"
+}
+
+need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is not on PATH: $2"; }
+
+# A tool: used when found, installed when missing, a stop otherwise.
+ensure() {
+  detect "$1"
+  case $T_STATE in
+    found) say "found $1 $T_VERSION ($T_ORIGIN): using it"; record "$1" found "$2"; return 0 ;;
+    old) fail "$1 is too old: $T_NOTE" ;;
+    unusable) fail "$T_NOTE" ;;
+  esac
+  if [ "$1" = tmux ]; then
+    need omarchy-pkg-add "Omarchy installs packages with it"
+    say "installing tmux with omarchy-pkg-add: it is a system package, so it asks for your password"
+    omarchy-pkg-add tmux || fail "omarchy-pkg-add tmux exited with status $?"
+  else
+    need mise "Omarchy ships it; install mise, then run $NAME --now again"
+    say "installing $1 with mise (mise use -g $T_MISE)"
+    mise use -g "$T_MISE" || fail "mise use -g $T_MISE exited with status $?"
+  fi
+  # A new shim or binary: forget where the shell last found the command.
+  hash -r 2>/dev/null || :
+  detect "$1"
+  case $T_STATE in
+    found) say "installed $1 $T_VERSION ($T_ORIGIN)"; record "$1" installed "$2" ;;
+    missing) fail "$1 was installed, but it is not on PATH: open a new terminal and run $NAME --now again" ;;
+    old) fail "the installed $1 is too old: $T_NOTE" ;;
+    unusable) fail "$T_NOTE" ;;
+  esac
+}
+
+# Started from the menu or a key, with no terminal: the same, again, in
+# Omarchy's floating terminal, as omarchy-default-agent does.
+in_terminal() {
+  [ -t 0 ] && [ -t 1 ] && return 0
+  [ -n "${OMARCHY_INSTALL_OATS_TERMINAL:-}" ] && return 0
+  if floating=$(command -v omarchy-launch-floating-terminal-with-presentation 2>/dev/null); then
+    case $self in *"'"*) printf '%s: %s\n' "$NAME" "its path holds a single quote: $self" >&2; exit 1 ;; esac
+    exec "$floating" "OMARCHY_INSTALL_OATS_TERMINAL=1 '$self' --now${harness:+ --harness $harness}"
+  fi
+  printf '%s: %s\n' "$NAME" "--now needs a terminal: the onboarding agent runs in it" >&2
+  exit 2
+}
+
+choose_harness() {
+  if [ -n "$harness" ]; then say "using $harness"; return 0; fi
+  if [ ! -t 0 ] && [ -z "${OMARCHY_INSTALL_OATS_TERMINAL:-}" ]; then
+    refuse "--now needs --harness claude|codex|pi without a terminal to ask in"
+  fi
+  default=$(omarchy-default-agent 2>/dev/null) || default=
+  case $default in claude | codex | pi) ;; *) default=claude ;; esac
+  others=
+  for h in claude codex pi; do [ "$h" = "$default" ] || others=$others/$h; done
+  printf 'Which harness should your agents run on? [%s%s] ' "$default" "$others"
+  read -r answer || answer=
+  harness=${answer:-$default}
+  case $harness in
+    claude | codex | pi) say "using $harness" ;;
+    *) fail "$harness is not one of claude, codex or pi" ;;
+  esac
+}
+
+channel() {
+  h=$1
+  if ! has_plugins "$h"; then
+    detect claude
+    fail "claude $T_VERSION has no plugin command; upgrade: $(upgrade_of "$T_ORIGIN" "$T_PATH")"
+  fi
+  if marketplace_present "$h"; then
+    say "found the $MARKETPLACE marketplace: using it"
+  else
+    "$h" plugin marketplace add "$MARKETPLACE_SOURCE" || fail "claude plugin marketplace add $MARKETPLACE_SOURCE exited with status $?"
+  fi
+  T_VERSION= T_ORIGIN=claude-plugin T_PATH=
+  if channel_present "$h"; then
+    say "found $CHANNEL: using it"
+    record "$CHANNEL" found plugin
+  else
+    "$h" plugin install "$CHANNEL" || fail "claude plugin install $CHANNEL exited with status $?"
+    channel_present "$h" || fail "claude plugin install $CHANNEL did not install it"
+    record "$CHANNEL" installed plugin
+  fi
+}
+
+# The onboarding agent, inline in this terminal, with the prompt as one argv
+# element. These are the unattended flags of Omarchy's own agent launcher
+# (/usr/share/omarchy/bin/omarchy-agent); claude also loads the aweb channel
+# as a development channel, which it asks the person to confirm.
+start_harness() {
+  case $harness in
+    claude) exec "$1" --permission-mode auto --dangerously-load-development-channels "plugin:$CHANNEL" -- "$2" ;;
+    codex) exec "$1" --approve-for-me -- "$2" ;;
+    pi) exec "$1" "$2" ;;
+  esac
+}
+
+now() {
+  in_terminal
+  REC_node= REC_tmux= REC_aw= REC_oats= REC_harness= REC_plugin=
+
+  step 1 harness "the harness your agents run on"
+  choose_harness
+
+  step 2 tools "node, $harness and tmux"
+  ensure node node
+  node_cmd=$T_CMD
+  ensure "$harness" harness
+  harness_cmd=$T_CMD
+  ensure tmux tmux
+
+  step 3 aw "aw, the aweb CLI"
+  ensure aw aw
+  aw_cmd=$T_CMD
+
+  step 4 oats "the OATS CLI"
+  ensure oats oats
+  oats_path=$T_PATH
+
+  if [ "$harness" = claude ]; then
+    step 5 channel "Claude's aweb channel plugin"
+    channel "$harness_cmd"
+  else
+    step 5 channel "skipped: the aweb channel plugin is for claude, and $harness needs none"
+  fi
+
+  step 6 onboarding "the onboarding agent, in ~/Work"
+  work=$HOME/Work
+  if [ -e "$work" ] && [ ! -d "$work" ]; then fail "$work is there and is not a directory"; fi
+  mkdir -p "$work" || fail "mkdir $work exited with status $?"
+  tools=
+  for r in "$REC_node" "$REC_tmux" "$REC_aw" "$REC_oats" "$REC_harness" "$REC_plugin"; do
+    [ -n "$r" ] && tools="$tools$r
+"
+  done
+  prompt=$(printf '%s' "$tools" | "$node_cmd" "$plugin/bin/install.mjs" handoff --harness "$harness" --oats "$oats_path" --aw "$aw_cmd") ||
+    fail "the found-list could not be written"
+  cd "$work" || fail "cd $work exited with status $?"
+  say "starting $harness in $work"
+  start_harness "$harness_cmd" "$prompt"
+  fail "$harness_cmd could not be started"
+}
+
+case $mode in
+  --check) check ;;
+  --now) now ;;
+esac

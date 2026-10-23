@@ -5,4 +5,5 @@ field name is the kernel's. The paths, names and workspace key are made up,
 each instance row keeps a subset of its fields, `features` is shortened, and
 the oats-machine--steward agent is modelled on a package soul's agent from
 that capture (its name as packageSoulAgentName gives it, with
-soulSource.path oats-package/souls/<soul>).
+soulSource.path oats-package/souls/<soul>, and the soul key
+oats.machine/steward on its agent row, which isStewardAgent matches first).
