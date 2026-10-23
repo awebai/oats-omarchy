@@ -54,7 +54,8 @@ steps, one line each:
 3. **aw**, the aweb CLI (1.36.33 or later), with mise.
 4. **The OATS CLI** (0.67.1 or later), with mise.
 5. **Claude's aweb channel plugin**, with claude only: its marketplace and
-   the plugin, each when it is absent.
+   the plugin, each when it is absent. A copy you disabled stays disabled:
+   it stops with the command that enables it.
 6. **The onboarding agent.** It writes what it found to
    `~/.local/state/oats-omarchy/found.json` ([the found-list](docs/found-list.md)),
    then starts the harness in `~/Work` with a prompt that points it at
@@ -76,7 +77,8 @@ tmux, when it is missing, asks for their password:
 ```
 
 Without a terminal, `--now` opens Omarchy's floating terminal and runs
-there, because the onboarding agent runs in it.
+there, because the onboarding agent runs in it; without `--harness` it is
+refused.
 
 ## Installing with a coding agent
 

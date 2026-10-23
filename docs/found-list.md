@@ -67,6 +67,9 @@ One JSON object, with no secrets:
   steward's agent (`lib/steward.mjs` `isStewardAgent`: the agent row whose
   `key` is `oats.machine/steward`, or, on a row without a key, the agent
   named `oats-machine--steward`); false for a deployment that is not `ok`.
+  When an `ok` deployment's status cannot be read, no found-list is written
+  and the installer stops, naming it: `steward: false` always means the
+  status was read.
 
 ## Versioning
 

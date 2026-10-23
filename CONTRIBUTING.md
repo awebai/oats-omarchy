@@ -472,10 +472,17 @@ not exist yet) and the handoff.
   is omarchy-default-agent's rule for telling it from the person's own
   install; a wrapper counts only when mise has the agent, and it is never
   run.
-- **An instance's shim** (`*/.oats/bin/oats`) is not the CLI: the
-  installer refuses it, as setup does.
+- **An instance's shim** (`*/.oats/bin/oats`) is not the CLI, on PATH or
+  behind a link: the installer refuses it without running it, as setup
+  does.
+- **Claude's channel plugin** is read from `claude plugin list --json` by
+  node (`channelState`): a user-scoped copy counts, a project or local one
+  only when it is `~/Work`'s, since the list names other projects' copies
+  too. A disabled copy stops the run with the command that enables it; it
+  is never enabled or installed over.
 - **The handoff.** `--now`'s last step writes the found-list
-  (`docs/found-list.md`) and prints the prompt: `lib/onboarding-prompt.txt`
+  (`docs/found-list.md`; a deployment whose status cannot be read stops
+  it, so `steward: false` is never a guess) and prints the prompt: `lib/onboarding-prompt.txt`
   with its placeholders filled (`renderPrompt`). The prompt states facts
   only (the skill, the harness, the plugin, the found-list); the bootstrap's
   steps are getting-started's, and the test holds a list of command names it
@@ -486,7 +493,8 @@ not exist yet) and the handoff.
   `omarchy-agent`'s unattended flags.
 - **No terminal.** From the menu or a key, `--now` runs itself again in
   Omarchy's floating terminal, marked with `OMARCHY_INSTALL_OATS_TERMINAL=1`
-  (which the tests set to run inline).
+  (which the tests set to run inline). Without `--harness` there it is
+  refused first, since nobody can be asked.
 - **The bar icon.** Before setup has run, the icon's set-up line
   (`widget.mjs` `setupCommand`) asks `--check` first, inside the line, so it
   runs once per click and never otherwise, and runs the installer instead of

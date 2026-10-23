@@ -100,7 +100,7 @@ case "$1" in
       "list --json") cat "$c/plugins.json" 2>/dev/null || echo '[]' ;;
       "marketplace list") cat "$c/marketplaces.json" 2>/dev/null || echo '[]' ;;
       "marketplace add") [ -f "$c/fail-marketplace" ] && { echo "failed to clone $4" >&2; exit 1; }; echo '[{"name":"awebai-marketplace","source":"github","repo":"awebai/claude-plugins"}]' > "$c/marketplaces.json" ;;
-      "install aweb-channel@awebai-marketplace") echo '[{"id":"aweb-channel@awebai-marketplace","version":"1.7.11","scope":"user","enabled":true}]' > "$c/plugins.json" ;;
+      "install aweb-channel@awebai-marketplace") printf '%s\\n' '[' '  {' '    "id": "aweb-channel@awebai-marketplace",' '    "version": "1.7.11",' '    "scope": "user",' '    "enabled": true' '  }' ']' > "$c/plugins.json" ;;
       *) echo "claude: $*" >&2; exit 1 ;;
     esac
     exit 0 ;;
@@ -209,8 +209,10 @@ export const ALL = (w, { harness = "claude", node = "26.8.2", aw = "1.36.47", oa
   w.put("oats", "npm-global", oats);
   w.put(harness, "local-bin", "2.1.308");
 };
-export const withChannel = (w) => {
-  writeFileSync(join(w.root, "claude", "plugins.json"), JSON.stringify([{ id: "aweb-channel@awebai-marketplace", version: "1.7.11", scope: "user", enabled: true }]));
+// Claude's plugin list as `claude plugin list --json` prints it (indented),
+// with the channel plugin as `entry` makes it.
+export const withChannel = (w, entry = {}) => {
+  writeFileSync(join(w.root, "claude", "plugins.json"), JSON.stringify([{ id: "aweb-channel@awebai-marketplace", version: "1.7.11", scope: "user", enabled: true, ...entry }], null, 2));
   writeFileSync(join(w.root, "claude", "marketplaces.json"), JSON.stringify([{ name: "awebai-marketplace", source: "github", repo: "awebai/claude-plugins" }]));
 };
 // One deployment with a steward and one without.

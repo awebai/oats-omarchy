@@ -31,6 +31,7 @@ STEPS=6
 CHANNEL=aweb-channel@awebai-marketplace
 MARKETPLACE=awebai-marketplace
 MARKETPLACE_SOURCE=awebai/claude-plugins
+DISABLED="it is installed and disabled; enable it with: claude plugin enable $CHANNEL"
 
 dir=$(cd -- "$(dirname -- "$0")" && pwd -P) || exit 1
 plugin=$(cd -- "$dir/.." && pwd -P) || exit 1
@@ -95,10 +96,12 @@ ver_ge() {
 first_version() { grep -oE '[0-9]+(\.[0-9]+)+[0-9A-Za-z.+-]*' | head -n 1; }
 
 # What each tool is called by npm, mise and pacman, and its minimum.
+# T_MISE_AT is the version mise installs and upgrades to: node's LTS line,
+# else the latest.
 spec() {
-  T_NPM= T_MISE= T_PAC= T_MIN=
+  T_NPM= T_MISE= T_PAC= T_MIN= T_MISE_AT=latest
   case $1 in
-    node) T_MISE=node T_PAC=nodejs T_MIN=$NODE_MIN ;;
+    node) T_MISE=node T_PAC=nodejs T_MIN=$NODE_MIN T_MISE_AT=lts ;;
     tmux) T_PAC=tmux ;;
     aw) T_NPM=@awebai/aw T_MISE=npm:@awebai/aw T_MIN=$AW_MIN ;;
     oats) T_NPM=@awebai/oats T_MISE=npm:@awebai/oats T_MIN=$OATS_MIN ;;
@@ -154,7 +157,7 @@ upgrade_of() {
         echo "npm install -g --prefix $prefix $T_NPM@latest"
       fi
       ;;
-    mise) echo "mise use -g $T_MISE@latest" ;;
+    mise) echo "mise use -g $T_MISE@$T_MISE_AT" ;;
     pacman)
       if [ -n "$T_PAC" ]; then echo "sudo pacman -Syu $T_PAC"; else echo "upgrade it the way you installed it"; fi
       ;;
@@ -188,17 +191,21 @@ detect() {
         [ -n "$T_CMD" ] || return 0
       fi
       ;;
-    oats)
-      case $T_CMD in
+  esac
+  T_PATH=$(resolve "$1" "$T_CMD")
+  # An instance home's shim is not the CLI, on PATH or behind a link, and
+  # it is not run, as setup's discover.kernel has it.
+  if [ "$1" = oats ]; then
+    for p in "$T_CMD" "$T_PATH"; do
+      case $p in
         */.oats/bin/oats)
-          T_STATE=unusable T_PATH=$T_CMD
-          T_NOTE="$T_CMD is an instance home's shim, not the installed OATS CLI: run $NAME outside an agent session"
+          T_STATE=unusable
+          T_NOTE="$p is an instance home's shim, not the installed OATS CLI: run $NAME outside an agent session"
           return 0
           ;;
       esac
-      ;;
-  esac
-  T_PATH=$(resolve "$1" "$T_CMD")
+    done
+  fi
   T_ORIGIN=$(origin_of "$T_CMD" "$T_PATH")
   T_VERSION=$(version_of "$1" "$T_CMD")
   if [ -z "$T_VERSION" ]; then
@@ -213,7 +220,10 @@ detect() {
 # Claude's plugin commands: present when `claude plugin list --json` answers
 # a list (an older claude has no plugin subcommand).
 has_plugins() { "$1" plugin list --json 2>/dev/null | grep -q '^\['; }
-channel_present() { "$1" plugin list --json 2>/dev/null | grep -q "\"id\": *\"$CHANNEL\""; }
+# The channel plugin for a session in ~/Work, as `claude plugin list --json`
+# lists it (bin/install.mjs channel): enabled, disabled or absent. A copy
+# installed for another project is absent here. $1 claude, $2 node.
+channel_state() { "$1" plugin list --json 2>/dev/null | "$2" "$plugin/bin/install.mjs" channel --dir "$HOME/Work"; }
 marketplace_present() { "$1" plugin marketplace list --json 2>/dev/null | grep -q "\"name\": *\"$MARKETPLACE\""; }
 
 # ---------------------------------------------------------------------------
@@ -252,10 +262,14 @@ check() {
     if [ "$harness" = claude ] && [ "$T_STATE" = found ]; then
       if ! has_plugins "$T_CMD"; then
         item "$CHANNEL" "too old: claude $T_VERSION has no plugin command; upgrade: $(upgrade_of "$T_ORIGIN" "$T_PATH")"; ready=1
-      elif channel_present "$T_CMD"; then
-        item "$CHANNEL" "found (claude-plugin)"
+      elif [ -z "$node_cmd" ]; then
+        item "$CHANNEL" "missing: node is needed to read Claude's plugin list"; ready=1
       else
-        item "$CHANNEL" missing; ready=1
+        case $(channel_state "$T_CMD" "$node_cmd") in
+          enabled) item "$CHANNEL" "found (claude-plugin)" ;;
+          disabled) item "$CHANNEL" "not usable: $DISABLED"; ready=1 ;;
+          *) item "$CHANNEL" missing; ready=1 ;;
+        esac
       fi
     elif [ "$harness" = claude ]; then
       item "$CHANNEL" "missing: claude is needed to install it"; ready=1
@@ -300,8 +314,10 @@ ensure() {
     omarchy-pkg-add tmux || fail "omarchy-pkg-add tmux exited with status $?"
   else
     need mise "Omarchy ships it; install mise, then run $NAME --now again"
-    say "installing $1 with mise (mise use -g $T_MISE)"
-    mise use -g "$T_MISE" || fail "mise use -g $T_MISE exited with status $?"
+    install=$T_MISE
+    [ "$T_MISE_AT" = latest ] || install=$T_MISE@$T_MISE_AT
+    say "installing $1 with mise (mise use -g $install)"
+    mise use -g "$install" || fail "mise use -g $install exited with status $?"
   fi
   # A new shim or binary: forget where the shell last found the command.
   hash -r 2>/dev/null || :
@@ -346,7 +362,7 @@ choose_harness() {
 }
 
 channel() {
-  h=$1
+  h=$1 n=$2
   if ! has_plugins "$h"; then
     detect claude
     fail "claude $T_VERSION has no plugin command; upgrade: $(upgrade_of "$T_ORIGIN" "$T_PATH")"
@@ -357,14 +373,18 @@ channel() {
     "$h" plugin marketplace add "$MARKETPLACE_SOURCE" || fail "claude plugin marketplace add $MARKETPLACE_SOURCE exited with status $?"
   fi
   T_VERSION= T_ORIGIN=claude-plugin T_PATH=
-  if channel_present "$h"; then
-    say "found $CHANNEL: using it"
-    record "$CHANNEL" found plugin
-  else
-    "$h" plugin install "$CHANNEL" || fail "claude plugin install $CHANNEL exited with status $?"
-    channel_present "$h" || fail "claude plugin install $CHANNEL did not install it"
-    record "$CHANNEL" installed plugin
-  fi
+  case $(channel_state "$h" "$n") in
+    enabled)
+      say "found $CHANNEL: using it"
+      record "$CHANNEL" found plugin
+      ;;
+    disabled) fail "$CHANNEL $DISABLED" ;;
+    *)
+      "$h" plugin install "$CHANNEL" || fail "claude plugin install $CHANNEL exited with status $?"
+      [ "$(channel_state "$h" "$n")" = enabled ] || fail "claude plugin install $CHANNEL did not install it"
+      record "$CHANNEL" installed plugin
+      ;;
+  esac
 }
 
 # The onboarding agent, inline in this terminal, with the prompt as one argv
@@ -380,6 +400,10 @@ start_harness() {
 }
 
 now() {
+  # Nobody to ask: refused before anything runs, the floating terminal too.
+  if [ -z "$harness" ] && [ -z "${OMARCHY_INSTALL_OATS_TERMINAL:-}" ] && ! { [ -t 0 ] && [ -t 1 ]; }; then
+    refuse "--now needs --harness claude|codex|pi without a terminal to ask in"
+  fi
   in_terminal
   REC_node= REC_tmux= REC_aw= REC_oats= REC_harness= REC_plugin=
 
@@ -403,7 +427,7 @@ now() {
 
   if [ "$harness" = claude ]; then
     step 5 channel "Claude's aweb channel plugin"
-    channel "$harness_cmd"
+    channel "$harness_cmd" "$node_cmd"
   else
     step 5 channel "skipped: the aweb channel plugin is for claude, and $harness needs none"
   fi

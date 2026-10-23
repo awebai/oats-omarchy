@@ -123,6 +123,29 @@ test("--check: a claude without the plugin command, or without the channel plugi
   assert.match(r.stdout, /^aweb-channel@awebai-marketplace: too old: claude 2\.1\.308 has no plugin command; upgrade: upgrade it the way you installed it$/m);
 });
 
+test("--check: an oats on PATH that links to an instance home's shim is not the CLI, and is not run", (t) => {
+  const w = world(t);
+  ALL(w);
+  deployments(w);
+  rmSync(join(w.npm, "bin", "oats"));
+  const shim = join(w.root, "agents", "one", "instances", "one-1", ".oats", "bin", "oats");
+  writeExecutable(shim, `#!/bin/sh\necho RAN >> '${join(w.root, "shim.log")}'\necho '@awebai/oats 0.67.1'\n`);
+  symlinkSync(shim, join(w.other, "oats"));
+  const r = w.run(["--check"]);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.stdout, new RegExp(`^oats: not usable: ${shim.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} is an instance home's shim`, "m"));
+  assert.equal(w.log("shim.log"), "");
+});
+
+test("--now without --harness and without a terminal is refused before anything runs, the floating terminal included", (t) => {
+  const w = world(t);
+  const r = w.run(["--now"], { extraEnv: { OMARCHY_INSTALL_OATS_TERMINAL: "" } });
+  assert.equal(r.status, 2, r.out);
+  assert.match(r.stderr, /^omarchy-install-oats: --now needs --harness claude\|codex\|pi without a terminal to ask in$/m);
+  assert.equal(w.log("floating.log"), "");
+  assert.equal(w.log("mise.log"), "");
+});
+
 test("bad arguments are refused before anything runs", (t) => {
   const w = world(t);
   for (const args of [["--harness", "grok"], ["--harness"], ["--bogus"], ["--now", "--harness=opencode"]]) {
@@ -171,14 +194,14 @@ test("--now installs what is missing with mise, says so, and the found-list says
   const w = world(t);
   w.put("tmux", "other", "3.5a");
   w.put("pi", "lazy");
-  miseInstalls(w, "node", "node", "24.3.0");
+  miseInstalls(w, "node", "node@lts", "24.3.0");
   miseInstalls(w, "pi", "pi", "0.40.1");
   miseInstalls(w, "aw", "npm:@awebai/aw", "1.36.47");
   miseInstalls(w, "oats", "npm:@awebai/oats", "0.67.1");
   const r = w.run(["--now", "--harness", "pi"]);
   assert.equal(r.status, 0, r.out);
-  assert.deepEqual(w.log("mise.log").split("--\n").filter((x) => x.startsWith("use\n")).map((x) => x.split("\n")[2]), ["node", "pi", "npm:@awebai/aw", "npm:@awebai/oats"]);
-  for (const line of ["installing node with mise (mise use -g node)", "installed node 24.3.0 (mise)", "installed pi 0.40.1 (mise)", "installed aw 1.36.47 (mise)", "installed oats 0.67.1 (mise)", "step 5/6: skipped: the aweb channel plugin is for claude, and pi needs none"]) {
+  assert.deepEqual(w.log("mise.log").split("--\n").filter((x) => x.startsWith("use\n")).map((x) => x.split("\n")[2]), ["node@lts", "pi", "npm:@awebai/aw", "npm:@awebai/oats"]);
+  for (const line of ["installing node with mise (mise use -g node@lts)", "installed node 24.3.0 (mise)", "installed pi 0.40.1 (mise)", "installed aw 1.36.47 (mise)", "installed oats 0.67.1 (mise)", "step 5/6: skipped: the aweb channel plugin is for claude, and pi needs none"]) {
     assert.ok(r.stdout.includes(`omarchy-install-oats: ${line}\n`), line);
   }
   assert.equal(w.log("wrapper.log"), "", "Omarchy's wrapper never ran");
@@ -206,6 +229,27 @@ test("--now: Claude's channel plugin, added when absent, and its marketplace fir
   assert.equal(r.status, 0, r.out);
   assert.equal(w.log("claude-plugin.log"), "plugin\nlist\n--json\n--\nplugin\nmarketplace\nlist\n--json\n--\nplugin\nmarketplace\nadd\nawebai/claude-plugins\n--\nplugin\nlist\n--json\n--\nplugin\ninstall\naweb-channel@awebai-marketplace\n--\nplugin\nlist\n--json\n--\n");
   assert.deepEqual(found(w).tools.at(-1), { name: "aweb-channel@awebai-marketplace", version: null, origin: "claude-plugin", path: null, state: "installed" });
+});
+
+test("--now: a channel plugin installed for another project is not this session's: the user-scoped copy is installed; one for ~/Work is used", (t) => {
+  const w = world(t);
+  ALL(w);
+  withChannel(w, { scope: "project", projectPath: join(w.root, "some-other-project") });
+  let r = w.run(["--now", "--harness", "claude"]);
+  assert.equal(r.status, 0, r.out);
+  assert.ok(w.log("claude-plugin.log").includes("plugin\ninstall\naweb-channel@awebai-marketplace\n"), "installed");
+  assert.equal(found(w).tools.at(-1).state, "installed");
+  const own = world(t);
+  ALL(own);
+  withChannel(own, { scope: "local", projectPath: join(own.home, "Work") });
+  r = own.run(["--now", "--harness", "claude"]);
+  assert.equal(r.status, 0, r.out);
+  assert.ok(!own.log("claude-plugin.log").includes("plugin\ninstall\n"));
+  assert.equal(found(own).tools.at(-1).state, "found");
+  const c = own.run(["--check", "--harness", "claude"]);
+  assert.match(c.stdout, /^aweb-channel@awebai-marketplace: found \(claude-plugin\)$/m);
+  withChannel(own, { enabled: false });
+  assert.match(own.run(["--check", "--harness", "claude"]).stdout, /^aweb-channel@awebai-marketplace: not usable: it is installed and disabled; enable it with: claude plugin enable aweb-channel@awebai-marketplace$/m);
 });
 
 test("--now run again skips every step that is done and still starts the onboarding agent", (t) => {
@@ -246,15 +290,20 @@ test("--now with no terminal runs again in Omarchy's floating terminal, as omarc
 });
 
 for (const [name, set, expect, after] of [
-  ["step 2 (tools): mise fails", (w) => { w.put("tmux", "other", "3.5a"); w.put("claude", "local-bin", "2.1.308"); miseInstalls(w, "node", "node", "fail"); }, /^omarchy-install-oats: step 2 \(tools\) failed: mise use -g node exited with status 1$/m],
+  ["step 2 (tools): mise fails", (w) => { w.put("tmux", "other", "3.5a"); w.put("claude", "local-bin", "2.1.308"); miseInstalls(w, "node", "node@lts", "fail"); }, /^omarchy-install-oats: step 2 \(tools\) failed: mise use -g node@lts exited with status 1$/m],
   ["step 2 (tools): no mise", (w) => { rmSync(join(w.bin, "mise")); }, /^omarchy-install-oats: step 2 \(tools\) failed: mise is not on PATH: Omarchy ships it; install mise, then run omarchy-install-oats --now again$/m],
-  ["step 2 (tools): mise installs a node below the floor", (w) => { miseInstalls(w, "node", "node", "20.1.0"); }, /^omarchy-install-oats: step 2 \(tools\) failed: the installed node is too old: 20\.1\.0 < 22; upgrade: mise use -g node@latest$/m],
-  ["step 2 (tools): installed but not on PATH", (w) => { miseInstalls(w, "node", "node", "nothing"); }, /^omarchy-install-oats: step 2 \(tools\) failed: node was installed, but it is not on PATH: open a new terminal and run omarchy-install-oats --now again$/m],
+  ["step 2 (tools): mise installs a node below the floor", (w) => { miseInstalls(w, "node", "node@lts", "20.1.0"); }, /^omarchy-install-oats: step 2 \(tools\) failed: the installed node is too old: 20\.1\.0 < 22; upgrade: mise use -g node@lts$/m],
+  ["step 2 (tools): installed but not on PATH", (w) => { miseInstalls(w, "node", "node@lts", "nothing"); }, /^omarchy-install-oats: step 2 \(tools\) failed: node was installed, but it is not on PATH: open a new terminal and run omarchy-install-oats --now again$/m],
   ["step 3 (aw): too old, never replaced or shadowed", (w) => { ALL(w, { aw: "1.36.20" }); }, /^omarchy-install-oats: step 3 \(aw\) failed: aw is too old: 1\.36\.20 < 1\.36\.33; upgrade: npm install -g @awebai\/aw@latest$/m,
     (w) => { assert.ok(!w.log("mise.log").includes("use\n"), "no mise install in front of it"); assert.ok(!existsSync(join(w.shims, "aw"))); }],
   ["step 4 (oats): an instance's shim", (w) => { ALL(w); rmSync(join(w.npm, "bin", "oats")); w.put("oats", "shim", "0.67.1"); }, /^omarchy-install-oats: step 4 \(oats\) failed: .*\.oats\/bin\/oats is an instance home's shim/m],
   ["step 5 (channel): claude has no plugin command", (w) => { ALL(w); writeFileSync(join(w.root, "claude", "no-plugin"), ""); }, /^omarchy-install-oats: step 5 \(channel\) failed: claude 2\.1\.308 has no plugin command; upgrade: upgrade it the way you installed it$/m],
   ["step 5 (channel): the marketplace cannot be added", (w) => { ALL(w); writeFileSync(join(w.root, "claude", "fail-marketplace"), ""); }, /failed to clone awebai\/claude-plugins\nomarchy-install-oats: step 5 \(channel\) failed: claude plugin marketplace add awebai\/claude-plugins exited with status 1$/m],
+  ["step 5 (channel): the plugin is installed and disabled, and stays so", (w) => { ALL(w); withChannel(w, { enabled: false }); }, /^omarchy-install-oats: step 5 \(channel\) failed: aweb-channel@awebai-marketplace it is installed and disabled; enable it with: claude plugin enable aweb-channel@awebai-marketplace$/m,
+    (w) => assert.ok(!w.log("claude-plugin.log").includes("install\n"), "not installed again")],
+  ["step 6 (onboarding): a deployment whose status cannot be read is not a deployment without a steward", (w) => { ALL(w); withChannel(w); const { a } = deployments(w); writeFileSync(join(a, "status.mode"), "envelope:E_LOCK"); }, /^the deployment merak \(.*\/Agents\/merak\) could not be read: oats status --json: the kernel refused status \(E_LOCK\)\nomarchy-install-oats: step 6 \(onboarding\) failed: the found-list could not be written$/m,
+    (w) => assert.ok(!existsSync(join(w.home, ".local", "state", "oats-omarchy", "found.json")), "no found-list")],
+  ["step 6 (onboarding): a deployment whose status is not JSON", (w) => { ALL(w); withChannel(w); const { b } = deployments(w); writeFileSync(join(b, "status.json"), "not json"); }, /^the deployment acme \(.*\/Work\/acme\) could not be read: oats status --json: .*JSON/m],
   ["step 6 (onboarding): ~/Work is a file", (w) => { ALL(w); withChannel(w); writeFileSync(join(w.home, "Work"), "notes"); }, /^omarchy-install-oats: step 6 \(onboarding\) failed: .*\/Work is there and is not a directory$/m],
 ]) test(`--now stops at the failing step with its reason: ${name}`, (t) => {
   const w = world(t);
