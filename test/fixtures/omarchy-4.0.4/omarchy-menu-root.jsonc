@@ -1,9 +1,12 @@
 // The root of Omarchy 4.0.4's menu definition
 // (/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc): every root-level
-// item, with its label, aliases and kind (an action's command replaced by
-// `true`), and one child of each submenu, so the submenu is shown. Search
-// lists root rows before deeper ones, so these are what the root row "OATS"
-// is ranked against; the container test ranks it against the whole real file.
+// item, with its label, aliases and kind (an action's or a check's command
+// replaced by `true`, icons left out), and one child of each submenu, so the
+// submenu is shown; and the parents of the Default Agent menu, where setup
+// adds its OATS row (setup.default, setup.default.agent, and one of
+// Omarchy's agent rows). Search lists root rows before deeper ones, so these
+// are what the root row "OATS" is ranked against; the container test ranks
+// it against the whole real file.
 {
   "apps": {"label":"Apps","aliases":["app","applications"],"provider":"apps"},
   "learn": {"label":"Learn"},
@@ -14,6 +17,9 @@
   "style.theme": {"label":"Theme","action":"true"},
   "setup": {"label":"Setup","aliases":["settings"]},
   "setup.monitors": {"label":"Monitors","action":"true"},
+  "setup.default": {"label":"Defaults","aliases":["default","defaults"]},
+  "setup.default.agent": {"label":"Agent","title":"Default Agent"},
+  "setup.default.agent.claude": {"label":"Claude","checked":"true","action":"true"},
   "install": {"label":"Install"},
   "install.package": {"label":"Package","action":"true"},
   "remove": {"label":"Remove","aliases":["uninstall"]},

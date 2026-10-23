@@ -27,16 +27,9 @@ const MODEL = fixture("omarchy-4.0.4", "MenuModel.js");
 // omarchy 4.0.4-1 package. Re-vendor by copying that file from a newer
 // package unchanged, then set this and check the ranking still holds.
 const DIGEST = "ff6b265ca477d0d04297b0d9a5d9715960069db6da44603160d329e087e55fd8";
-// The fixture holds the root and one child of each submenu; the Default
-// Agent row's parents are added from the same file (Omarchy 4.0.4's
-// setup.default and setup.default.agent, icons left out), with one of
-// Omarchy's own agent rows beside it, so the row sits where Omarchy puts it.
-const DEFAULT_AGENT = [
-  '  "setup.default": {"label":"Defaults","aliases":["default","defaults"]},',
-  '  "setup.default.agent": {"label":"Agent","title":"Default Agent"},',
-  '  "setup.default.agent.claude": {"label":"Claude","checked":"true","action":"true"},',
-].join("\n");
-const DEFAULTS = readFileSync(fixture("omarchy-4.0.4", "omarchy-menu-root.jsonc"), "utf8").replace(/\}\s*$/, `${DEFAULT_AGENT}\n}\n`);
+// The fixture holds the root, one child of each submenu, and the Default
+// Agent row's parents, so that row sits where Omarchy puts it.
+const DEFAULTS = readFileSync(fixture("omarchy-4.0.4", "omarchy-menu-root.jsonc"), "utf8");
 const QUERIES = ["o", "oa", "oat", "oats", "OATS"];
 
 // The launchers OATS installs (their entries' Name), and others whose names
