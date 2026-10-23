@@ -123,7 +123,11 @@ compares them with what is there, and only then writes:
   once), never in `--check`. It runs in a node of its own, since
   `findSteward` is asynchronous and setup is not, through a temporary shim
   with the bytes of setup's, which a first `--apply` has not written yet;
-  without the list it reads the deployment setup is applying for. Without
+  without the list it reads the deployment setup is applying for. It
+  answers within `STEWARD_BUDGET` (`lookUpSteward`) however many
+  deployments there are: at the budget the node stops itself with SIGTERM,
+  on which the kernel read kills its process group, and setup's own
+  deadline sends SIGTERM too, never SIGKILL, so no kernel is left running. Without
   a steward the agent-key part is skipped with findSteward's reason and the
   choice stays recorded. A key already moved keeps its lines, and the plan
   notes that no steward was found.

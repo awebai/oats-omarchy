@@ -18,7 +18,7 @@ import * as files from "../lib/files.mjs";
 import * as keys from "../lib/keys.mjs";
 import * as menu from "../lib/menu.mjs";
 import { shellQuote } from "../lib/quote.mjs";
-import { AGENT_QUESTION, blocksFor, NOT_CHOSEN, setup, UI_QUESTION } from "../lib/setup.mjs";
+import { AGENT_QUESTION, blocksFor, lookUpSteward, NOT_CHOSEN, setup, UI_QUESTION } from "../lib/setup.mjs";
 import { fixture, repo, sandbox, snapshot, withStewards, writeExecutable } from "./helpers/sandbox.mjs";
 
 const USER_BINDINGS = '-- My bindings\no.bind("SUPER + RETURN", "Terminal", "uwsm-app -- xdg-terminal-exec")\n';
@@ -811,4 +811,21 @@ test("the steward gate: the kernel read for it fails, and the key stays with Oma
   assert.equal(part(r, "agent-key").status, "skipped");
   assert.match(part(r, "agent-key").reason, /^the agent key stays with Omarchy until this machine has one steward: no steward on this machine: .*; not read: .*oats-lock\.json is unreadable/);
   assert.ok(!agentLines(file));
+});
+
+// The lookup answers within its budget however slow the kernel is, and
+// leaves no kernel running: the fake kernel's status read hangs, with a
+// child of its own (both pids logged in status.pids).
+test("the steward lookup stops at its budget: its reason, and the hanging kernel read and its child are gone", async (t) => {
+  const s = sandbox(t);
+  writeFileSync(join(s.root, "status.mode"), "hang");
+  const started = Date.now();
+  const found = lookUpSteward({ node: process.execPath, cli: s.cli, features: [], deployment: s.deployment, env: s.env, path: s.env.PATH }, { budgetMs: 1500 });
+  assert.deepEqual(found, { ok: false, reason: "no answer within 1.5 s" });
+  assert.ok(Date.now() - started < 10_000, "the budget, not the backstop");
+  const pids = readFileSync(join(s.root, "status.pids"), "utf8").trim().split(/\s+/).map(Number);
+  assert.equal(pids.length, 2);
+  const alive = () => pids.filter((pid) => { try { process.kill(pid, 0); return true; } catch { return false; } });
+  for (let i = 0; i < 40 && alive().length; i++) await new Promise((done) => setTimeout(done, 50));
+  try { assert.deepEqual(alive(), [], "the kernel read and its child are gone"); } finally { for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } } }
 });
