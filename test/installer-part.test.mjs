@@ -111,3 +111,20 @@ test("an installer the person edited: --check reports it, and --remove leaves it
   s.run(["setup", "--remove"]);
   assert.equal(readFileSync(w, "utf8"), "#!/bin/sh\necho edited\n");
 });
+
+test("--only agent-key alone writes no installer, and --check does not ask for it; a full --apply then writes it", (t) => {
+  const s = sandbox(t);
+  const dir = join(s.home, ".config", "hypr");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "hyprland.lua"), 'require("hypr.bindings")\n');
+  writeFileSync(join(dir, "bindings.lua"), "-- My bindings\n");
+  const w = installerOf(s);
+  const only = s.run(["setup", "--apply", "--only", "agent-key", "--agent-key", "oats", "--json"]);
+  assert.equal(only.status, 0, only.stdout + only.stderr);
+  assert.equal(only.json.result.parts.find((x) => x.part === "installer"), undefined);
+  assert.deepEqual(stateOf(s).parts.filter((x) => ["shim", "launcher"].includes(x)).sort(), ["launcher", "shim"], "--only wrote its parts");
+  assert.ok(!existsSync(w));
+  assert.ok(!s.run(["setup", "--check", "--json"]).json.result.drift.some((line) => line.includes(w)));
+  assert.equal(part(s.run(["setup", "--apply", "--json"]), "installer").status, "applied");
+  assert.ok(existsSync(w));
+});
