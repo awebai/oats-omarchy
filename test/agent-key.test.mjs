@@ -526,6 +526,60 @@ test("giving the key back after the person edited bindings.lua: the block's byte
   assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
 });
 
+// Giving the key back needs no OATS CLI: with the CLI setup checked no
+// longer answering, setup's lines for the agent key still go, and the
+// SUPER + O lines stay exactly as they are.
+for (const [name, text] of [["no SUPER + O section", `${USER_BINDINGS}${MY_SUPER_O}`], ["a SUPER + O section", USER_BINDINGS]]) {
+  test(`giving the key back with the OATS CLI broken since, ${name}: the agent key's lines go all the same`, (t) => {
+    const s = sandbox(t);
+    const file = hypr(s, text);
+    assert.equal(s.run(["setup", "--apply", "--agent-key", "oats"]).status, 0);
+    const k = bindings.sections(keysRecord(s).block);
+    assert.ok(k.agentKey);
+    writeExecutable(s.cli, "#!/usr/bin/env node\nprocess.exit(1);\n");
+    const r = s.run(["setup", "--apply", "--agent-key", "omarchy", "--json"]);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(part(r, "agent-key").status, "removed");
+    assert.match(part(r, "keys").reason, /the OATS CLI cannot be used/);
+    assert.equal(part(r, "shim").status, "skipped");
+    assert.equal(stateOf(s).agentKey, "omarchy");
+    if (k.submap) {
+      assert.equal(part(r, "keys").status, "skipped");
+      assert.equal(keysRecord(s).block, bindings.composeBlock({ submap: k.submap }), "the SUPER + O lines as they were");
+      assert.equal(readFileSync(file, "utf8"), bindings.appendBlock(text, keysRecord(s).block).text);
+    } else {
+      assert.equal(readFileSync(file, "utf8"), text, "the block is gone, the file as before setup");
+      assert.equal(keysRecord(s), undefined);
+    }
+    assert.ok(!readFileSync(file, "utf8").includes(keys.AGENT_OURS));
+  });
+}
+
+// A choice given back whose lines could not be taken out (here, edited into
+// the state by hand) is what --check reports.
+test("--check: the agent key's lines still in the block while the key is given back are drift", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  assert.equal(s.run(["setup", "--apply", "--agent-key", "oats"]).status, 0);
+  const statePath = join(discoverPaths(s.env).stateDir, "state.json");
+  writeFileSync(statePath, JSON.stringify({ ...stateOf(s), agentKey: "omarchy" }));
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, [
+    `the agent key still opens OATS, though it is given back to Omarchy: setup's lines for it are still in ${file}: run setup --apply again`,
+  ]);
+});
+
+// Only the key block calls the shim (no TUI, hook or menu part): the shim and
+// the launcher are applied for its SUPER + O lines, and so is the agent key.
+test("the key block alone calls the shim: the launcher and the agent key's section are applied with it", (t) => {
+  const s = sandbox(t, { launchers: ["omarchy-launch-floating-terminal-with-presentation"] });
+  const file = hypr(s);
+  const r = s.run(["setup", "--apply", "--agent-key", "oats", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  for (const name of ["shim", "keys", "launcher", "agent-key"]) assert.equal(part(r, name).status, "applied", `${name}: ${part(r, name).reason}`);
+  for (const name of ["tui", "hook", "menu"]) assert.equal(part(r, name).status, "skipped", name);
+  assert.ok(readFileSync(file, "utf8").includes(keys.agentBindLine(wrapperOf(s))));
+});
+
 test("--remove after an apply with both sections puts the whole home back", (t) => {
   const s = sandbox(t);
   hypr(s);

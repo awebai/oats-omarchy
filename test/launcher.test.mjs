@@ -7,12 +7,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as bindings from "../lib/bindings.mjs";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import * as files from "../lib/files.mjs";
+import { atomicCreate } from "../lib/state.mjs";
 import { repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
 // The user's Lua layout: a hyprland.lua and their bindings.lua.
@@ -189,4 +190,35 @@ test("the launcher goes with the shim: skipped whenever the shim is", (t) => {
   assert.deepEqual(part(r, "launcher"), { part: "launcher", status: "skipped", reason: "the shim is not applied, and the launcher goes with it", paths: [] });
   assert.equal(bare.run(["setup", "--apply"]).status, 0);
   assert.equal(existsSync(wrapperOf(bare)), false);
+});
+
+// A file that appears at the launcher's path while setup checks the config
+// (the fake Hyprland saves one during verification): setup writes nothing
+// and leaves it, rather than replace a file it did not write.
+test("a launcher file that appears while setup verifies the config: --apply refuses and leaves it", (t) => {
+  const s = sandbox(t);
+  hypr(s);
+  mkdirSync(binDir(s), { recursive: true });
+  const before = snapshot(s.home);
+  const r = s.run(["setup", "--apply", "--agent-key", "oats", "--json"], { FAKE_HYPR_SAVE_TO: wrapperOf(s) });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(r.json.error.code, "E_CHANGED");
+  assert.equal(readFileSync(wrapperOf(s), "utf8"), "-- concurrent save\n");
+  rmSync(wrapperOf(s));
+  assert.deepEqual(snapshot(s.home), before, "nothing else was written");
+});
+
+// The write itself: linked into place, so a file there first is never
+// replaced, even one that appears after setup's last look.
+test("atomicCreate fails on a path that exists and leaves it as it was", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "oats-omarchy-create-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "omarchy-launch-oats");
+  atomicCreate(path, Buffer.from("ours\n"), 0o755);
+  assert.equal(readFileSync(path, "utf8"), "ours\n");
+  assert.equal(statSync(path).mode & 0o777, 0o755);
+  writeFileSync(path, "theirs\n");
+  assert.throws(() => atomicCreate(path, Buffer.from("ours\n"), 0o755), { code: "EEXIST" });
+  assert.equal(readFileSync(path, "utf8"), "theirs\n");
+  assert.deepEqual(readdirSync(dir), ["omarchy-launch-oats"], "no temporary file left");
 });

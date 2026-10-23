@@ -97,10 +97,14 @@ compares them with what is there, and only then writes:
   Omarchy's session PATH after `/usr/share/omarchy/bin`, so its name never
   shadows one of Omarchy's. Unlike the shim and the entries, a file or link
   there that setup has no record of is never backed up or replaced: the part
-  is skipped with the reason (`launcherCheck`). A missing `~/.local/bin` is
+  is skipped with the reason (`launcherCheck`). One that appears while setup
+  checks the config makes `--apply` refuse (`E_CHANGED`), and the write
+  links the file into place (`atomicCreate` in `lib/state.mjs`), which fails
+  rather than replace anything there. A missing `~/.local/bin` is
   created and recorded like any directory setup creates, so `--remove`
   deletes it only when it is empty. The launcher goes only with the shim: it
-  is ready only when the shim part is.
+  is ready only when the shim part is, so the agent key's lines are written
+  only when something calls the shim (another part, or the submap's lines).
 - The agent key's owner, `oats` or `omarchy` (`chooseAgentKey`), is
   `--agent-key`, else the one the state records as `agentKey`, else none
   (null). It moves only on an explicit pick: with none, `--apply` in a
@@ -145,7 +149,8 @@ compares them with what is there, and only then writes:
   again. A section that fails is skipped alone with the reason, and its
   snippet is printed; the other is still written. A recorded section whose
   update fails stays as it was recorded. When the agent key is given back
-  (`--agent-key omarchy`) its section is dropped, and a block left empty is
+  (`--agent-key omarchy`) its section is dropped, with or without a usable
+  OATS CLI (the submap's lines then stay as they are), and a block left empty is
   taken out the way `--remove` takes it out (the backup back whole, else
   the block's bytes alone), its record dropped and its backup deleted once
   the state is written. Hyprland verifies the whole candidate file, both
@@ -231,7 +236,9 @@ compares them with what is there, and only then writes:
   skipped by its checks is not drift. A state with no `agentKey` (v0.6.0
   and older) gets one more line, that the launcher and the agent key are
   new in this version and not applied yet, and that the agent key stays
-  with Omarchy until the person picks OATS. `--apply` then swaps only those
+  with Omarchy until the person picks OATS. Setup's lines for the agent key
+  still in the block while the state gives the key to Omarchy are reported
+  too. `--apply` then swaps only those
   blocks, a key block verified as a new one is, and rewrites the entry.
   v0.6.0's key block is this version's SUPER + O section alone, so without
   `--agent-key` it stays as it is. `test/upgrade.test.mjs` starts from
