@@ -10,7 +10,7 @@ import { paths as discoverPaths } from "../lib/discover.mjs";
 import * as files from "../lib/files.mjs";
 import * as menu from "../lib/menu.mjs";
 import { shellQuote, shellWord } from "../lib/quote.mjs";
-import { PLUGIN_DIR, setup } from "../lib/setup.mjs";
+import { AGENT_QUESTION, PLUGIN_DIR, setup } from "../lib/setup.mjs";
 import { sandbox } from "./helpers/sandbox.mjs";
 import { parsePlugin, pluginFilePath } from "../widget.mjs";
 
@@ -136,10 +136,12 @@ test("a typed path is checked and asked again; Enter alone stops with E_NO_DEPLO
 test("--apply from a terminal asks for the deployment first, then shows the plan and asks y/N", (t) => {
   const s = sandbox(t, { node: true });
   const { real } = places(s);
-  const r = fromTerminal(s, ["--apply"], [real, "n"]);
+  // No agent key recorded: its question comes between the two.
+  const r = fromTerminal(s, ["--apply"], [real, "omarchy", "n"]);
   assert.equal(r.status, 1);
-  assert.equal(r.asked.length, 2);
-  assert.match(r.asked[1], /^Apply it\? \[y\/N\] $/);
+  assert.equal(r.asked.length, 3);
+  assert.ok(r.asked[1].endsWith(AGENT_QUESTION), r.asked[1]);
+  assert.match(r.asked[2], /^Apply it\? \[y\/N\] $/);
   assert.ok(r.out.includes(real));
   assert.match(r.out, /aborted: nothing was changed/);
 });

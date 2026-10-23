@@ -8,18 +8,26 @@
 // stand-in for the CLI (test/helpers/sandbox.mjs).
 // Without a running Hyprland, `omarchy menu keybindings --print` answers with
 // its static bindings only, so the "keys taken" cases serve the captured
-// --print through a PATH fake of `omarchy`.
+// --print through a PATH fake of `omarchy`. That fake serves the same text
+// after setup writes its block, so no case here can read back from --print
+// that SUPER + SHIFT + CTRL + A runs "OATS agent", or "Agent" again once it is
+// given back: the agent key's cases assert the block's bytes and the real
+// Hyprland --verify-config of the live config instead.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import vm from "node:vm";
 import { parseDesktopExec, shellWord } from "../lib/quote.mjs";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import { readDesktopEntry } from "../lib/desktop-entry.mjs";
+import * as bindings from "../lib/bindings.mjs";
 import * as files from "../lib/files.mjs";
-import { fixture, repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
+import * as menu from "../lib/menu.mjs";
+import { blocksFor, managedPaths } from "../lib/setup.mjs";
+import { agentBindLine } from "../lib/keys.mjs";
+import { fixture, repo, sandbox, snapshot, withStewards, writeExecutable } from "./helpers/sandbox.mjs";
 import * as widget from "../widget.mjs";
 import { appRow, loadMenuModel, search } from "./helpers/omarchy-search.mjs";
 
@@ -76,6 +84,20 @@ function verifySnippet(s, keys) {
   return spawnSync("bash", [verify, "--expect", "ok", conf, s.home], { encoding: "utf8" });
 }
 
+// The live config, setup's block included, as Hyprland reads it.
+const verifyConfig = (s) => spawnSync("bash", [verify, "--expect", "ok", join(s.home, ".config", "hypr", "hyprland.lua"), s.home], { encoding: "utf8" });
+
+// The key block's two sections as this version writes them for a home with
+// the TUI set up and no Desktop (lib/bindings.mjs composeBlock joins them).
+// Neither section depends on the node or the plugin directory.
+function keySections(s) {
+  const p = discoverPaths(s.env);
+  return blocksFor({ shimPath: p.shim, deployment: s.deployment, node: process.execPath, pluginDir: repo, tuiReady: true, desktopExec: null, ui: "tui", wrapper: p.wrapper, bindingsPath: managedPaths(p).keys }).keys;
+}
+
+const stateOf = (s) => JSON.parse(readFileSync(join(discoverPaths(s.env).stateDir, "state.json"), "utf8"));
+const partOf = (r, part) => r.json.result.parts.find((x) => x.part === part);
+
 const plan = (s, extra = []) => {
   const r = s.run(["setup", "--plan", "--json", ...extra]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -94,7 +116,8 @@ test("Lua layout, no Desktop: plan, apply, the real post-update hook, check, rem
   const before = snapshot(s.home);
   const p = plan(s);
   assert.equal(p.found.launchPath.source, "minimal", "no user bus in the container");
-  assert.deepEqual(p.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "skipped"], ["hook", "will apply"], ["menu", "will apply"], ["keys", "skipped"]]);
+  assert.deepEqual(p.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "skipped"], ["hook", "will apply"], ["launcher", "will apply"], ["menu", "will apply"], ["keys", "skipped"], ["agent-key", "skipped"]]);
+  assert.equal(p.agentKey.choice, null, "no terminal and no --agent-key: the agent key stays with Omarchy");
   assert.equal(p.found.menu.defaults, join(OMARCHY, "default", "omarchy", "omarchy-menu.jsonc"));
   assert.equal(p.keys.status, "unchecked", "--print without Hyprland");
   assert.match(p.keys.notes[0], /no running Hyprland answered/);
@@ -171,6 +194,117 @@ test("the key block: a block Hyprland refuses is not written, and Hyprland's lin
   assert.match(keys.reason, /^Hyprland --verify-config refuses your config with the key block added, so setup writes nothing:\n/);
   assert.equal(s.run(["setup", "--apply"]).status, 0);
   assert.ok(readFileSync(file).equals(mine));
+});
+
+// The block with each set of sections it can hold, appended to Omarchy's own
+// bindings.lua: the agent key's hl.unbind and o.bind, after Omarchy's
+// utilities.lua bound the combo, and the submap, each alone and together.
+for (const [name, pick] of [
+  ["both sections", (k) => k],
+  ["the SUPER + O submap alone", (k) => ({ submap: k.submap })],
+  ["the agent key alone", (k) => ({ agentKey: k.agentKey })],
+]) {
+  test(`the key block with ${name} passes the real Hyprland --verify-config`, { skip }, (t) => {
+    const s = omarchySandbox(t);
+    userHypr(s, { layout: "lua" });
+    const file = managedPaths(discoverPaths(s.env)).keys;
+    const block = bindings.composeBlock(pick(keySections(s)));
+    writeFileSync(file, bindings.appendBlock(readFileSync(file, "utf8"), block).text);
+    const v = verifyConfig(s);
+    assert.equal(v.status, 0, v.stdout + v.stderr);
+  });
+}
+
+// The agent key end to end: picked, given back, picked again, then removed.
+// Each step's bindings.lua is checked byte for byte and by the real Hyprland;
+// the menu's Default Agent row's `checked` runs as Omarchy's guard script
+// runs it, with bash, against the real file.
+test("the agent key: --agent-key oats writes both sections, --agent-key omarchy takes the agent key's out, --remove restores bindings.lua byte for byte", { skip }, (t) => {
+  const s = omarchySandbox(t, { print: "fixture" });
+  withStewards(s);
+  userHypr(s, { layout: "lua" });
+  const p = discoverPaths(s.env);
+  const file = managedPaths(p).keys;
+  const original = readFileSync(file);
+  const before = snapshot(s.home);
+  const k = keySections(s);
+  const both = bindings.appendBlock(original.toString("utf8"), bindings.composeBlock(k)).text;
+  const submapOnly = bindings.appendBlock(original.toString("utf8"), bindings.composeBlock({ submap: k.submap })).text;
+  const checked = () => {
+    const rows = loadMenuModel(join(OMARCHY, "shell", "plugins", "menu", "MenuModel.js")).parseMenuJsonc(readFileSync(join(s.home, ".config", "omarchy", "extensions", "omarchy-menu.jsonc"), "utf8"));
+    const row = rows.find((x) => x.id === menu.AGENT_ID);
+    assert.ok(row, "the Default Agent row is in the menu block");
+    return spawnSync("bash", ["-c", row.checked], { env: s.env, encoding: "utf8" }).status;
+  };
+
+  const oats = s.run(["setup", "--apply", "--agent-key", "oats", "--json"]);
+  assert.equal(oats.status, 0, oats.stdout + oats.stderr);
+  for (const part of ["launcher", "keys", "agent-key"]) assert.equal(partOf(oats, part).status, "applied", `${part}: ${partOf(oats, part).reason}`);
+  assert.deepEqual([oats.json.result.agentKey.choice, oats.json.result.agentKey.from], ["oats", "--agent-key"]);
+  assert.equal(existsSync(join(s.root, "hyprland.log")), false, "the real Hyprland verified it, not the sandbox's fake");
+  assert.equal(readFileSync(file, "utf8"), both);
+  assert.equal(stateOf(s).files.find((f) => f.path === file).block, bindings.composeBlock(k));
+  assert.equal(stateOf(s).agentKey, "oats");
+  // The launcher the agent key runs, by the node and plugin setup recorded.
+  assert.equal(readFileSync(p.wrapper, "utf8"), files.launcher({ node: stateOf(s).node, pluginDir: stateOf(s).pluginDir }));
+  assert.equal(statSync(p.wrapper).mode & 0o777, 0o755);
+  let v = verifyConfig(s);
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+  assert.equal(checked(), 0, "the Default Agent row shows OATS as checked");
+
+  const back = s.run(["setup", "--apply", "--agent-key", "omarchy", "--json"]);
+  assert.equal(back.status, 0, back.stdout + back.stderr);
+  assert.equal(partOf(back, "agent-key").status, "removed", partOf(back, "agent-key").reason);
+  assert.equal(partOf(back, "keys").status, "already applied");
+  assert.equal(readFileSync(file, "utf8"), submapOnly, "Omarchy's own binding is no longer unbound");
+  assert.equal(stateOf(s).agentKey, "omarchy");
+  v = verifyConfig(s);
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+  assert.equal(checked(), 1, "not checked once the key is given back");
+
+  const again = s.run(["setup", "--apply", "--agent-key", "oats", "--json"]);
+  assert.equal(again.status, 0, again.stdout + again.stderr);
+  assert.equal(partOf(again, "agent-key").status, "applied", partOf(again, "agent-key").reason);
+  assert.equal(readFileSync(file, "utf8"), both);
+
+  const removed = s.run(["setup", "--remove"]);
+  assert.equal(removed.status, 0, removed.stdout + removed.stderr);
+  assert.ok(readFileSync(file).equals(original), "bindings.lua is Omarchy's again, byte for byte");
+  v = verifyConfig(s);
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+  assert.deepEqual(snapshot(s.home), before);
+});
+
+// SUPER + O taken by the user's own unbind: the submap section is refused,
+// the agent key's is written alone (setup's own verification by the real
+// Hyprland included), and giving the key back empties the block, which goes
+// the way --remove takes it out.
+test("the agent key alone: SUPER + O refused, the agent key's section written and verified, --agent-key omarchy restores bindings.lua byte for byte", { skip }, (t) => {
+  const s = omarchySandbox(t, { print: "fixture" });
+  withStewards(s);
+  userHypr(s, { layout: "lua" });
+  const file = managedPaths(discoverPaths(s.env)).keys;
+  writeFileSync(file, `${readFileSync(file, "utf8")}hl.unbind("SUPER + O")\n`);
+  const mine = readFileSync(file);
+  const k = keySections(s);
+
+  const oats = s.run(["setup", "--apply", "--agent-key", "oats", "--json"]);
+  assert.equal(oats.status, 0, oats.stdout + oats.stderr);
+  assert.equal(partOf(oats, "keys").status, "skipped");
+  assert.match(partOf(oats, "keys").reason, /your bindings\.lua binds SUPER \+ O itself/);
+  assert.equal(partOf(oats, "agent-key").status, "applied", partOf(oats, "agent-key").reason);
+  assert.equal(existsSync(join(s.root, "hyprland.log")), false, "the real Hyprland verified it, not the sandbox's fake");
+  assert.equal(readFileSync(file, "utf8"), bindings.appendBlock(mine.toString("utf8"), bindings.composeBlock({ agentKey: k.agentKey })).text);
+  let v = verifyConfig(s);
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+
+  const back = s.run(["setup", "--apply", "--agent-key", "omarchy", "--json"]);
+  assert.equal(back.status, 0, back.stdout + back.stderr);
+  assert.equal(partOf(back, "agent-key").status, "removed", partOf(back, "agent-key").reason);
+  assert.ok(readFileSync(file).equals(mine), "the user's bindings.lua, byte for byte");
+  assert.equal(stateOf(s).files.some((f) => f.path === file), false, "no record of a block that is gone");
+  v = verifyConfig(s);
+  assert.equal(v.status, 0, v.stdout + v.stderr);
 });
 
 test("the .conf layout: the hyprlang snippet passes --verify-config", { skip }, (t) => {
@@ -341,6 +475,45 @@ for (const ui of ["tui", "desktop"]) {
     }
   });
 }
+
+// The Default Agent row in Omarchy's own menu: under its real Setup > Default
+// Agent (Omarchy infers the parent from the dotted id, so every id up the
+// chain must be one of its menu's rows), with the root OATS row still first
+// when "oats" is typed in SUPER + SPACE.
+test("Omarchy's MenuModel reads the Default Agent row: OATS under its real Setup > Default Agent, and typing oats still shows the root OATS row first", { skip }, (t) => {
+  const s = omarchySandbox(t);
+  assert.equal(s.run(["setup", "--apply"]).status, 0);
+  const user = readFileSync(join(s.home, ".config", "omarchy", "extensions", "omarchy-menu.jsonc"), "utf8");
+  const defaults = readFileSync(join(OMARCHY, "default", "omarchy", "omarchy-menu.jsonc"), "utf8");
+  const model = loadMenuModel(join(OMARCHY, "shell", "plugins", "menu", "MenuModel.js"));
+  const ours = model.parseMenuJsonc(user).map((x) => x.id);
+  const { items } = model.mergeMenuSources(model.parseMenuJsonc(defaults), model.parseMenuJsonc(user));
+  const row = items[menu.AGENT_ID];
+  assert.ok(row, "the row is in the merged menu");
+  assert.deepEqual([row.parent, row.kind, row.label, row.icon], ["setup.default.agent", "action", "OATS", items["oats-ui"].icon]);
+  const chain = [];
+  for (let id = row.parent; id !== "root"; id = items[id].parent) {
+    assert.ok(items[id], `${id}, up from ${menu.AGENT_ID}, is a row of the menu`);
+    assert.ok(!ours.includes(id), `${id} is Omarchy's, not setup's`);
+    assert.equal(items[id].kind, "menu", id);
+    chain.push(id);
+    assert.ok(chain.length < 8, chain.join(" < "));
+  }
+  assert.deepEqual(chain, ["setup.default.agent", "setup.default", "setup"]);
+  // The block as this version builds it from what setup recorded, the TUI
+  // the only UI (the row's strings are pinned in test/menu.test.mjs), and the
+  // row's check against the bind line setup writes.
+  const p = discoverPaths(s.env);
+  const state = stateOf(s);
+  const expected = blocksFor({ shimPath: p.shim, deployment: state.deployment, node: state.node, pluginDir: state.pluginDir, tuiReady: true, desktopExec: null, ui: "tui", wrapper: p.wrapper, bindingsPath: managedPaths(p).keys }).menu;
+  assert.ok(user.includes(expected), "the menu block is this version's");
+  assert.equal(row.checked, menu.agentChecked({ bindings: managedPaths(p).keys, line: agentBindLine(p.wrapper) }));
+
+  const apps = [appRow({ id: "org.oats.tui", name: files.TUI_NAME }), appRow({ id: "awebai-oats-desktop", name: files.DESKTOP_NAME })];
+  const rows = search(model, { defaults, user, apps }, "oats");
+  assert.equal(rows[0].itemId, "oats-ui", JSON.stringify(rows.slice(0, 4)));
+  assert.ok(rows.some((x) => x.itemId === menu.AGENT_ID), `the Default Agent row is found too: ${rows.map((x) => x.itemId)}`);
+});
 
 test("waiting opens the chosen session through Omarchy's real floating terminal: the detach key arrives as argv", { skip }, (t) => {
   const s = omarchySandbox(t, { launchers: ["omarchy-menu-select"], deploymentName: "my agents" });

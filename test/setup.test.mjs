@@ -16,6 +16,7 @@ const paths = (s) => ({
   desktopEntry: join(s.home, ".local/share/applications/awebai-oats-desktop.desktop"),
   desktopIcon: join(s.home, ".local/share/icons/hicolor/256x256/apps/awebai-oats-desktop.png"),
   hook: join(s.home, ".config/omarchy/hooks/post-update.d/oats-omarchy.hook"),
+  launcher: join(s.home, ".local/bin/omarchy-launch-oats"),
   state: join(s.home, ".local/state/oats-omarchy/state.json"),
   menu: join(s.home, ".config/omarchy/extensions/omarchy-menu.jsonc"),
 });
@@ -39,7 +40,7 @@ test("--plan writes nothing, not even Omarchy's keybindings cache", (t) => {
   assert.deepEqual(snapshot(s.home), before);
   const cache = readFileSync(join(s.root, "print-cache.log"), "utf8").trim();
   assert.ok(cache && !cache.startsWith(s.home) && !existsSync(cache), "--print ran with a temporary cache that is gone");
-  assert.deepEqual(r.json.result.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "will apply"], ["hook", "will apply"], ["menu", "will apply"], ["keys", "skipped"]]);
+  assert.deepEqual(r.json.result.parts.map((x) => [x.part, x.status]), [["shim", "will apply"], ["tui", "will apply"], ["desktop", "will apply"], ["hook", "will apply"], ["launcher", "will apply"], ["menu", "will apply"], ["keys", "skipped"], ["agent-key", "skipped"]]);
   assert.equal(r.json.result.found.deployment.path, s.deployment);
   assert.deepEqual(r.json.result.found.deployment, { path: s.deployment, from: "the working directory" });
   assert.deepEqual(r.json.result.found.plugin, { dir: repo, inPlugins: false });
@@ -56,7 +57,7 @@ test("plan is the default mode, and the text says what it found and where", (t) 
   assert.match(r.stdout, /^setup --plan \(nothing was written\)$/m);
   assert.match(r.stdout, /deployment {2}.* \(from the working directory\)/);
   assert.match(r.stdout, /Setup runs from .*, not from ~\/\.config\/omarchy\/plugins\/: the menu and the hook it writes point at this clone/);
-  assert.match(r.stdout, /desktop  skipped: no OATS Desktop found/);
+  assert.match(r.stdout, /desktop   skipped: no OATS Desktop found/);
   assert.match(r.stdout, /Get OATS Desktop from https:\/\/github\.com\/awebai\/oats\/releases/);
   assert.match(r.stdout, /Paste this at the end of .*\/\.config\/hypr\/bindings\.lua/);
 });
@@ -67,8 +68,8 @@ test("--apply writes exactly the parts, and a second --apply writes nothing", (t
   const p = paths(s);
   const r = s.run(["setup", "--apply", "--ui", "tui", "--json"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.json.result.written.sort(), [p.shim, p.tuiEntry, p.tuiIcon, p.desktopEntry, p.desktopIcon, p.hook, p.menu].sort());
-  assert.deepEqual(r.json.result.parts.map((x) => x.status), ["applied", "applied", "applied", "applied", "applied", "skipped"]);
+  assert.deepEqual(r.json.result.written.sort(), [p.shim, p.tuiEntry, p.tuiIcon, p.desktopEntry, p.desktopIcon, p.hook, p.launcher, p.menu].sort());
+  assert.deepEqual(r.json.result.parts.map((x) => x.status), ["applied", "applied", "applied", "applied", "applied", "applied", "skipped", "skipped"]);
 
   assert.equal(readFileSync(p.shim, "utf8"), `#!/bin/sh\nexec '${process.execPath}' '${s.cli}' "$@"\n`);
   assert.equal(statSync(p.shim).mode & 0o777, 0o755);
@@ -82,6 +83,8 @@ test("--apply writes exactly the parts, and a second --apply writes nothing", (t
   assert.equal(desktop.Icon, "awebai-oats-desktop");
   assert.deepEqual(parseDesktopExec(desktop.Exec), [join(s.home, "Applications/OATS-Desktop.AppImage"), "--dir", s.deployment]);
   assert.equal(statSync(p.hook).mode & 0o777, 0o755);
+  assert.equal(readFileSync(p.launcher, "utf8"), `#!/bin/sh\nexec '${process.execPath}' '${repo}/bin/launch.mjs' "$@"\n`);
+  assert.equal(statSync(p.launcher).mode & 0o777, 0o755);
   const state = JSON.parse(readFileSync(p.state, "utf8"));
   assert.equal(state.deployment, s.deployment);
   assert.deepEqual([state.node, state.cli, state.pluginDir], [process.execPath, s.cli, repo]);
@@ -95,7 +98,7 @@ test("--apply writes exactly the parts, and a second --apply writes nothing", (t
   const again = s.run(["setup", "--apply", "--json"]);
   assert.equal(again.status, 0, again.stderr);
   assert.deepEqual(again.json.result.written, []);
-  assert.deepEqual(again.json.result.parts.map((x) => x.status), ["already applied", "already applied", "already applied", "already applied", "already applied", "skipped"]);
+  assert.deepEqual(again.json.result.parts.map((x) => x.status), ["already applied", "already applied", "already applied", "already applied", "already applied", "already applied", "skipped", "skipped"]);
   assert.deepEqual(snapshot(s.home), after, "the second --apply changed nothing");
   assert.match(s.run(["setup", "--apply"]).stdout, /already applied, nothing written/);
 });
@@ -108,7 +111,7 @@ test("--apply then --remove restores the whole tree byte for byte, with no user 
   assert.notDeepEqual(snapshot(s.home), before);
   const r = s.run(["setup", "--remove", "--json"]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.equal(r.json.result.restored.length, 7);
+  assert.equal(r.json.result.restored.length, 8);
   assert.deepEqual(snapshot(s.home), before);
   const again = s.run(["setup", "--remove"]);
   assert.equal(again.status, 0);

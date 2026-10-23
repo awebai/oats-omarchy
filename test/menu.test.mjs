@@ -6,11 +6,15 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as files from "../lib/files.mjs";
+import { agentBindLine } from "../lib/keys.mjs";
 import * as menu from "../lib/menu.mjs";
-import { sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
+import { repo, sandbox, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
-const BLOCK = menu.block({ open: "launch-tui" });
-const OURS = ["oats-ui"];
+// The block's two rows: the default UI's, and the OATS row under Setup >
+// Default Agent, with stand-ins for its check and its pick.
+const AGENT = { checked: "check-agent-key", action: "pick-oats" };
+const BLOCK = menu.block({ open: "launch-tui", agent: AGENT });
+const OURS = ["oats-ui", menu.AGENT_ID];
 
 // Inserted, read the way Omarchy reads it, then taken out again.
 function roundTrip(text) {
@@ -18,20 +22,29 @@ function roundTrip(text) {
   assert.ok(ins, "insertable");
   const parsed = menu.omarchyParse(ins.text);
   assert.ok(parsed.ok, parsed.reason);
-  assert.deepEqual(Object.keys(parsed.items).filter((id) => id.startsWith("oats")), OURS);
+  assert.deepEqual(Object.keys(parsed.items).filter((id) => id.startsWith("oats") || id.startsWith("setup.")), OURS);
   assert.equal(menu.verifyEdit(text, ins.text, BLOCK), null);
   const out = menu.removeBlock(ins.text, { ...ins, block: BLOCK });
   return { ins, parsed, out };
 }
 
-test("the block: one delimited row, with a trailing comma, that opens the default UI", () => {
+test("the block: two delimited rows, each with a trailing comma, that open the default UI and pick OATS for the agent key", () => {
   const lines = BLOCK.split("\n");
   assert.equal(lines[0], "  // >>> oats-omarchy (managed by setup; remove with setup --remove) >>>");
   assert.equal(lines.at(-2), "  // <<< oats-omarchy <<<");
   assert.deepEqual(lines.slice(1, -2).map((l) => JSON.parse(`{${l.trim().replace(/,$/, "")}}`)).map((o) => Object.keys(o)[0]), OURS);
+  // Exactly as written, in this order: the root row, then the Default Agent row.
+  assert.equal(BLOCK, menu.START
+    + '  "oats-ui": {"icon":"\u{F06A9}","label":"OATS","action":"launch-tui"},\n'
+    + '  "setup.default.agent.oats": {"icon":"\u{F06A9}","label":"OATS","checked":"check-agent-key","action":"pick-oats"},\n'
+    + menu.END);
   const items = menu.omarchyParse(`{\n${BLOCK}}\n`).items;
-  assert.deepEqual(items, { "oats-ui": { icon: "\u{F06A9}", label: "OATS", action: "launch-tui" } });
-  assert.equal(menu.block({ open: null }), null, "no default UI, no block");
+  assert.deepEqual(items, {
+    "oats-ui": { icon: "\u{F06A9}", label: "OATS", action: "launch-tui" },
+    "setup.default.agent.oats": { icon: "\u{F06A9}", label: "OATS", checked: "check-agent-key", action: "pick-oats" },
+  });
+  assert.equal(menu.AGENT_ID, "setup.default.agent.oats", "Omarchy reads its parent from the id: Setup > Default Agent");
+  assert.equal(menu.block({ open: null, agent: AGENT }), null, "no default UI, no block");
 });
 
 test("the user's last entry with and without a trailing comma, one line, empty object: every byte comes back", () => {
@@ -112,6 +125,9 @@ test("what setup refuses to edit: Omarchy cannot read the file, ids of ours alre
   assert.equal(menu.omarchyParse("[1]").ok, false);
   // Only the row's id is ours: the ids v0.5.0's submenu used are the user's to take.
   assert.deepEqual(menu.conflicts('{\n  "oats-ui": {"label":"Mine"},\n  "oats": {},\n  "oats.status": {}\n}\n'), ["oats-ui"]);
+  // The Default Agent row's id is ours too; Omarchy's own rows beside it are not.
+  assert.deepEqual(menu.IDS, ["oats-ui", "setup.default.agent.oats"]);
+  assert.deepEqual(menu.conflicts('{\n  "setup.default.agent.oats": {"label":"My OATS"},\n  "setup.default.agent.claude": {}\n}\n'), ["setup.default.agent.oats"]);
   const odd = menu.block({ open: "echo a, }" });
   const ins = menu.insertBlock("{}\n", odd);
   assert.match(menu.verifyEdit("{}\n", ins.text, odd), /would not read the menu item oats-ui as written/);
@@ -135,6 +151,14 @@ test("--apply with no menu file creates it with the block; --remove deletes it a
   const items = menu.omarchyParse(text).items;
   assert.deepEqual(Object.keys(items), OURS);
   assert.equal(items["oats-ui"].action, files.tuiCommand({ shimPath: join(s.home, ".local/share/oats-omarchy/oats"), deployment: s.deployment }), "it opens the TUI, the only UI");
+  // The Default Agent row: checked while bindings.lua holds the agent key's
+  // line, and its pick runs this setup with --agent-key oats.
+  const wrapper = join(s.home, ".local/bin/omarchy-launch-oats");
+  const checked = menu.agentChecked({ bindings: join(s.home, ".config/hypr/bindings.lua"), line: agentBindLine(wrapper) });
+  assert.deepEqual(items[menu.AGENT_ID], {
+    icon: "\u{F06A9}", label: "OATS", checked,
+    action: menu.agentPick({ setup: files.setupArgv({ node: process.execPath, pluginDir: repo, deployment: s.deployment }), checked, wrapper }),
+  });
   assert.equal(part(s.run(["setup", "--apply", "--json"]), "menu").status, "already applied");
   assert.equal(s.run(["setup", "--remove"]).status, 0);
   assert.deepEqual(snapshot(s.home), before);
