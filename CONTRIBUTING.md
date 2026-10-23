@@ -295,7 +295,10 @@ own. Its state and `plugin.json` record `deployment: null`. The launchers,
 the panel's buttons, the menu and setup's own argv carry no `--dir`, and the
 post-update hook does not `cd` anywhere. Without the feature, all of that is
 for the one deployment, exactly as above; `--check` reports when the CLI
-gains or loses the list, and `--apply` switches either way. Setup reads the
+gains or loses the list, and `--apply` switches either way. Without a
+usable CLI setup cannot tell, so one applied for the list stays applied for
+it (unless `--dir` names a deployment): giving the agent key back, for one,
+needs no CLI. Setup reads the
 list (`lib/deployments.mjs`, `deploymentsApi: 1`, each row's path, name and
 state) only for the plan's notes; the plugin never writes it.
 

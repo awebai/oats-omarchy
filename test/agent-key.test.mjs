@@ -555,6 +555,27 @@ for (const [name, text] of [["no SUPER + O section", `${USER_BINDINGS}${MY_SUPER
   });
 }
 
+// The same for setup applied for this computer's list of deployments, run
+// from outside any deployment: without a CLI to ask, it stays applied for
+// the list, so there is no deployment to find, and the key goes back.
+test("giving the key back with the OATS CLI broken since, applied for the list, from HOME: the agent key's lines go", (t) => {
+  const s = sandbox(t);
+  const text = `${USER_BINDINGS}${MY_SUPER_O}`;
+  const file = hypr(s, text);
+  writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.60.0", features: ["deployments-list"] }));
+  const first = s.run(["setup", "--apply", "--agent-key", "oats", "--json"], {}, { cwd: s.home });
+  assert.equal(first.status, 0, first.stdout + first.stderr);
+  assert.equal(stateOf(s).deployment, null);
+  writeExecutable(s.cli, "#!/usr/bin/env node\nprocess.exit(1);\n");
+  const r = s.run(["setup", "--apply", "--agent-key", "omarchy", "--json"], {}, { cwd: s.home });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").status, "removed");
+  assert.equal(r.json.result.deployment, null);
+  assert.equal(readFileSync(file, "utf8"), text);
+  assert.equal(stateOf(s).deployment, null, "still applied for the list");
+  assert.equal(stateOf(s).agentKey, "omarchy");
+});
+
 // A choice given back whose lines could not be taken out (here, edited into
 // the state by hand) is what --check reports.
 test("--check: the agent key's lines still in the block while the key is given back are drift", (t) => {
@@ -578,6 +599,31 @@ test("the key block alone calls the shim: the launcher and the agent key's secti
   for (const name of ["shim", "keys", "launcher", "agent-key"]) assert.equal(part(r, name).status, "applied", `${name}: ${part(r, name).reason}`);
   for (const name of ["tui", "hook", "menu"]) assert.equal(part(r, name).status, "skipped", name);
   assert.ok(readFileSync(file, "utf8").includes(keys.agentBindLine(wrapperOf(s))));
+});
+
+// Hyprland refusing the candidate when only the submap's lines call the
+// shim: Hyprland checks the one candidate, and nothing is retried without
+// the agent key's lines; both sections are skipped with its reason.
+test("the key block alone calls the shim, and Hyprland refuses the agent key's lines: nothing written, one verification, Hyprland's reason", (t) => {
+  const s = sandbox(t, { launchers: ["omarchy-launch-floating-terminal-with-presentation"] });
+  const file = hypr(s);
+  const calls = join(s.root, "verify-count");
+  writeExecutable(join(s.fakebin, "Hyprland"), `#!/bin/sh
+printf 'verify\\n' >> '${calls}'
+if grep -q 'OATS agent' "$(dirname "$3")/bindings.lua"; then
+  printf '======== Config parsing result:\\nagent binding unsupported\\n'
+  exit 1
+fi
+printf '======== Config parsing result:\\nconfig ok\\n'
+`);
+  const r = s.run(["setup", "--apply", "--agent-key", "oats", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(readFileSync(file, "utf8"), USER_BINDINGS);
+  assert.equal(part(r, "keys").status, "skipped");
+  assert.equal(part(r, "agent-key").status, "skipped");
+  assert.equal(part(r, "agent-key").reason, part(r, "keys").reason);
+  assert.match(part(r, "keys").reason, /agent binding unsupported/);
+  assert.equal(readFileSync(calls, "utf8"), "verify\nverify\n", "the unchanged copy, then the one candidate");
 });
 
 test("--remove after an apply with both sections puts the whole home back", (t) => {
