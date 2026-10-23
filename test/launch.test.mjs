@@ -9,6 +9,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { APP_ID, deliverPrompt, launch, LAUNCH_SCRIPT, parseArgs } from "../lib/launch.mjs";
+import { paths as discoverPaths } from "../lib/discover.mjs";
+import { STATE_SCHEMA } from "../lib/state.mjs";
 import { DETACH_KEY } from "../lib/waiting.mjs";
 import { ALL_FEATURES, fakeKernel, gone } from "./helpers/fake-kernel.mjs";
 import { fixture, repo, sandbox, writeExecutable } from "./helpers/sandbox.mjs";
@@ -350,6 +352,21 @@ test("in the window: the steward is found, started, and attached with the detach
   assert.deepEqual(w.k.calls().slice(2).map((c) => c.cwd), [w.s.deployment, w.s.deployment, w.s.deployment]);
 });
 
+test("in the window: the deployment setup's state records is read first, and with its one steward the list is not read", async (t) => {
+  const w = world(t);
+  const stateDir = discoverPaths(w.env).stateDir;
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, "state.json"), JSON.stringify({ schemaVersion: STATE_SCHEMA, files: [], deployment: w.s.deployment }));
+  const r = await inner(w);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(argvs(w), [
+    ["version", "--json"], ["status", "--json"],
+    ["session", "start", "--home", w.home, "--json"],
+    ["session", "attach", "--detach-key", "C-\\", "--home", w.home],
+  ]);
+  assert.equal(w.k.calls()[1].cwd, w.s.deployment);
+});
+
 test("in the window: a steward already running (E_SESSION_RUNNING) is attached; without the feature there is no detach key", async (t) => {
   const w = world(t, { features: ["deployments-list"] });
   set(w, "start.mode", "running");
@@ -535,12 +552,44 @@ test("deliverPrompt alone: the inspect then the input, with the text on stdin", 
   assert.equal(Buffer.from(calls[1].stdin, "base64").toString("utf8"), TRICKY);
 });
 
+// A failed inspect may be transient: tried again after the poll interval,
+// within the 20 s budget; the input is never tried again.
+for (const [name, first] of [["an error envelope", "envelope:E_SESSION_BUSY"], ["a non-zero exit with no envelope", "stderr"]]) {
+  test(`deliverPrompt: an inspect that fails once (${name}), then answers running, is tried again, and the prompt is sent`, async (t) => {
+    const w = world(t);
+    set(w, "inspect.modes", JSON.stringify([first, ""]));
+    const sent = await deliverPrompt({ shim: w.k.shim, home: w.home, text: "hello", env: w.env, cwd: w.s.deployment, features: ALL_FEATURES, timeouts: { poll: 50 } });
+    assert.deepEqual(sent, { delivered: true, line: "your prompt was sent to the steward" });
+    assert.deepEqual(argvs(w).map((a) => a[1]), ["inspect", "inspect", "input"]);
+  });
+}
+
+test("deliverPrompt: an inspect that keeps failing is tried until the deadline, which names the failure; nothing is sent", async (t) => {
+  const w = world(t);
+  set(w, "inspect.mode", "envelope:E_SESSION_BUSY");
+  const start = Date.now();
+  const sent = await deliverPrompt({ shim: w.k.shim, home: w.home, text: "hello", env: w.env, cwd: w.s.deployment, features: ALL_FEATURES, timeouts: { poll: 100, ready: 1500 } });
+  assert.deepEqual(sent, { delivered: false, line: "sending your prompt: the steward's session could not be inspected within 2 s: the kernel refused inspect (E_SESSION_BUSY): your prompt was not sent" });
+  assert.ok(Date.now() - start < 5000);
+  const kinds = argvs(w).map((a) => a[1]);
+  assert.ok(kinds.length >= 2 && kinds.every((k) => k === "inspect"), kinds.join(" "));
+});
+
+test("deliverPrompt: a failed input is never sent again", async (t) => {
+  const w = world(t);
+  set(w, "input.mode", "envelope:E_SESSION_BUSY");
+  const sent = await deliverPrompt({ shim: w.k.shim, home: w.home, text: "hello", env: w.env, cwd: w.s.deployment, features: ALL_FEATURES, timeouts: { poll: 50 } });
+  assert.equal(sent.delivered, false);
+  assert.deepEqual(argvs(w).map((a) => a[1]), ["inspect", "input"]);
+});
+
 // Every kernel call the window adds, hanging with a child: ended at its
 // bound, the kernel and its child gone, the step named.
 for (const [cmd, line] of [
   ["version", /^omarchy-launch-oats: finding the steward: oats version --json failed: timed out after 400 ms\n/],
   ["start", /^omarchy-launch-oats: starting the steward \(.*\): timed out after 400 ms\n/],
-  ["inspect", /^omarchy-launch-oats: sending your prompt: the steward's session could not be inspected: timed out after 400 ms: your prompt was not sent\n/],
+  // Retried until the readiness deadline: each hanging read ended at its bound.
+  ["inspect", /^omarchy-launch-oats: sending your prompt: the steward's session could not be inspected within 5 s: timed out after 400 ms: your prompt was not sent\n/],
   ["input", /^omarchy-launch-oats: sending your prompt: timed out after 400 ms: it may or may not have gone in, and it is not sent again\n/],
 ]) test(`a hanging session ${cmd} is ended at its bound with its child, and the window says so`, async (t) => {
   const w = world(t);
@@ -551,7 +600,9 @@ for (const [cmd, line] of [
   assert.match(r.err, line);
   assert.equal(r.pauses, 1);
   const pids = readFileSync(join(w.k.k, `${cmd}.pids`), "utf8").trim().split(/\s+/).map(Number);
-  assert.equal(pids.length, 2);
+  // A kernel and its child per read: the inspect is read again until the deadline.
+  if (cmd === "inspect") assert.ok(pids.length >= 4 && pids.length % 2 === 0, String(pids.length));
+  else assert.equal(pids.length, 2);
   assert.ok(await gone(pids), "the kernel and its child are gone");
   if (cmd === "input") assert.equal(argvs(w).filter((a) => a[1] === "input").length, 1, "never sent twice");
 });
