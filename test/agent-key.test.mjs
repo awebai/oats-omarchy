@@ -10,15 +10,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import * as bindings from "../lib/bindings.mjs";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import * as files from "../lib/files.mjs";
 import * as keys from "../lib/keys.mjs";
 import * as menu from "../lib/menu.mjs";
 import { shellQuote } from "../lib/quote.mjs";
-import { AGENT_QUESTION, blocksFor, lookUpSteward, NOT_CHOSEN, setup, UI_QUESTION } from "../lib/setup.mjs";
+import { AGENT_QUESTION, blocksFor, lookUpSteward, NOT_CHOSEN, ONLY_HEADING, setup, UI_QUESTION } from "../lib/setup.mjs";
 import { fixture, repo, sandbox, snapshot, withStewards, writeExecutable } from "./helpers/sandbox.mjs";
 
 const USER_BINDINGS = '-- My bindings\no.bind("SUPER + RETURN", "Terminal", "uwsm-app -- xdg-terminal-exec")\n';
@@ -115,10 +115,10 @@ test("the agent key's section, in Lua and in hyprlang: the launcher by its absol
 test("the Default Agent row's check and pick, exactly; blocksFor puts them in the menu block", () => {
   const checked = String.raw`grep -qxF -e 'o.bind("SUPER + SHIFT + CTRL + A", "OATS agent", "'\''/home/my user/$HOME dir/.local/bin/omarchy-launch-oats'\''")' -- '/home/my user/$HOME dir/.config/hypr/bindings.lua'`;
   assert.equal(menu.agentChecked({ bindings: BINDINGS, line: keys.agentBindLine(WRAPPER) }), checked);
-  const pick = String.raw`omarchy-launch-floating-terminal-with-presentation ''\''/opt/node $v/bin/node'\'' '\''/srv/my plugins/oats-omarchy/bin/setup.mjs'\'' --dir '\''/home/my user/my $deployment'\'' --apply --agent-key oats && grep -qxF -e '\''o.bind("SUPER + SHIFT + CTRL + A", "OATS agent", "'\''\'\'''\''/home/my user/$HOME dir/.local/bin/omarchy-launch-oats'\''\'\'''\''")'\'' -- '\''/home/my user/$HOME dir/.config/hypr/bindings.lua'\'' && '\''/home/my user/$HOME dir/.local/bin/omarchy-launch-oats'\'''`;
+  const pick = String.raw`omarchy-launch-floating-terminal-with-presentation ''\''/opt/node $v/bin/node'\'' '\''/srv/my plugins/oats-omarchy/bin/setup.mjs'\'' --dir '\''/home/my user/my $deployment'\'' --apply --agent-key oats --only agent-key && grep -qxF -e '\''o.bind("SUPER + SHIFT + CTRL + A", "OATS agent", "'\''\'\'''\''/home/my user/$HOME dir/.local/bin/omarchy-launch-oats'\''\'\'''\''")'\'' -- '\''/home/my user/$HOME dir/.config/hypr/bindings.lua'\'' && '\''/home/my user/$HOME dir/.local/bin/omarchy-launch-oats'\'''`;
   assert.equal(menu.agentPick({ setup: files.setupArgv({ node: NODE, pluginDir: PLUGIN, deployment: DEPLOYMENT }), checked, wrapper: WRAPPER }), pick);
   // With this computer's list of deployments: no --dir.
-  const listed = String.raw`omarchy-launch-floating-terminal-with-presentation ''\''/opt/node $v/bin/node'\'' '\''/srv/my plugins/oats-omarchy/bin/setup.mjs'\'' --apply --agent-key oats && grep -qxF -e '\''o.bind("SUPER + SHIFT + CTRL + A", "OATS agent", "'\''\'\'''\''/home/my user/$HOME dir/.local/bin/omarchy-launch-oats'\''\'\'''\''")'\'' -- '\''/home/my user/$HOME dir/.config/hypr/bindings.lua'\'' && '\''/home/my user/$HOME dir/.local/bin/omarchy-launch-oats'\'''`;
+  const listed = String.raw`omarchy-launch-floating-terminal-with-presentation ''\''/opt/node $v/bin/node'\'' '\''/srv/my plugins/oats-omarchy/bin/setup.mjs'\'' --apply --agent-key oats --only agent-key && grep -qxF -e '\''o.bind("SUPER + SHIFT + CTRL + A", "OATS agent", "'\''\'\'''\''/home/my user/$HOME dir/.local/bin/omarchy-launch-oats'\''\'\'''\''")'\'' -- '\''/home/my user/$HOME dir/.config/hypr/bindings.lua'\'' && '\''/home/my user/$HOME dir/.local/bin/omarchy-launch-oats'\'''`;
   assert.equal(menu.agentPick({ setup: files.setupArgv({ node: NODE, pluginDir: PLUGIN, deployment: null }), checked, wrapper: WRAPPER }), listed);
 
   const blocks = blocksFor({ shimPath: "/x/oats", deployment: DEPLOYMENT, node: NODE, pluginDir: PLUGIN, tuiReady: true, desktopExec: null, ui: "tui", wrapper: WRAPPER, bindingsPath: BINDINGS });
@@ -187,10 +187,10 @@ exit 0
   return { pick, plugin, row };
 }
 
-test("the row's pick: setup --apply --agent-key oats in the floating terminal, then the check, then the launcher only when the check passes", (t) => {
+test("the row's pick: setup --apply --agent-key oats --only agent-key in the floating terminal, then the check, then the launcher only when the check passes", (t) => {
   const s = sandbox(t, { deploymentName: "my deployment $x" });
   const { pick, plugin, row } = pickRig(s);
-  const setupLine = `[setup][${plugin}/bin/setup.mjs][--dir][${s.deployment}][--apply][--agent-key][oats]\n`;
+  const setupLine = `[setup][${plugin}/bin/setup.mjs][--dir][${s.deployment}][--apply][--agent-key][oats][--only][agent-key]\n`;
   // The stub setup writes the bind line, so the check, which runs after it,
   // passes, and the launcher runs, with no arguments.
   assert.equal(pick("write"), `${setupLine}[launcher]\n`);
@@ -206,7 +206,7 @@ test("the row's pick: setup --apply --agent-key oats in the floating terminal, t
 test("the row's pick with this computer's list of deployments passes no --dir", (t) => {
   const s = sandbox(t);
   const { pick, plugin } = pickRig(s, { deployment: null });
-  assert.equal(pick("write"), `[setup][${plugin}/bin/setup.mjs][--apply][--agent-key][oats]\n[launcher]\n`);
+  assert.equal(pick("write"), `[setup][${plugin}/bin/setup.mjs][--apply][--agent-key][oats][--only][agent-key]\n[launcher]\n`);
 });
 
 test("after an apply, the menu row is written exactly, for a home and a deployment with spaces and $", (t) => {
@@ -224,7 +224,7 @@ test("after an apply, the menu row is written exactly, for a home and a deployme
   const items = menu.omarchyParse(readFileSync(join(home, ".config/omarchy/extensions/omarchy-menu.jsonc"), "utf8")).items;
   const checked = `grep -qxF -e 'o.bind("SUPER + SHIFT + CTRL + A", "OATS agent", "'\\''${wrapper}'\\''")' -- '${file}'`;
   const q = (x) => `'\\''${x}'\\''`;
-  const inner = `${q(process.execPath)} ${q(`${repo}/bin/setup.mjs`)} --dir ${q(s.deployment)} --apply --agent-key oats && grep -qxF -e '\\''o.bind("SUPER + SHIFT + CTRL + A", "OATS agent", "'\\''\\'\\'''\\''${wrapper}'\\''\\'\\'''\\''")'\\'' -- ${q(file)} && ${q(wrapper)}`;
+  const inner = `${q(process.execPath)} ${q(`${repo}/bin/setup.mjs`)} --dir ${q(s.deployment)} --apply --agent-key oats --only agent-key && grep -qxF -e '\\''o.bind("SUPER + SHIFT + CTRL + A", "OATS agent", "'\\''\\'\\'''\\''${wrapper}'\\''\\'\\'''\\''")'\\'' -- ${q(file)} && ${q(wrapper)}`;
   assert.deepEqual(items[menu.AGENT_ID], { icon: "\u{F06A9}", label: "OATS", checked, action: `omarchy-launch-floating-terminal-with-presentation '${inner}'` });
 
   // The check, run as the menu runs it: true now, false once the key is
@@ -828,4 +828,367 @@ test("the steward lookup stops at its budget: its reason, and the hanging kernel
   const alive = () => pids.filter((pid) => { try { process.kill(pid, 0); return true; } catch { return false; } });
   for (let i = 0; i < 40 && alive().length; i++) await new Promise((done) => setTimeout(done, 50));
   try { assert.deepEqual(alive(), [], "the kernel read and its child are gone"); } finally { for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } } }
+});
+
+// ---------------------------------------------------------------------------
+// --only agent-key: what picking OATS for the agent key changes, and nothing
+// else. The Default Agent row runs it; a person types it. SUPER + O, the
+// launcher entries, the hook, the menu and the default UI stay as they are,
+// on disk and in setup's state.
+
+// The paths under HOME that are new or changed since `before`; none may go.
+function changedSince(s, before) {
+  const after = snapshot(s.home);
+  for (const path of before.keys()) assert.ok(after.has(path), `${path} is still there`);
+  return [...after].filter(([path, entry]) => before.get(path) !== entry).map(([path]) => path).sort();
+}
+const ONLY_RUN = ["setup", "--apply", "--only", "agent-key"];
+const stateRel = ".local/state/oats-omarchy";
+
+test("--only agent-key on a fresh HOME writes the shim, the launcher and a key block holding only the agent key's section, and nothing else", (t) => {
+  const s = sandbox(t);
+  // Both UIs found and none chosen: a full --apply without a terminal would
+  // refuse (E_UI_REQUIRED); this one never asks.
+  withDesktop(s);
+  const file = hypr(s);
+  const p = discoverPaths(s.env);
+  const before = snapshot(s.home);
+  const r = s.run([...ONLY_RUN, "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(r.json.result.parts.map((x) => [x.part, x.status]), [["shim", "applied"], ["launcher", "applied"], ["agent-key", "applied"]]);
+  assert.deepEqual([...r.json.result.written].sort(), [p.shim, p.wrapper, file].sort());
+  const rec = keysRecord(s);
+  assert.deepEqual(changedSince(s, before), [
+    ".config/hypr/bindings.lua",
+    ".local/bin", relative(s.home, p.wrapper),
+    ".local/share/oats-omarchy", relative(s.home, p.shim),
+    ".local/state", stateRel, `${stateRel}/backup`, `${stateRel}/${rec.prior.backup}`, `${stateRel}/node`, `${stateRel}/state.json`,
+  ].sort(), "no launcher entry, icon, hook, menu or plugin.json");
+  const block = `${bindings.START}${keys.agentLua(p.wrapper)}${bindings.END}`;
+  assert.equal(rec.block, block);
+  assert.equal(readFileSync(file, "utf8"), `${USER_BINDINGS}\n${block}`);
+  assert.equal(readFileSync(p.shim, "utf8"), files.shim({ node: process.execPath, cli: s.cli }));
+  assert.equal(readFileSync(p.wrapper, "utf8"), files.launcher({ node: process.execPath, pluginDir: repo }));
+  const state = stateOf(s);
+  assert.deepEqual([state.parts, state.ui, state.agentKey, state.desktop, state.deployment], [["shim", "launcher", "keys"], null, "oats", null, s.deployment]);
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, [], "no drift: the bar widget's file goes with a full --apply");
+
+  // A full --apply afterwards takes the narrowed apply as its own work.
+  const plan = s.run(["setup", "--plan", "--ui", "tui", "--json"]);
+  for (const name of ["shim", "launcher"]) assert.deepEqual(part(plan, name), { part: name, status: "already applied", paths: [name === "shim" ? p.shim : p.wrapper] }, "no \"replaces an existing file\"");
+  assert.ok(!s.run(["setup", "--plan", "--ui", "tui"]).stdout.includes("replaces"));
+  const full = s.run(["setup", "--apply", "--ui", "tui", "--json"]);
+  assert.equal(full.status, 0, full.stdout + full.stderr);
+  for (const name of ["tui", "hook", "menu", "keys"]) assert.equal(part(full, name).status, "applied", name);
+  assert.equal(part(full, "agent-key").status, "already applied");
+  assert.ok(!full.json.result.written.includes(p.shim) && !full.json.result.written.includes(p.wrapper));
+  assert.deepEqual(bindings.sections(keysRecord(s).block).agentKey, keys.agentLua(p.wrapper));
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
+});
+
+test("--only agent-key over a full setup: SUPER + O's section, the entries, the hook, the menu, the bar widget's file and the default UI stay byte for byte", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  const p = discoverPaths(s.env);
+  assert.equal(s.run(["setup", "--apply", "--agent-key", "omarchy"]).status, 0);
+  const submap = bindings.sections(keysRecord(s).block).submap;
+  assert.ok(submap.includes("SUPER + O") && !submap.includes("OATS Desktop"), submap);
+  // The Desktop appears since: a full --apply would now plan SUPER + O's
+  // section anew (with D), and asks which UI opens first.
+  withDesktop(s);
+  assert.equal(part(s.run(["setup", "--plan", "--ui", "tui", "--json"]), "keys").status, "will apply");
+  assert.equal(s.run(["setup", "--apply", "--json"]).json.error.code, "E_UI_REQUIRED");
+  const state0 = stateOf(s);
+  const drift0 = s.run(["setup", "--check", "--json"]).json.result.drift;
+  const before = snapshot(s.home);
+
+  const r = s.run([...ONLY_RUN, "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(r.json.result.parts.map((x) => [x.part, x.status]), [["shim", "already applied"], ["launcher", "already applied"], ["agent-key", "applied"]]);
+  assert.deepEqual(r.json.result.written, [file]);
+  assert.deepEqual(changedSince(s, before), [".config/hypr/bindings.lua", `${stateRel}/state.json`]);
+  const block = `${bindings.START}${submap}${keys.agentLua(p.wrapper)}${bindings.END}`;
+  assert.equal(readFileSync(file, "utf8"), `${USER_BINDINGS}\n${block}`, "SUPER + O's section as recorded, byte for byte");
+  assert.equal(readFileSync(join(s.root, "hyprland-saw.lua"), "utf8"), readFileSync(file, "utf8"), "Hyprland verified the whole candidate, both sections");
+  const { files: files1, agentKey: agentKey1, ...rest1 } = stateOf(s);
+  const { files: files0, agentKey: agentKey0, ...rest0 } = state0;
+  assert.deepEqual([agentKey0, agentKey1], ["omarchy", "oats"]);
+  assert.deepEqual(rest1, rest0, "the deployment, node, plugin directory, Desktop, parts and default UI as recorded");
+  assert.deepEqual(files1.filter((f) => f.role !== "keys"), files0.filter((f) => f.role !== "keys"));
+  assert.equal(keysRecord(s).block, block);
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, drift0);
+
+  // Given back the same way: only the agent key's section goes.
+  const backBefore = snapshot(s.home);
+  const back = s.run([...ONLY_RUN, "--agent-key", "omarchy", "--json"]);
+  assert.equal(back.status, 0, back.stdout + back.stderr);
+  assert.equal(part(back, "agent-key").status, "removed");
+  assert.deepEqual(changedSince(s, backBefore), [".config/hypr/bindings.lua", `${stateRel}/state.json`]);
+  assert.equal(readFileSync(file, "utf8"), `${USER_BINDINGS}\n${bindings.composeBlock({ submap })}`);
+  assert.equal(stateOf(s).agentKey, "omarchy");
+});
+
+test("--only agent-key gives the key back with --agent-key omarchy: the block goes, the shim and the launcher stay", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  const p = discoverPaths(s.env);
+  // Nothing applied yet: there is nothing to give back, and nothing is written.
+  const fresh = snapshot(s.home);
+  const none = s.run([...ONLY_RUN, "--agent-key", "omarchy", "--json"]);
+  assert.equal(none.status, 0, none.stdout + none.stderr);
+  assert.deepEqual(none.json.result.written, []);
+  assert.deepEqual(snapshot(s.home), fresh);
+
+  assert.equal(s.run(ONLY_RUN).status, 0);
+  const rec = keysRecord(s);
+  const r = s.run([...ONLY_RUN, "--agent-key", "omarchy", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const left = "the agent key is given back, so it is left as it is";
+  assert.deepEqual(r.json.result.parts, [
+    { part: "shim", status: "skipped", reason: left, paths: [] },
+    { part: "launcher", status: "skipped", reason: left, paths: [] },
+    { part: "agent-key", status: "removed", paths: [file] },
+  ]);
+  assert.deepEqual(r.json.result.agentKey, { choice: "omarchy", from: "--agent-key" });
+  assert.equal(readFileSync(file, "utf8"), USER_BINDINGS, "the block is gone, the file as before setup");
+  assert.equal(keysRecord(s), undefined);
+  assert.equal(existsSync(join(p.stateDir, rec.prior.backup)), false);
+  assert.ok(existsSync(p.shim) && existsSync(p.wrapper));
+  assert.equal(stateOf(s).agentKey, "omarchy");
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
+});
+
+test("--plan --only agent-key: its heading, only its parts, no default UI or SUPER + O; it writes nothing", (t) => {
+  const s = sandbox(t);
+  withDesktop(s);
+  const file = hypr(s);
+  const p = discoverPaths(s.env);
+  assert.equal(ONLY_HEADING, "Only the agent key: SUPER + O, the launchers, the menu and the hook are left as they are");
+  const before = snapshot(s.home);
+  const text = s.run(["setup", "--plan", "--only", "agent-key"]).stdout;
+  assert.ok(text.startsWith(`setup --plan --only agent-key (nothing was written)\n\n${ONLY_HEADING}\n  shim      will apply\n            ${p.shim}\n  launcher  will apply\n            ${p.wrapper}\n  agent-key will apply\n            ${file}\n\nAgent key\n  OATS (--only agent-key): SUPER + SHIFT + CTRL + A opens the steward through omarchy-launch-oats\n`), text);
+  for (const heading of ["\nParts\n", "\nDefault UI\n", "\nKeys\n"]) assert.ok(!text.includes(heading), heading);
+  assert.ok(!text.includes("SUPER+O becomes a prefix"));
+  assert.ok(text.endsWith("\nRun `setup --apply --only agent-key` to write the parts marked \"will apply\"; `setup --apply --only agent-key --agent-key omarchy` gives the key back.\n"), text);
+  // The mode alone is --plan, as without --only.
+  assert.equal(s.run(["setup", "--only=agent-key"]).stdout, text);
+
+  const plan = s.run(["setup", "--plan", "--only", "agent-key", "--agent-key", "oats", "--json"]);
+  const result = plan.json.result;
+  assert.equal(result.only, "agent-key");
+  assert.deepEqual(result.parts.map((x) => x.part), ["shim", "launcher", "agent-key"]);
+  assert.ok(!Object.hasOwn(result, "ui") && !Object.hasOwn(result, "keys"), Object.keys(result).join(", "));
+  assert.deepEqual(result.agentKey, { choice: "oats", from: "--agent-key", snippet: keys.agentLua(p.wrapper), format: "lua", file });
+  assert.ok(result.notes.includes(caveat(s)));
+  assert.deepEqual(snapshot(s.home), before);
+});
+
+test("--only takes agent-key, with --plan or --apply only, and not with --ui or --desktop (E_BAD_ARGS, exit 2)", (t) => {
+  const s = sandbox(t);
+  const cases = [
+    [["--apply", "--only", "menu"], '--only takes agent-key (got "menu")'],
+    [["--plan", "--only=keys"], '--only takes agent-key (got "keys")'],
+    [["--apply", "--only"], "--only needs a value"],
+    [["--apply", "--only", "--yes"], "--only needs a value"],
+    [["--check", "--only", "agent-key"], "--only goes with --plan or --apply"],
+    [["--remove", "--only", "agent-key"], "--only goes with --plan or --apply"],
+    [["--apply", "--only", "agent-key", "--ui", "tui"], "--ui does not go with --only agent-key, which leaves the default UI as it is"],
+    [["--plan", "--only", "agent-key", "--desktop", "/opt/x.AppImage"], "--desktop does not go with --only agent-key, which leaves the Desktop as it is"],
+  ];
+  for (const [args, message] of cases) {
+    const r = s.run(["setup", ...args, "--json"], {}, { yes: false });
+    assert.equal(r.status, 2, args.join(" "));
+    assert.deepEqual([r.json.error.code, r.json.error.message], ["E_BAD_ARGS", message], args.join(" "));
+    const text = s.run(["setup", ...args], {}, { yes: false });
+    assert.ok(text.stderr.startsWith(`setup: ${message}\nusage: setup `), text.stderr);
+  }
+  assert.match(s.run(["setup", "--apply", "--only", "x"], {}, { yes: false }).stderr, /\[--only agent-key\]/, "the usage names it");
+  assert.equal(existsSync(join(s.home, ".local/state/oats-omarchy")), false);
+});
+
+test("--only agent-key still needs the person's yes: in a terminal it asks only Apply it?, and without one it refuses without --yes", (t) => {
+  const s = sandbox(t);
+  withDesktop(s);
+  const file = hypr(s);
+  const before = snapshot(s.home);
+  const refused = s.run([...ONLY_RUN, "--json"], {}, { yes: false });
+  assert.equal(refused.status, 1);
+  assert.equal(refused.json.error.code, "E_CONFIRM");
+  assert.deepEqual(snapshot(s.home), before);
+  const no = fromTerminal(s, ["--apply", "--only", "agent-key"], ["n"]);
+  assert.deepEqual(no.asked, [APPLY], "no UI question, no agent key question");
+  assert.deepEqual(snapshot(s.home), before);
+  const r = fromTerminal(s, ["--apply", "--only", "agent-key"], ["y"]);
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(r.asked, [APPLY]);
+  assert.deepEqual(r.hyprWhenAsked, [0], "verified after the answer, not before");
+  assert.ok(r.out.includes(`\n${ONLY_HEADING}\n`));
+  assert.ok(readFileSync(file, "utf8").includes(keys.agentLua(wrapperOf(s))));
+});
+
+test("--only agent-key keeps the steward gate: with no steward the key stays with Omarchy, and the shim and the launcher are written for a later run", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  withStewards(s, []);
+  const r = s.run([...ONLY_RUN, "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(part(r, "agent-key"), { part: "agent-key", status: "skipped", reason: "the agent key stays with Omarchy until this machine has one steward: no steward on this machine: spawn one with `oats spawn oats.machine/steward --name steward` in the machine's deployment; run setup --apply --only agent-key again after spawning it", paths: [] });
+  assert.equal(part(r, "shim").status, "applied");
+  assert.equal(part(r, "launcher").status, "applied");
+  assert.equal(readFileSync(file, "utf8"), USER_BINDINGS);
+  assert.equal(stateOf(s).agentKey, "oats");
+  withStewards(s, ["steward"]);
+  const again = s.run([...ONLY_RUN, "--json"]);
+  assert.equal(part(again, "agent-key").status, "applied");
+  assert.ok(agentLines(file));
+});
+
+test("--only agent-key keeps the stock-binding check and Hyprland's verification", (t) => {
+  // The person binds the key themselves: the plan prints the lines to adapt.
+  const s = sandbox(t);
+  const mine = `${USER_BINDINGS}o.bind("SUPER SHIFT CTRL + a", "Mine", "true")\n`;
+  const file = hypr(s, mine);
+  const r = s.run([...ONLY_RUN, "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").reason, agentRefusals[3][2]);
+  assert.equal(readFileSync(file, "utf8"), mine);
+  assert.equal(part(r, "launcher").status, "applied", "the snippet runs the launcher");
+  assert.ok(s.run(["setup", "--plan", "--only", "agent-key"]).stdout.includes(`to move the key yourself, add this at the end of ${file}:`));
+
+  // Hyprland refuses the candidate: nothing goes into bindings.lua.
+  const h = sandbox(t);
+  const hfile = hypr(h);
+  h.env.FAKE_HYPR_REFUSE_BLOCK = "1";
+  const refused = h.run([...ONLY_RUN, "--json"]);
+  assert.equal(refused.status, 0, refused.stdout + refused.stderr);
+  assert.match(part(refused, "agent-key").reason, /^Hyprland --verify-config refuses your config with the key block added/);
+  assert.equal(readFileSync(hfile, "utf8"), USER_BINDINGS);
+});
+
+test("--only agent-key leaves a hook or menu the person changed alone, where a full --apply refuses", (t) => {
+  const s = sandbox(t);
+  hypr(s);
+  assert.equal(s.run(["setup", "--apply", "--agent-key", "omarchy"]).status, 0);
+  const hook = join(s.home, ".config/omarchy/hooks/post-update.d/oats-omarchy.hook");
+  writeFileSync(hook, `${readFileSync(hook, "utf8")}# mine\n`);
+  assert.equal(s.run(["setup", "--apply", "--agent-key", "oats", "--json"]).json.error.code, "E_MODIFIED");
+  const r = s.run([...ONLY_RUN, "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").status, "applied");
+  assert.ok(readFileSync(hook, "utf8").endsWith("# mine\n"));
+});
+
+test("--remove after --only agent-key on a fresh HOME puts the whole home back", (t) => {
+  const s = sandbox(t);
+  hypr(s);
+  const before = snapshot(s.home);
+  assert.equal(s.run(ONLY_RUN).status, 0);
+  const r = s.run(["setup", "--remove", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(snapshot(s.home), before);
+});
+
+// What the state records after --only agent-key is what the files it leaves
+// run: the OATS CLI of a shim it did not touch, and, over its own work
+// alone, the node of the shim and launcher it rewrote.
+test("--only agent-key giving the key back keeps the recorded OATS CLI of the shim it leaves alone", (t) => {
+  const s = sandbox(t);
+  hypr(s);
+  assert.equal(s.run(["setup", "--apply", "--agent-key", "oats"]).status, 0);
+  const cli = stateOf(s).cli;
+  const shim = readFileSync(discoverPaths(s.env).shim, "utf8");
+  // `oats` is gone from PATH; the CLI setup recorded is still there.
+  unlinkSync(join(s.fakebin, "oats"));
+  const r = s.run([...ONLY_RUN, "--agent-key", "omarchy", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").status, "removed");
+  assert.equal(readFileSync(discoverPaths(s.env).shim, "utf8"), shim);
+  assert.equal(stateOf(s).cli, cli);
+  assert.ok(!s.run(["setup", "--check", "--json"]).json.result.drift.some((d) => d.includes("OATS CLI")));
+});
+
+test("--only agent-key again over its own work alone records the node its rewritten shim and launcher run", (t) => {
+  const s = sandbox(t, { node: true });
+  hypr(s);
+  const p = discoverPaths(s.env);
+  assert.equal(s.run(ONLY_RUN).status, 0);
+  const old = stateOf(s).node;
+  unlinkSync(old);
+  const node = join(s.fakebin, "node");
+  symlinkSync(process.execPath, node);
+  const r = s.run([...ONLY_RUN, "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual([...r.json.result.written].sort(), [p.shim, p.wrapper].sort());
+  assert.ok(readFileSync(p.wrapper, "utf8").includes(node));
+  assert.equal(stateOf(s).node, node);
+  assert.equal(readFileSync(join(p.stateDir, "node"), "utf8"), `${node}\n`);
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
+});
+
+// The launcher finds the steward through the state: a full setup applied for
+// this computer's list, with an OATS CLI that no longer keeps one, gives it
+// no deployment to look in, whatever --dir names now.
+test("--only agent-key does not move the key over a full setup applied for the list once the OATS CLI keeps none: a full --apply comes first", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.65.0", features: ["deployments-list"] }));
+  writeFileSync(join(s.root, "deployments.json"), JSON.stringify({ deploymentsApi: 1, file: join(s.home, ".oats/config/deployments.json"), deployments: [{ path: s.deployment, name: "deployment", state: "ok" }], imports: {} }));
+  assert.equal(s.run(["setup", "--apply", "--agent-key", "omarchy"]).status, 0);
+  assert.equal(stateOf(s).deployment, null);
+  const before = readFileSync(file, "utf8");
+  writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.60.0", features: [] }));
+  const blocked = "setup is applied for this computer's list of deployments, which this OATS CLI no longer keeps, so the launcher would find no steward: run a full setup --apply --dir <deployment> first, which switches it, then setup --apply --only agent-key";
+  const r = s.run([...ONLY_RUN, "--dir", s.deployment, "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(part(r, "agent-key"), { part: "agent-key", status: "skipped", reason: `the agent key stays with Omarchy: ${blocked}`, paths: [] });
+  assert.equal(readFileSync(file, "utf8"), before);
+  assert.equal(stateOf(s).deployment, null, "the full setup's deployment as recorded");
+  assert.equal(stateOf(s).agentKey, "oats", "the choice is recorded");
+  // The full --apply switches it, and moves the key on the recorded choice.
+  const full = s.run(["setup", "--apply", "--dir", s.deployment, "--json"]);
+  assert.equal(full.status, 0, full.stdout + full.stderr);
+  assert.equal(part(full, "agent-key").status, "applied");
+  assert.equal(stateOf(s).deployment, s.deployment);
+  assert.ok(agentLines(file));
+});
+
+test("--only agent-key over its own work alone records the deployment its launcher reads, even when no file changes", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.65.0", features: ["deployments-list"] }));
+  writeFileSync(join(s.root, "deployments.json"), JSON.stringify({ deploymentsApi: 1, file: join(s.home, ".oats/config/deployments.json"), deployments: [{ path: s.deployment, name: "deployment", state: "ok" }], imports: {} }));
+  assert.equal(part(s.run([...ONLY_RUN, "--json"]), "agent-key").status, "applied");
+  assert.equal(stateOf(s).deployment, null);
+  const moved = readFileSync(file, "utf8");
+  // The same CLI without the list: the key already moved, every file current.
+  writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.65.0", features: [] }));
+  const r = s.run([...ONLY_RUN, "--dir", s.deployment, "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(r.json.result.parts.map((x) => x.status), ["already applied", "already applied", "already applied"]);
+  assert.deepEqual(r.json.result.written, []);
+  assert.equal(readFileSync(file, "utf8"), moved);
+  assert.equal(stateOf(s).deployment, s.deployment, "the state alone is rewritten");
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
+  // Nothing changes on a second run.
+  const after = snapshot(s.home);
+  assert.deepEqual(s.run([...ONLY_RUN, "--dir", s.deployment, "--json"]).json.result.written, []);
+  assert.deepEqual(snapshot(s.home), after);
+});
+
+test("--only agent-key giving the key back over its own work alone keeps the node the untouched shim and launcher run, so --check says it is gone", (t) => {
+  const s = sandbox(t, { node: true });
+  hypr(s);
+  const p = discoverPaths(s.env);
+  assert.equal(s.run(ONLY_RUN).status, 0);
+  const old = stateOf(s).node;
+  unlinkSync(old);
+  symlinkSync(process.execPath, join(s.fakebin, "node"));
+  const shim = readFileSync(p.shim, "utf8");
+  const launcher = readFileSync(p.wrapper, "utf8");
+  const r = s.run([...ONLY_RUN, "--agent-key", "omarchy", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").status, "removed");
+  assert.deepEqual([readFileSync(p.shim, "utf8"), readFileSync(p.wrapper, "utf8")], [shim, launcher]);
+  assert.equal(stateOf(s).node, old);
+  assert.ok(s.run(["setup", "--check", "--json"]).json.result.drift.includes(`the node setup recorded, ${old}, is gone: run setup --apply again`));
 });
