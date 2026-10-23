@@ -152,13 +152,15 @@ test("--apply with no menu file creates it with the block; --remove deletes it a
   assert.deepEqual(Object.keys(items), OURS);
   assert.equal(items["oats-ui"].action, files.tuiCommand({ shimPath: join(s.home, ".local/share/oats-omarchy/oats"), deployment: s.deployment }), "it opens the TUI, the only UI");
   // The Default Agent row: checked while bindings.lua holds the agent key's
-  // line, and its pick runs this setup with --agent-key oats.
+  // line, and its pick runs this setup with --agent-key oats --only agent-key
+  // (the exact string is pinned in test/agent-key.test.mjs).
   const wrapper = join(s.home, ".local/bin/omarchy-launch-oats");
   const checked = menu.agentChecked({ bindings: join(s.home, ".config/hypr/bindings.lua"), line: agentBindLine(wrapper) });
   assert.deepEqual(items[menu.AGENT_ID], {
     icon: "\u{F06A9}", label: "OATS", checked,
     action: menu.agentPick({ setup: files.setupArgv({ node: process.execPath, pluginDir: repo, deployment: s.deployment }), checked, wrapper }),
   });
+  assert.match(items[menu.AGENT_ID].action, / --apply --agent-key oats --only agent-key && /);
   assert.equal(part(s.run(["setup", "--apply", "--json"]), "menu").status, "already applied");
   assert.equal(s.run(["setup", "--remove"]).status, 0);
   assert.deepEqual(snapshot(s.home), before);

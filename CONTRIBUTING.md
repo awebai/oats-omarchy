@@ -131,6 +131,29 @@ compares them with what is there, and only then writes:
   a steward the agent-key part is skipped with findSteward's reason and the
   choice stays recorded. A key already moved keeps its lines, and the plan
   notes that no steward was found.
+- `--only agent-key` (`ONLY`; with `--plan` or `--apply`) plans only what
+  the agent key needs: the shim, the launcher and the key block's agent-key
+  section (`desiredOnly`, which `desiredParts` hands over to). It implies
+  `--agent-key oats` unless `--agent-key omarchy` gives the key back, and
+  any other value, `--check`, `--remove`, `--ui` or `--desktop` with it is
+  `E_BAD_ARGS`. The agent key goes through the same gate and checks as in a
+  full apply (the launcher, the steward, `agentKeyRefusal`, Hyprland on the
+  whole candidate after the confirmation). The submap section is passed to
+  `keysEdit` as not wanted, so a recorded one stays byte for byte and an
+  absent one stays absent. The block's file stays with the "keys" part,
+  which the plan does not show (`hidden`). Nothing else is planned: no
+  entries, hook, menu, `plugin.json` or cache refresh, and no UI question
+  or `E_UI_REQUIRED`. The shim and the launcher are written whether or not
+  the key moves now (a printed snippet runs the launcher too), except when
+  the key is given back, which leaves them as they are. The plan says so
+  under `ONLY_HEADING`. Over a state, the apply keeps the deployment, node,
+  plugin directory, Desktop, default UI and parts the state records, which
+  the other files were written from, so `--check` rebuilds them unchanged.
+  It records the OATS CLI, which only the shim runs, and adds its parts.
+  With no state, it records what it found. `--check` expects `plugin.json`
+  only once a part outside `ONLY_PARTS` is recorded, since a narrowed apply
+  alone leaves the bar icon offering setup. A later full `--apply` finds the
+  shim and the launcher recorded and current.
 - The default UI, `tui` or `desktop` (`chooseUi` in `lib/setup.mjs`), is
   what the menu's root row "OATS" and a right click on the bar icon open.
   With one of the two set up it is that one. With both it is `--ui`, else
@@ -187,7 +210,10 @@ compares them with what is there, and only then writes:
   read when HOME points at it.
 - `--apply` and `--remove` change files in the person's home. In a terminal
   they show what they will do and ask; otherwise they refuse with
-  `E_CONFIRM` unless `--yes` is given, as `omarchy plugin add` does.
+  `E_CONFIRM` unless `--yes` is given, as `omarchy plugin add` does. Setup
+  cannot tell an agent from a person and does not try: the README tells
+  coding agents never to apply or remove, and to give the person the
+  command instead.
 - `lib/files.mjs` renders each file (the shim, the launcher entries, the
   post-update hook, the bar widget's `plugin.json`); `lib/desktop-entry.mjs`
   reads and writes desktop entries.
@@ -213,10 +239,11 @@ compares them with what is there, and only then writes:
   `agentBindLine` in `bindings.lua`: it reads the file Hyprland loads, so it
   cannot disagree with the live binding, and a block changed by hand is
   what `--check` reports, since setup records the block's bytes. Its action
-  (`agentPick`) runs `setup --apply --agent-key oats`, by the recorded node
-  and plugin, in `omarchy-launch-floating-terminal-with-presentation`,
-  where the plan shows and setup asks, and then the launcher only when that
-  check passes. Both ids are in `IDS`, so a user's own row with one of them
+  (`agentPick`) runs `setup --apply --agent-key oats --only agent-key`, by
+  the recorded node and plugin, in
+  `omarchy-launch-floating-terminal-with-presentation`, where the plan shows
+  and setup asks, and then the launcher only when that check passes. Picking
+  OATS there never touches SUPER + O, the entries, the menu or the hook. Both ids are in `IDS`, so a user's own row with one of them
   is refused. With neither UI set up there is no block, and the menu part
   is skipped. Omarchy 4.0.4's search
   (`MenuModel.js` `searchScore`) ranks an exact label at the root above any
@@ -531,7 +558,9 @@ CI's `omarchy` job runs in a pinned `archlinux:base` container:
   the user's whole configuration with the printed snippet added, the key
   block written, refused and removed with the real Hyprland, the block with
   each of its sections alone and both, the agent key picked, given back and
-  removed with `bindings.lua` checked byte for byte, Omarchy's
+  removed with `bindings.lua` checked byte for byte, `--only agent-key` on
+  a fresh home and over a full setup (SUPER + O's section, the menu, the
+  hook and the entry byte for byte), Omarchy's
   own `MenuModel.js` reading the menu block (it is plain functions, so it
   runs as a script in a `vm` context), the Default Agent row under
   Omarchy's real Setup > Defaults > Agent included, and ranking the

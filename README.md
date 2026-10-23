@@ -20,20 +20,31 @@ only after Hyprland has checked a copy of your config with it. Otherwise it
 prints the snippet for you to add. Once you pick OATS for it, the agent key,
 SUPER + SHIFT + CTRL + A, goes into the same block and opens the machine's
 steward through `omarchy-launch-oats`, a launcher setup writes to
-`~/.local/bin` (see "The agent key"). `--remove` restores exactly what was
+`~/.local/bin`. Picking it with `setup --apply --only agent-key`, or the
+OATS row in Omarchy's Default Agent menu, changes nothing else (see "The
+agent key"). `--remove` restores exactly what was
 there before.
 
 ## Installing with a coding agent
 
 This section is written to you, the coding agent asked to install this
-plugin. Follow the steps in order. Every command here is checked against
-v0.6.0.
+plugin. Follow the steps in order. Every command here is this version's
+(`setup --help` lists setup's flags).
 
-> **Never pass `--yes` to `setup --apply` or `setup --remove` until the
-> person has said yes in the chat to what you showed them.** You have no
-> terminal, so `setup` refuses to apply or remove without `--yes`. That flag
-> stands in for the person's own answer to its `Apply it? [y/N]` question.
-> The person's request to install the plugin is consent for step 3 only.
+> **You never run `setup --apply` or `setup --remove`, with or without
+> `--yes`.** You run `setup --plan` and `setup --check`, which change
+> nothing, and you show the person what they say. Applying is the person's
+> own act: they type the exact command you give them in their own terminal,
+> where setup shows the plan again and asks, or they pick a row in Omarchy's
+> menu. That is not an extra approval: it is them choosing.
+>
+> Why: setup writes Hyprland key bindings, launchers in `~/.local/bin` and
+> an Omarchy post-update hook, which change what the person's desktop runs
+> and stay after the session. An agent's permission checks (Claude Code's
+> auto mode among them) refuse that from an agent as persistence, and they
+> are right to: moving the person's desktop keys is theirs to do. Don't
+> look for a way around it. `--yes` is for a person in a terminal that
+> cannot answer setup's question; never pass it yourself.
 
 **1. Check the prerequisites.** Stop at the first one that fails, and tell the
 person how to fix it. Don't install system packages yourself.
@@ -80,28 +91,27 @@ Otherwise, ask for the deployment: the directory that directly holds
 - Check that the directory holds a regular `oats-local.yaml` before you
   pass it as `--dir`.
 
-**3. Add the plugin.** First tell the person what Omarchy's installer would
-warn them, since `--yes` skips that warning: plugins run as unsandboxed code
-inside the Omarchy shell, so add only repos they trust. If they hesitate,
-don't run it.
+**3. The person adds the plugin.** Give them this command for their own
+terminal:
 
 ```bash
-omarchy plugin add https://github.com/awebai/oats-omarchy --enable --yes
+omarchy plugin add https://github.com/awebai/oats-omarchy --enable
 ```
 
-This clones the default branch into
-`~/.config/omarchy/plugins/ai.aweb.oats/`. `--enable` loads the plugin's bar
-icon into the Omarchy shell at once; it runs no setup. `--yes` is needed
-because you have no terminal, and the person's request to install the plugin
-is their consent to it.
+Omarchy asks them there whether they trust the repository, since plugins run
+as unsandboxed code inside the Omarchy shell. It clones the default branch
+into `~/.config/omarchy/plugins/ai.aweb.oats/`, and `--enable` loads the
+plugin's bar icon into the Omarchy shell at once. It runs no setup. Once
+they say it is done, check that `~/.config/omarchy/plugins/ai.aweb.oats/setup`
+is there.
 
-To install the released v0.6.0 rather than the tip of the default branch,
-pin it before the shell loads it. Add the plugin without `--enable`, check
-out the tag, then enable it:
+To install a release rather than the tip of the default branch, they pin it
+before the shell loads it: they add the plugin without `--enable`, check out
+the tag, then enable it:
 
 ```bash
-omarchy plugin add https://github.com/awebai/oats-omarchy --yes
-git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.6.0
+omarchy plugin add https://github.com/awebai/oats-omarchy
+git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout <tag>
 omarchy plugin enable ai.aweb.oats
 ```
 
@@ -117,22 +127,21 @@ Its `result.ui.found` lists the UIs setup can open, `tui`, `desktop` or
 both.
 - **Both:** ask the person "Open which OATS first: TUI or Desktop?". The
   usual answer is the TUI. Pass the answer as `--ui tui` or `--ui desktop` in
-  steps 5 and 6. Without `--ui`, `setup --apply` refuses here, since you have
-  no terminal for it to ask in.
+  steps 5 and 6. (Without `--ui`, setup asks it in the person's terminal.)
 - **One:** that one is the default. Pass no `--ui`, and don't ask.
 - **None:** there is no default UI, and no OATS row. The plan's parts say
   why.
 
 Then ask the person "Should the agent key (SUPER + SHIFT + CTRL + A) open
 OATS's steward, or stay with Omarchy's agent?". Pass the answer as
-`--agent-key oats` or `--agent-key omarchy` in steps 5 and 6. Without
-`--agent-key`, setup asks nothing (you have no terminal) and the key stays
-with Omarchy. When the plan's "Agent key" says it was chosen at an earlier
-`--apply`, that choice is kept: ask only if the person wants to change it.
-The key moves only when the machine has exactly one OATS steward. When the
-plan's agent-key part says it stays with Omarchy until the machine has one,
-run `setup --apply` again once the steward is spawned, after the person's
-yes as in step 6.
+`--agent-key oats` or `--agent-key omarchy` in steps 5 and 6. (Without
+`--agent-key`, setup asks it in the person's terminal.) When the plan's
+"Agent key" says it was chosen at an earlier `--apply`, that choice is kept:
+ask only if the person wants to change it. The key moves only when the
+machine has exactly one OATS steward. When the plan's agent-key part says it
+stays with Omarchy until the machine has one, give the person
+`~/.config/omarchy/plugins/ai.aweb.oats/setup --apply --only agent-key` to
+type once the steward is spawned (see "The agent key").
 
 **5. Show the plan.** Leave out `--dir <deployment>` here and in step 6
 only when both checks in step 2 hold, and `--ui <ui>` when step 4 says so.
@@ -162,20 +171,25 @@ point out:
 - with the list, its notes: that the list holds no deployment yet, or that a
   `--dir` you passed is not in it, and what to run.
 
-Then ask whether to apply it.
+If they ask for changes, change the flags and show the plan again.
 
-**6. Apply, only after the person's yes in the chat.**
+**6. Give the person the command that applies it.** They type it in their
+own terminal, with the same flags as the plan you showed:
 
 ```bash
-~/.config/omarchy/plugins/ai.aweb.oats/setup --apply --yes --dir <deployment> --ui <ui> --agent-key <oats|omarchy>
+~/.config/omarchy/plugins/ai.aweb.oats/setup --apply --dir <deployment> --ui <ui> --agent-key <oats|omarchy>
 ```
 
-If they say no, or ask for changes, stop here: setup has written nothing.
-The plugin itself stays installed unless they want it removed
-(`omarchy plugin remove ai.aweb.oats --yes`, once they agree).
+There setup shows the plan again and asks `Apply it? [y/N]`. After their
+yes it checks the key block with Hyprland, then writes. Nothing is written
+until they answer `y`. If they decide against it, the plugin itself stays
+installed unless they remove it (`omarchy plugin remove ai.aweb.oats`, in
+their terminal).
 
-**7. Report.** Say what was applied and what was skipped, with the reasons
-setup gives. If the plan printed the key snippet instead of writing it (for
+**7. Report.** Once they say it ran, run `setup --check` (it prints nothing
+when everything is as setup wrote it) and `setup --plan` (the parts read
+"already applied"). Say what was applied and what was skipped, with the
+reasons setup gives. If the plan printed the key snippet instead of writing it (for
 example, SUPER + O was already bound to something of the person's), show
 them the snippet and let them paste it into their Hyprland bindings
 themselves. The same goes for the agent key's lines under "Agent key".
@@ -183,21 +197,24 @@ themselves. The same goes for the agent key's lines under "Agent key".
 **8. Tell the person how to look after it.** Here `setup` is
 `~/.config/omarchy/plugins/ai.aweb.oats/setup`.
 - **Check:** `setup --check` reports drift. Omarchy runs it after each
-  `omarchy update`. When the OATS CLI gains the list of deployments, it says
-  so: `setup --apply` again (without `--dir`) switches to it. After an
-  upgrade from v0.3.0 or v0.4.0 it reports the menu (and v0.4.0's key block)
-  as from another version of setup, and with both UIs "default UI not
-  chosen": ask the person which UI, as in step 4, then `setup --apply --ui
-  <ui>` once they agree.
+  `omarchy update`, and you may run it too. When the OATS CLI gains the list
+  of deployments, it says so: `setup --apply` again (without `--dir`)
+  switches to it. After an upgrade from v0.3.0 or v0.4.0 it reports the menu
+  (and v0.4.0's key block) as from another version of setup, and with both
+  UIs "default UI not chosen": ask the person which UI, as in step 4, then
+  give them `setup --apply --ui <ui>` to type.
+- **The agent key:** `setup --apply --only agent-key` moves it to OATS, or
+  they pick the row (see "The agent key"); `--agent-key omarchy` added gives
+  it back.
 - **Update:** `omarchy plugin update ai.aweb.oats`, then `setup --check`.
   Updating moves a pinned checkout to the tip of the default branch.
-- **Pin a release:** `git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout <tag>`, for
-  example `v0.6.0`. Pin again after any `omarchy plugin update`.
+- **Pin a release:** `git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout <tag>`.
+  Pin again after any `omarchy plugin update`.
 - **Remove:** `setup --remove` first, then `omarchy plugin remove ai.aweb.oats`.
   The other order leaves the launchers, the menu and the hook behind.
 
-When you run any of these yourself, add `--yes` (you have no terminal) only
-after the person has agreed in the chat. `setup --check` needs no `--yes`.
+You run `setup --check` and `setup --plan` yourself. Every other command
+here is the person's to type in their own terminal.
 
 ## The agent key
 
@@ -205,27 +222,45 @@ Omarchy binds its agent key, SUPER + SHIFT + CTRL + A, to
 `omarchy-agent --pick`, which opens Omarchy's agent. Setup can move it to
 OATS: the key then opens the machine's steward through
 `omarchy-launch-oats`, a launcher setup writes to `~/.local/bin` with the
-node it recorded. The key moves only once you pick OATS:
+node it recorded. The key moves only when you pick OATS, and picking it is
+your own act, in your own terminal or Omarchy's menu:
 
-- **Setup's question.** `setup --apply` in a terminal asks "The agent key
-  (SUPER + SHIFT + CTRL + A) opens: OATS or Omarchy's agent?", after the
-  default UI's question, with `--yes` too. Enter is OATS.
-- **`--agent-key oats`** (or `--agent-key omarchy`) answers it ahead. A
-  later `--apply` keeps the choice until you pass another `--agent-key`, and
-  the plan shows it, and where it came from, under "Agent key".
-- **The menu.** The **OATS** row in Omarchy's Default Agent menu (Setup >
-  Defaults > Agent, in SUPER + SPACE) is checked while the key opens OATS. It runs
-  `setup --apply --agent-key oats` in a floating terminal, which shows the
-  plan and asks, then opens the steward.
+- **The menu.** Pick **OATS** in Omarchy's Default Agent menu (Setup >
+  Defaults > Agent, in SUPER + SPACE). It is checked while the key opens
+  OATS. It opens a floating terminal, where setup shows the plan and asks,
+  then opens the steward.
+- **The command.** Type it yourself:
 
-Without a terminal and without `--agent-key`, setup asks nothing and the key
-stays with Omarchy.
+  ```bash
+  ~/.config/omarchy/plugins/ai.aweb.oats/setup --apply --only agent-key
+  ```
+
+  The row runs the same: `setup --apply --agent-key oats --only agent-key`.
+
+Either way, setup changes only what the agent key needs: the shim the
+launcher runs the OATS CLI through, the launcher itself, and the agent key's
+lines in the key block. **SUPER + O is left alone**, and so are the OATS TUI
+and OATS Desktop launchers, the menu, the post-update hook and the default
+UI. The plan says so under "Only the agent key". A coding agent can show you
+that plan (`--plan --only agent-key`) but never applies it for you.
+
+The menu row is there once a full `setup --apply` has run, since that is
+what writes the menu. A full `setup --apply` is also how you get SUPER + O,
+the launchers and the menu. It asks the agent key's question too: "The
+agent key (SUPER + SHIFT + CTRL + A) opens: OATS or Omarchy's agent?",
+after the default UI's question, with `--yes` too (Enter is OATS).
+`--agent-key oats` or `--agent-key omarchy` answers it ahead. A later
+`--apply` keeps the choice until you pass another `--agent-key`, and the
+plan shows it, and where it came from, under "Agent key". Without a
+terminal and without `--agent-key`, a full `--apply` asks nothing and the
+key stays with Omarchy.
 
 Picking OATS moves the key only when this machine has exactly one steward
 (an instance of `oats.machine/steward`), which setup looks for each time
 `--plan` or `--apply` runs. Without one, or with several, the key stays with
-Omarchy and the plan says why. Your choice is kept, so `setup --apply` after
-spawning the steward moves the key without asking again. A key that has
+Omarchy and the plan says why. Your choice is kept, so
+`setup --apply --only agent-key` (or a full `setup --apply`) after spawning
+the steward moves the key without asking again. A key that has
 already moved stays with OATS when the steward is gone: the plan notes it,
 and the key says so when you press it.
 
@@ -241,9 +276,11 @@ Setup never replaces a file at `~/.local/bin/omarchy-launch-oats` that it
 did not write: with one there, it leaves the launcher and the key alone and
 says why.
 
-**Giving it back.** `setup --apply --agent-key omarchy` takes setup's lines
-for the agent key out of the block, and `setup --remove` takes out
-everything. Either way Omarchy's own binding works again.
+**Giving it back.** `setup --apply --only agent-key --agent-key omarchy`
+takes setup's lines for the agent key out of the block, and nothing else
+(`setup --apply --agent-key omarchy` does the same with a full apply);
+`setup --remove` takes out everything. Either way Omarchy's own binding
+works again.
 
 Only the key moves. A right click in Omarchy's agents panel in the bar,
 `omarchy agent prompt` and crash notifications run `omarchy-agent`

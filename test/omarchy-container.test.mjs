@@ -307,6 +307,65 @@ test("the agent key alone: SUPER + O refused, the agent key's section written an
   assert.equal(v.status, 0, v.stdout + v.stderr);
 });
 
+// --only agent-key, as the Default Agent row runs it: on a fresh HOME the
+// block holds the agent key's section alone, and nothing else is written;
+// over a full setup, SUPER + O's section, the menu, the hook and the TUI's
+// launcher entry stay byte for byte. The real Hyprland verifies each
+// candidate, and the live config after.
+test("--only agent-key: a fresh HOME gets the agent key's section alone; a full setup keeps SUPER + O, the menu, the hook and the entry byte for byte; the real Hyprland accepts each", { skip }, (t) => {
+  const fresh = omarchySandbox(t, { print: "fixture" });
+  withStewards(fresh);
+  userHypr(fresh, { layout: "lua" });
+  const fp = discoverPaths(fresh.env);
+  const freshFile = managedPaths(fp).keys;
+  const freshOriginal = readFileSync(freshFile, "utf8");
+  const before = snapshot(fresh.home);
+  const only = fresh.run(["setup", "--apply", "--only", "agent-key", "--json"]);
+  assert.equal(only.status, 0, only.stdout + only.stderr);
+  assert.deepEqual(only.json.result.parts.map((x) => [x.part, x.status]), [["shim", "applied"], ["launcher", "applied"], ["agent-key", "applied"]], JSON.stringify(only.json.result.parts));
+  assert.equal(existsSync(join(fresh.root, "hyprland.log")), false, "the real Hyprland verified it, not the sandbox's fake");
+  assert.equal(readFileSync(freshFile, "utf8"), bindings.appendBlock(freshOriginal, bindings.composeBlock({ agentKey: keySections(fresh).agentKey })).text);
+  for (const path of [managedPaths(fp).menu, managedPaths(fp).hook, managedPaths(fp)["tui-entry"], join(fp.stateDir, "plugin.json")]) assert.equal(existsSync(path), false, path);
+  let v = verifyConfig(fresh);
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+  assert.equal(fresh.run(["setup", "--check"]).stdout, "");
+  assert.equal(fresh.run(["setup", "--remove"]).status, 0);
+  assert.deepEqual(snapshot(fresh.home), before);
+
+  const s = omarchySandbox(t, { print: "fixture" });
+  withStewards(s);
+  userHypr(s, { layout: "lua" });
+  const p = discoverPaths(s.env);
+  const at = managedPaths(p);
+  const original = readFileSync(at.keys, "utf8");
+  const full = s.run(["setup", "--apply", "--agent-key", "omarchy", "--json"]);
+  assert.equal(full.status, 0, full.stdout + full.stderr);
+  const k = keySections(s);
+  assert.equal(readFileSync(at.keys, "utf8"), bindings.appendBlock(original, bindings.composeBlock({ submap: k.submap })).text);
+  const kept = [at.menu, at.hook, at["tui-entry"], at["tui-icon"], join(p.stateDir, "plugin.json")];
+  const bytes = new Map(kept.map((path) => [path, readFileSync(path)]));
+  // The row's pick is the narrowed apply.
+  const rows = loadMenuModel(join(OMARCHY, "shell", "plugins", "menu", "MenuModel.js")).parseMenuJsonc(readFileSync(at.menu, "utf8"));
+  assert.match(rows.find((x) => x.id === menu.AGENT_ID).action, / --apply --agent-key oats --only agent-key && grep /);
+
+  const r = s.run(["setup", "--apply", "--only", "agent-key", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(partOf(r, "agent-key").status, "applied", partOf(r, "agent-key").reason);
+  assert.equal(readFileSync(at.keys, "utf8"), bindings.appendBlock(original, bindings.composeBlock(k)).text, "SUPER + O's section as it was, the agent key's after it");
+  for (const [path, was] of bytes) assert.ok(readFileSync(path).equals(was), `${path} is unchanged`);
+  v = verifyConfig(s);
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+  assert.equal(s.run(["setup", "--check"]).stdout, "");
+
+  const back = s.run(["setup", "--apply", "--only", "agent-key", "--agent-key", "omarchy", "--json"]);
+  assert.equal(back.status, 0, back.stdout + back.stderr);
+  assert.equal(partOf(back, "agent-key").status, "removed", partOf(back, "agent-key").reason);
+  assert.equal(readFileSync(at.keys, "utf8"), bindings.appendBlock(original, bindings.composeBlock({ submap: k.submap })).text);
+  for (const [path, was] of bytes) assert.ok(readFileSync(path).equals(was), `${path} is unchanged`);
+  v = verifyConfig(s);
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+});
+
 test("the .conf layout: the hyprlang snippet passes --verify-config", { skip }, (t) => {
   const s = omarchySandbox(t);
   userHypr(s, { layout: "conf" });
