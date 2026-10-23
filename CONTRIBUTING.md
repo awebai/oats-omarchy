@@ -256,16 +256,23 @@ same node lookup as `setup`. Without a node it says so on stderr and with
   a private directory (0700) under `$XDG_RUNTIME_DIR` (else the temporary
   directory) that holds the prompt, if any. Then it starts
   `omarchy-launch-tui --app-id=org.omarchy.agent <node> <plugin>/bin/launch.mjs
-  --in-terminal --started-file <handoff>/started [--prompt-file
+  --in-terminal --claim-file <handoff>/claim [--prompt-file
   <handoff>/prompt]` on its own, detached, with its own output as an exec
-  would give it. Neither the launcher's running nor its exit says that a
-  window opened. uwsm-app keeps it in the foreground while the window is
-  open, or hands the window to a service and ends with 0. Only the
-  window's mark says it: the window writes `started` once it has read and
-  removed the prompt. Until the mark, the launch counts as failed when the
-  launcher ends with a failure or a signal, or when no mark comes within
-  `WINDOW_START` (30 s). The handoff is removed either way. A failure
-  before the window goes to stderr and an Omarchy notification.
+  would give it.
+  - Neither the launcher's running nor its exit says that a window opened.
+    uwsm-app keeps it in the foreground while the window is open, or hands
+    the window to a service and ends with 0.
+  - Exactly one side claims the handoff, by creating `claim` with O_EXCL
+    (`claim`). The window claims it when it starts. The launch claims it
+    when the launcher fails or is signalled, or when no claim comes within
+    `WINDOW_START` (30 s).
+  - The window's claim is the launch's evidence that it started. It makes
+    the prompt the window's, and the window removes the handoff.
+  - The launch's claim means no window can send the prompt. The launch
+    then removes the handoff and reports the failure on stderr and in an
+    Omarchy notification.
+  - A claim that is already there, or a handoff already gone, is the other
+    side's.
 - **The window runs the flow** (`inTerminal`), so a failure shows where the
   person is looking: one line naming the step, then it waits for Enter. The
   steps are `version --json`, `findSteward`, `session start --home H
@@ -297,8 +304,10 @@ same node lookup as `setup`. Without a node it says so on stderr and with
   The window reads the file and deletes it first. `deliverPrompt` then:
   - checks that the kernel lists `session-inspect-running` and
     `waiting-on-you`, and sends nothing otherwise;
-  - polls `session inspect --home H --json` until `running` (at most 20 s,
-    at most once a second); that last read is the fresh `waitingOnYou`;
+  - polls `session inspect --home H --json` until `running`, at most once
+    a second and at most 20 s in all. Each read is bounded by what is left
+    of the 20 s, and an answer after it is not taken. That last read is the
+    fresh `waitingOnYou`;
   - sends nothing to a steward waiting on the person, because a pasted
     Enter could answer its prompt;
   - otherwise pipes the text to `session input --home H --json` on stdin
