@@ -137,8 +137,12 @@ compares them with what is there, and only then writes:
   `--agent-key oats` unless `--agent-key omarchy` gives the key back, and
   any other value, `--check`, `--remove`, `--ui` or `--desktop` with it is
   `E_BAD_ARGS`. The agent key goes through the same gate and checks as in a
-  full apply (the launcher, the steward, `agentKeyRefusal`, Hyprland on the
-  whole candidate after the confirmation). The submap section is passed to
+  full apply (`agentGate`: the launcher, then the steward; then
+  `agentKeyRefusal`, and Hyprland on the whole candidate after the
+  confirmation). Over a full setup applied for this computer's list, with
+  an OATS CLI that no longer keeps one, the gate fails (`blocked`): the
+  launcher reads the state, which then names no deployment, so a full
+  `--apply` must switch it first. The submap section is passed to
   `keysEdit` as not wanted, so a recorded one stays byte for byte and an
   absent one stays absent. The block's file stays with the "keys" part,
   which the plan does not show (`hidden`). Nothing else is planned: no
@@ -146,12 +150,14 @@ compares them with what is there, and only then writes:
   or `E_UI_REQUIRED`. The shim and the launcher are written whether or not
   the key moves now (a printed snippet runs the launcher too), except when
   the key is given back, which leaves them as they are. The plan says so
-  under `ONLY_HEADING`. Over a state, the apply keeps the deployment, node,
-  plugin directory, Desktop, default UI and parts the state records, which
-  the other files were written from, so `--check` rebuilds them unchanged.
-  It records the OATS CLI, which only the shim runs, and adds its parts.
-  With no state, it records what it found. `--check` expects `plugin.json`
-  only once a part outside `ONLY_PARTS` is recorded, since a narrowed apply
+  under `ONLY_HEADING`. Over a full setup (`fullState`: a part outside
+  `ONLY_PARTS` recorded), the apply keeps the deployment, node, plugin
+  directory, Desktop and default UI the state records, which the other
+  files were written from, so `--check` rebuilds them unchanged. Over its
+  own work alone, or no state, it records what it found. It records the
+  OATS CLI only when it plans the shim, the CLI's only user, and keeps the
+  recorded one otherwise; it adds its parts to those recorded. `--check`
+  expects `plugin.json` only over a full setup, since a narrowed apply
   alone leaves the bar icon offering setup. A later full `--apply` finds the
   shim and the launcher recorded and current.
 - The default UI, `tui` or `desktop` (`chooseUi` in `lib/setup.mjs`), is

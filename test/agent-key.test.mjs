@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import * as bindings from "../lib/bindings.mjs";
 import { paths as discoverPaths } from "../lib/discover.mjs";
@@ -1086,4 +1086,68 @@ test("--remove after --only agent-key on a fresh HOME puts the whole home back",
   const r = s.run(["setup", "--remove", "--json"]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.deepEqual(snapshot(s.home), before);
+});
+
+// What the state records after --only agent-key is what the files it leaves
+// run: the OATS CLI of a shim it did not touch, and, over its own work
+// alone, the node of the shim and launcher it rewrote.
+test("--only agent-key giving the key back keeps the recorded OATS CLI of the shim it leaves alone", (t) => {
+  const s = sandbox(t);
+  hypr(s);
+  assert.equal(s.run(["setup", "--apply", "--agent-key", "oats"]).status, 0);
+  const cli = stateOf(s).cli;
+  const shim = readFileSync(discoverPaths(s.env).shim, "utf8");
+  // `oats` is gone from PATH; the CLI setup recorded is still there.
+  unlinkSync(join(s.fakebin, "oats"));
+  const r = s.run([...ONLY_RUN, "--agent-key", "omarchy", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").status, "removed");
+  assert.equal(readFileSync(discoverPaths(s.env).shim, "utf8"), shim);
+  assert.equal(stateOf(s).cli, cli);
+  assert.ok(!s.run(["setup", "--check", "--json"]).json.result.drift.some((d) => d.includes("OATS CLI")));
+});
+
+test("--only agent-key again over its own work alone records the node its rewritten shim and launcher run", (t) => {
+  const s = sandbox(t, { node: true });
+  hypr(s);
+  const p = discoverPaths(s.env);
+  assert.equal(s.run(ONLY_RUN).status, 0);
+  const old = stateOf(s).node;
+  unlinkSync(old);
+  const node = join(s.fakebin, "node");
+  symlinkSync(process.execPath, node);
+  const r = s.run([...ONLY_RUN, "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual([...r.json.result.written].sort(), [p.shim, p.wrapper].sort());
+  assert.ok(readFileSync(p.wrapper, "utf8").includes(node));
+  assert.equal(stateOf(s).node, node);
+  assert.equal(readFileSync(join(p.stateDir, "node"), "utf8"), `${node}\n`);
+  assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
+});
+
+// The launcher finds the steward through the state: a full setup applied for
+// this computer's list, with an OATS CLI that no longer keeps one, gives it
+// no deployment to look in, whatever --dir names now.
+test("--only agent-key does not move the key over a full setup applied for the list once the OATS CLI keeps none: a full --apply comes first", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.65.0", features: ["deployments-list"] }));
+  writeFileSync(join(s.root, "deployments.json"), JSON.stringify({ deploymentsApi: 1, file: join(s.home, ".oats/config/deployments.json"), deployments: [{ path: s.deployment, name: "deployment", state: "ok" }], imports: {} }));
+  assert.equal(s.run(["setup", "--apply", "--agent-key", "omarchy"]).status, 0);
+  assert.equal(stateOf(s).deployment, null);
+  const before = readFileSync(file, "utf8");
+  writeFileSync(join(s.root, "version.json"), JSON.stringify({ version: "0.60.0", features: [] }));
+  const blocked = "setup is applied for this computer's list of deployments, which this OATS CLI no longer keeps, so the launcher would find no steward: run a full setup --apply --dir <deployment> first, which switches it, then setup --apply --only agent-key";
+  const r = s.run([...ONLY_RUN, "--dir", s.deployment, "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(part(r, "agent-key"), { part: "agent-key", status: "skipped", reason: `the agent key stays with Omarchy: ${blocked}`, paths: [] });
+  assert.equal(readFileSync(file, "utf8"), before);
+  assert.equal(stateOf(s).deployment, null, "the full setup's deployment as recorded");
+  assert.equal(stateOf(s).agentKey, "oats", "the choice is recorded");
+  // The full --apply switches it, and moves the key on the recorded choice.
+  const full = s.run(["setup", "--apply", "--dir", s.deployment, "--json"]);
+  assert.equal(full.status, 0, full.stdout + full.stderr);
+  assert.equal(part(full, "agent-key").status, "applied");
+  assert.equal(stateOf(s).deployment, s.deployment);
+  assert.ok(agentLines(file));
 });
