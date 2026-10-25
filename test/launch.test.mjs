@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { APP_ID, deliverPrompt, findWindow, launch, LAUNCH_LOCK, LAUNCH_SCRIPT, parseArgs, reclaimLaunchLock } from "../lib/launch.mjs";
+import { APP_ID, deliverPrompt, findWindow, launch, launchLockAddress, LAUNCH_SCRIPT, parseArgs } from "../lib/launch.mjs";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import { STATE_SCHEMA } from "../lib/state.mjs";
 import { DETACH_KEY } from "../lib/waiting.mjs";
@@ -841,7 +841,7 @@ test("two presses while the first window is still starting: one window; the seco
   assert.deepEqual([a.status, b.status], [0, 0], a.stderr + b.stderr);
   assert.deepEqual(launcherLog(w).trim().split("\n"), ["launched -"], "exactly one window");
   assert.ok(h.calls().some((c) => c[0] === "dispatch"), "the second press focused it");
-  assert.deepEqual(readdirSync(w.run).filter((f) => !f.startsWith("oats-omarchy-launch-")), [], "the launch lock is gone");
+  assert.deepEqual(readdirSync(w.run).filter((f) => !f.startsWith("oats-omarchy-launch-")), [], "nothing left in the runtime directory");
 });
 
 test("two presses with prompts while the first window starts: the first prompt reaches the window, the second is sent to the steward", async (t) => {
@@ -858,44 +858,54 @@ test("two presses with prompts while the first window starts: the first prompt r
   assert.equal(Buffer.from(input.stdin, "base64").toString("utf8"), "second");
 });
 
-test("a launch lock left by a launch that died is taken over", async (t) => {
+
+
+
+// A process holding the launch lock as a launch does: it listens on the
+// lock's address, says so, and waits. → { child, ready }.
+function holder(w) {
+  const child = spawn(process.execPath, ["-e", `require("node:net").createServer().listen(process.argv[1], () => process.stdout.write("ready")); setInterval(() => {}, 1000);`, launchLockAddress(w.env)], { stdio: ["ignore", "pipe", "inherit"] });
+  const ready = new Promise((done) => child.stdout.once("data", () => done()));
+  return { child, ready };
+}
+
+test("a launch that died holding the lock leaves nothing in the way: the next press opens the window at once", async (t) => {
   const w = world(t);
   hyprland(w, { clients: "clients-none.json" });
-  const dead = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" }).stdout;
-  writeFileSync(join(w.run, LAUNCH_LOCK), `${dead}\n`);
+  const h = holder(w);
+  await h.ready;
+  h.child.kill("SIGKILL");
+  await new Promise((done) => h.child.once("exit", done));
+  const started = Date.now();
   const r = outer(w, []);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(w.tuiArgs()[0], `--app-id=${APP_ID}`);
+  assert.ok(Date.now() - started < 5_000, "no wait for a holder that is gone");
 });
 
-test("two presses over the same dead holder's lock: one reclaims it, and one window opens", async (t) => {
+test("two presses after a launch died holding the lock: one window", async (t) => {
   const w = world(t);
-  const h = hyprland(w, { clients: "clients-none.json" });
+  const hc = hyprland(w, { clients: "clients-none.json" });
   slowWindow(w);
-  const dead = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" }).stdout;
-  writeFileSync(join(w.run, LAUNCH_LOCK), `${dead}\n`);
+  const h = holder(w);
+  await h.ready;
+  h.child.kill("SIGKILL");
+  await new Promise((done) => h.child.once("exit", done));
   const [a, b] = await Promise.all([outerAsync(w, []), outerAsync(w, [])]);
   assert.deepEqual([a.status, b.status], [0, 0], a.stderr + b.stderr);
   assert.deepEqual(launcherLog(w).trim().split("\n"), ["launched -"], "exactly one window");
-  assert.ok(h.calls().some((c) => c[0] === "dispatch"));
-  assert.deepEqual(readdirSync(w.run).filter((f) => !f.startsWith("oats-omarchy-launch-")), [], "no lock or takeover token left");
+  assert.ok(hc.calls().some((c) => c[0] === "dispatch"));
 });
 
-test("reclaimLaunchLock removes only the lock it saw, and only while it holds the takeover token", (t) => {
+test("a press waits for a live holder of the lock only as long as its bound, then goes on", async (t) => {
   const w = world(t);
-  const lock = join(w.run, LAUNCH_LOCK);
-  const live = String(process.pid);
-  // A press that read a dead holder, while another took the lock over since.
-  writeFileSync(lock, `${live}\n`);
-  reclaimLaunchLock(lock, "999999999\n");
-  assert.equal(readFileSync(lock, "utf8"), `${live}\n`, "a fresh lock is never removed on an old reading");
-  // A takeover in progress (its token held by a live press): nothing is removed.
-  writeFileSync(lock, "999999999\n");
-  writeFileSync(`${lock}.takeover`, `${live}\n`);
-  reclaimLaunchLock(lock, "999999999\n");
-  assert.equal(readFileSync(lock, "utf8"), "999999999\n");
-  rmSync(`${lock}.takeover`);
-  reclaimLaunchLock(lock, "999999999\n");
-  assert.equal(existsSync(lock), false, "the dead holder's lock, seen as it is, goes");
-  assert.equal(existsSync(`${lock}.takeover`), false, "and the token with it");
+  hyprland(w, { clients: "clients-none.json" });
+  const h = holder(w);
+  t.after(() => h.child.kill("SIGKILL"));
+  await h.ready;
+  const started = Date.now();
+  const code = await launch([], w.env, { err: { write: () => {} }, windowStartMs: 300, pollMs: 20, timeouts: { hyprctl: 100 } });
+  assert.equal(code, 0);
+  assert.ok(Date.now() - started < 3_000, `${Date.now() - started} ms`);
+  assert.equal(w.tuiArgs()[0], `--app-id=${APP_ID}`, "it opened the window, without the lock");
 });
