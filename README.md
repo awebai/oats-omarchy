@@ -43,21 +43,51 @@ not installed yet.
 It uses what is already on the machine: a tool on your PATH at or above its
 minimum is used as it is, never replaced, and never shadowed by a second
 copy. It installs only what is missing, and a tool that is too old stops it
-with the command that upgrades it the way it was installed. It runs six
-steps, one line each:
+with the command that upgrades it the way it was installed. It runs eight
+steps, one line each, and asks you one thing first.
 
-1. **The harness** your agents run on. It asks "Which harness should your
-   agents run on?", offering claude, codex or pi with Omarchy's default agent
-   first; Enter takes that one.
-2. **Node.js (22 or later), the harness and tmux.** Node and the harness are
-   installed with mise, as Omarchy installs agents. tmux is a system package:
+**One consent screen.** Before it installs anything, it shows every change
+that is yours to make, on one screen, each with why, what it changes and
+the command that undoes it, and asks once: `Make these changes? [y/N]`.
+Only `y` goes on; anything else changes nothing. An agent cannot make these
+changes for you (Claude's auto mode refuses them), so the installer makes
+them as you, in your terminal, and nothing asks you again later. They are:
+
+- **Sign in to GitHub, once:** one browser approval (GitHub's device flow)
+  for `gh`, with every scope onboarding needs (`repo`, `read:org`, `gist`,
+  `admin:ssh_signing_key`, `user:email`; a broader scope that covers one,
+  such as `user` for `user:email`, counts), and git signing in to
+  github.com through gh. With every scope already there, it is only the
+  git part, with no approval. Undo: `gh auth logout --hostname github.com`,
+  then `git config --global --unset-all credential.https://github.com.helper`
+  and the same for `credential.https://gist.github.com.helper`, the two git
+  settings `gh auth setup-git` writes.
+- **The agent key opens your steward:** SUPER + SHIFT + CTRL + A moves from
+  Omarchy's agent to OATS, as `setup --apply --only agent-key` does, before
+  the steward exists (onboarding spawns it). Undo: `setup --apply --only
+  agent-key --agent-key omarchy`.
+
+A change already made (gh signed in with those scopes, the key with OATS)
+is left off the screen; with none left there is no screen.
+
+1. **The harness** your agents run on: Omarchy's default agent when it is
+   claude, codex or pi. Otherwise it asks "Which harness should your agents
+   run on?", offering claude, codex or pi; Enter takes claude.
+2. **Node.js (22 or later), the harness, tmux and gh.** Node, the harness
+   and gh (2.81.0 or later, only when the sign-in is to do) are installed
+   with mise, as Omarchy installs agents. tmux is a system package:
    `omarchy-pkg-add` installs it and asks for your password.
 3. **aw**, the aweb CLI (1.36.33 or later), with mise.
 4. **The OATS CLI** (0.67.1 or later), with mise.
 5. **Claude's aweb channel plugin**, with claude only: its marketplace and
    the plugin, each when it is absent. A copy you disabled stays disabled:
    it stops with the command that enables it.
-6. **The onboarding agent.** It writes what it found to
+6. **GitHub:** the sign-in, when you agreed to it. It opens your browser at
+   github.com/login/device, and gh prints the code to enter there.
+7. **The agent key:** moved to OATS, when you agreed to it. If setup leaves
+   it with Omarchy (you bound the key yourself, say), it says why, and the
+   onboarding agent tells you how to move it.
+8. **The onboarding agent.** It writes what it found to
    `~/.local/state/oats-omarchy/found.json` ([the found-list](docs/found-list.md)),
    then starts the harness in `~/Work` with a prompt that points it at
    OATS's getting-started skill and at that list. The agent sets up the

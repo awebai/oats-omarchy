@@ -33,6 +33,7 @@ One JSON object, with no secrets:
     { "name": "claude", "version": "2.1.308", "origin": "other",      "path": "/abs/claude",       "state": "found" },
     { "name": "aweb-channel@awebai-marketplace", "version": null, "origin": "claude-plugin", "path": null, "state": "found" }
   ],
+  "github": { "login": "octo-person", "scopes": ["repo", "read:org", "gist", "admin:ssh_signing_key", "user:email"] },
   "awIdentity": { "dir": "/home/u/Work/.aw", "alias": "merak", "address": "juan.aweb.ai/merak", "role": "work" },
   "deployments": [
     { "dir": "/home/u/Agents/merak", "name": "merak", "state": "ok", "steward": true },
@@ -56,6 +57,12 @@ One JSON object, with no secrets:
     `omarchy-pkg-add`, the plugin with `claude plugin install`). The installer
     stops on a tool that is too old or not usable, so a found-list holds only
     these two states.
+- **`github`** is gh's sign-in to github.com, as `gh auth status` gives it
+  once the installer's GitHub step has run: the account's `login` and the
+  token's `scopes`, which hold every scope onboarding needs. The installer
+  made it in the person's terminal, so the onboarding agent uses it and
+  never signs in again. It is null when gh is not signed in. When the
+  installer installed or used gh for it, `tools[]` lists `gh` too.
 - **`awIdentity`** is the `.aw` in `~/Work` (from `aw whoami --json` run
   there, without any `AWEB_*` or `AW_*` variable), or null when there is none.
   `alias` and `address` are null when `aw` does not say them.
