@@ -169,7 +169,7 @@ the tag, then enable it:
 
 ```bash
 omarchy plugin add https://github.com/awebai/oats-omarchy
-git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.7.0
+git -C ~/.config/omarchy/plugins/ai.aweb.oats fetch origin tag v0.7.0 && git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.7.0
 omarchy plugin enable ai.aweb.oats
 ```
 
@@ -266,7 +266,7 @@ themselves. The same goes for the agent key's lines under "Agent key".
   it back.
 - **Update:** `omarchy plugin update ai.aweb.oats`, then `setup --check`.
   Updating moves a pinned checkout to the tip of the default branch.
-- **Pin a release:** `git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.7.0`.
+- **Pin a release:** `git -C ~/.config/omarchy/plugins/ai.aweb.oats fetch origin tag v0.7.0 && git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.7.0`.
   Pin again after any `omarchy plugin update`.
 - **Remove:** `setup --remove` first, then `omarchy plugin remove ai.aweb.oats`.
   The other order leaves the launchers, the menu and the hook behind.
@@ -433,9 +433,10 @@ Then it asks who the agent key opens (see "The agent key").
   `omarchy update`.
 
 **Pinning a release.** The plugin is a plain git checkout:
-`git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.7.0`. `omarchy plugin
-update` fast-forwards it to the tip of the default branch, so pin again after
-an update.
+`git -C ~/.config/omarchy/plugins/ai.aweb.oats fetch origin tag v0.7.0 && git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.7.0`.
+The command fetches the release's tag first, because `omarchy plugin update`
+fetches no tags. `omarchy plugin update` fast-forwards the checkout to the
+tip of the default branch, so pin again after an update.
 
 **Removing it.** Run `setup --remove` first: it restores everything setup
 wrote. Then run `omarchy plugin remove ai.aweb.oats`. The launchers, menu and
