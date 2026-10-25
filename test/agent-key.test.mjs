@@ -19,7 +19,7 @@ import * as keys from "../lib/keys.mjs";
 import * as menu from "../lib/menu.mjs";
 import { shellQuote } from "../lib/quote.mjs";
 import { AGENT_QUESTION, blocksFor, lookUpSteward, NOT_CHOSEN, ONLY_HEADING, setup, UI_QUESTION } from "../lib/setup.mjs";
-import { fixture, removeInSandbox, repo, sandbox, snapshot, withStewards, writeExecutable } from "./helpers/sandbox.mjs";
+import { fixture, inSandbox, removeInSandbox, repo, sandbox, snapshot, withStewards, writeExecutable } from "./helpers/sandbox.mjs";
 
 const USER_BINDINGS = '-- My bindings\no.bind("SUPER + RETURN", "Terminal", "uwsm-app -- xdg-terminal-exec")\n';
 const MY_SUPER_O = 'o.bind("SUPER + O", "Mine", "true")\n';
@@ -1122,6 +1122,9 @@ test("--only agent-key again over its own work alone records the node its rewrit
   const p = discoverPaths(s.env);
   assert.equal(s.run(ONLY_RUN).status, 0);
   const old = stateOf(s).node;
+  // setup records the node by the kernel's stable-node rule: on a Homebrew
+  // host that is the keg's opt link, which this test must not remove.
+  if (!inSandbox(s.root, old)) { t.skip(`setup recorded the host's node, ${old}: this test needs one inside the sandbox`); return; }
   removeInSandbox(s.root, old);
   const node = join(s.fakebin, "node");
   symlinkSync(process.execPath, node);
@@ -1190,6 +1193,9 @@ test("--only agent-key giving the key back over its own work alone keeps the nod
   const p = discoverPaths(s.env);
   assert.equal(s.run(ONLY_RUN).status, 0);
   const old = stateOf(s).node;
+  // setup records the node by the kernel's stable-node rule: on a Homebrew
+  // host that is the keg's opt link, which this test must not remove.
+  if (!inSandbox(s.root, old)) { t.skip(`setup recorded the host's node, ${old}: this test needs one inside the sandbox`); return; }
   removeInSandbox(s.root, old);
   symlinkSync(process.execPath, join(s.fakebin, "node"));
   const shim = readFileSync(p.shim, "utf8");

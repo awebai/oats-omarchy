@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { removeInSandbox } from "./helpers/sandbox.mjs";
+import { inSandbox, removeInSandbox } from "./helpers/sandbox.mjs";
 
 test("removeInSandbox: a file or link inside the sandbox goes; a path whose directory resolves outside it is refused and kept", (t) => {
   const base = realpathSync(mkdtempSync(join(tmpdir(), "oats-omarchy-guard-")));
@@ -35,4 +35,5 @@ test("removeInSandbox: a file or link inside the sandbox goes; a path whose dire
   assert.throws(() => removeInSandbox(root, join(root, "opt", "bin", "node")), /refusing to remove .*: it is outside the sandbox/);
   assert.throws(() => removeInSandbox(root, node), /outside the sandbox/);
   assert.equal(existsSync(node), true, "the host's file is kept");
+  assert.deepEqual([inSandbox(root, join(root, "x")), inSandbox(root, join(root, "opt", "bin", "node")), inSandbox(root, node)], [true, false, false]);
 });
