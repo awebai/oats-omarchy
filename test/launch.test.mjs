@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { APP_ID, deliverPrompt, findWindow, launch, LAUNCH_SCRIPT, parseArgs } from "../lib/launch.mjs";
+import { APP_ID, deliverPrompt, findWindow, launch, LAUNCH_LOCK, LAUNCH_SCRIPT, parseArgs } from "../lib/launch.mjs";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import { STATE_SCHEMA } from "../lib/state.mjs";
 import { DETACH_KEY } from "../lib/waiting.mjs";
@@ -811,4 +811,59 @@ test("--prompt with the steward's window open and no steward to find: the step i
   assert.match(r.stderr, /^omarchy-launch-oats: finding the steward: no steward on this machine: .*: your prompt was not sent\n$/);
   assert.match(w.notified(), /^Could not send your prompt to the OATS steward\nfinding the steward: no steward on this machine/);
   assert.ok(!argvs(w).some((a) => a[1] === "input"));
+});
+
+// Two presses before the first window maps: the second must not open a
+// second window. The launcher stand-in maps the steward's window (it
+// appears in `hyprctl clients -j`) only after 300 ms, then claims the
+// handoff as the window does when it starts.
+function slowWindow(w) {
+  const clients = join(w.s.root, "hypr", "clients.json");
+  launcherDoing(w, `log("launched " + (prompt ? readFileSync(prompt, "utf8") : "-"));
+setTimeout(() => {
+  writeFileSync(${JSON.stringify(clients)}, readFileSync(${JSON.stringify(fixture("hyprctl", "clients-steward.json"))}));
+  writeFileSync(claim, "window", { flag: "wx" });
+  require("node:fs").rmSync(require("node:path").dirname(claim), { recursive: true });
+}, 300);`);
+}
+const outerAsync = (w, args) => new Promise((done) => {
+  const child = spawn("/bin/sh", [LAUNCHER, ...args], { env: w.env, cwd: w.s.home });
+  let err = "";
+  child.stderr.on("data", (d) => { err += d; });
+  child.once("exit", (status) => done({ status, stderr: err }));
+});
+
+test("two presses while the first window is still starting: one window; the second waits for it and focuses it", async (t) => {
+  const w = world(t);
+  const h = hyprland(w, { clients: "clients-none.json" });
+  slowWindow(w);
+  const [a, b] = await Promise.all([outerAsync(w, []), outerAsync(w, [])]);
+  assert.deepEqual([a.status, b.status], [0, 0], a.stderr + b.stderr);
+  assert.deepEqual(launcherLog(w).trim().split("\n"), ["launched -"], "exactly one window");
+  assert.ok(h.calls().some((c) => c[0] === "dispatch"), "the second press focused it");
+  assert.deepEqual(readdirSync(w.run).filter((f) => !f.startsWith("oats-omarchy-launch-")), [], "the launch lock is gone");
+});
+
+test("two presses with prompts while the first window starts: the first prompt reaches the window, the second is sent to the steward", async (t) => {
+  const w = world(t);
+  hyprland(w, { clients: "clients-none.json" });
+  slowWindow(w);
+  const first = outerAsync(w, ["--prompt", "first"]);
+  await waitFor(() => launcherLog(w).includes("launched"));
+  const second = await outerAsync(w, ["--prompt", "second"]);
+  assert.equal((await first).status, 0);
+  assert.equal(second.status, 0, second.stderr);
+  assert.deepEqual(launcherLog(w).trim().split("\n"), ["launched first"]);
+  const input = w.k.calls().find((c) => c.argv[1] === "input");
+  assert.equal(Buffer.from(input.stdin, "base64").toString("utf8"), "second");
+});
+
+test("a launch lock left by a launch that died is taken over", async (t) => {
+  const w = world(t);
+  hyprland(w, { clients: "clients-none.json" });
+  const dead = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" }).stdout;
+  writeFileSync(join(w.run, LAUNCH_LOCK), `${dead}\n`);
+  const r = outer(w, []);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(w.tuiArgs()[0], `--app-id=${APP_ID}`);
 });

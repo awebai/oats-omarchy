@@ -429,6 +429,14 @@ same node lookup as `setup`. Without a node it says so on stderr and with
     v0.56.2 prints it (`CHyprCtl::getWindowData`), and `test/launch.test.mjs`
     has a stand-in hyprctl with its replies under a Lua and a hyprlang
     config.
+- **One launch at a time** (`LAUNCH_LOCK`). The lookup and the launch run
+  under a lock file holding the holder's pid, in `$XDG_RUNTIME_DIR` (else
+  the temporary directory, named for the user), created with O_EXCL. It is
+  held until the launched window claims its handoff, so a second press
+  before the first window maps waits, looks again and focuses that window.
+  A lock whose holder is gone is taken over; a press that cannot get it
+  within `WINDOW_START` plus two hyprctl bounds goes on without it. A
+  prompt for an open window is sent after the lock is released.
 - **Otherwise the outer process only opens the window.** It checks that
   `omarchy-launch-tui` is on PATH, and makes the handoff: a private directory (0700) under `$XDG_RUNTIME_DIR` (else the temporary
   directory) that holds the prompt, if any. Then it starts
