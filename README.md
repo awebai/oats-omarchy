@@ -199,7 +199,8 @@ ask only if the person wants to change it. The key moves only when the
 machine has exactly one OATS steward. When the plan's agent-key part says it
 stays with Omarchy until the machine has one, give the person
 `~/.config/omarchy/plugins/ai.aweb.oats/setup --apply --only agent-key` to
-type once the steward is spawned (see "The agent key").
+type once the steward is spawned (see "The agent key"). Put one sentence of
+why in front of it: the agent key, SUPER + SHIFT + CTRL + A, becomes one key that opens the agent that looks after this machine.
 
 **5. Show the plan.** Leave out `--dir <deployment>` here and in step 6
 only when both checks in step 2 hold, and `--ui <ui>` when step 4 says so.
@@ -263,9 +264,13 @@ themselves. The same goes for the agent key's lines under "Agent key".
   give them `setup --apply --ui <ui>` to type.
 - **The agent key:** `setup --apply --only agent-key` moves it to OATS, or
   they pick the row (see "The agent key"); `--agent-key omarchy` added gives
-  it back.
+  it back. Say why first, in one sentence: the agent key, SUPER + SHIFT + CTRL + A, becomes one key that opens the agent that looks after this machine. To try it, they
+  press the key or run `setsid ~/.local/bin/omarchy-launch-oats` in a
+  terminal.
 - **Update:** `omarchy plugin update ai.aweb.oats`, then `setup --check`.
-  Updating moves a pinned checkout to the tip of the default branch.
+  Updating moves a pinned checkout to the tip of the default branch. It
+  updates an installed plugin only: on a machine without
+  `~/.config/omarchy/plugins/ai.aweb.oats`, add it as in step 3.
 - **Pin a release:** `git -C ~/.config/omarchy/plugins/ai.aweb.oats fetch origin tag v0.7.0 && git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.7.0`.
   Pin again after any `omarchy plugin update`.
 - **Remove:** `setup --remove` first, then `omarchy plugin remove ai.aweb.oats`.
@@ -299,7 +304,8 @@ Either way, setup changes only what the agent key needs: the shim the
 launcher runs the OATS CLI through, the launcher itself, and the agent key's
 lines in the key block. **SUPER + O is left alone**, and so are the OATS TUI
 and OATS Desktop launchers, the menu, the post-update hook and the default
-UI. The plan says so under "Only the agent key". A coding agent can show you
+UI. The plan opens with one sentence of why, then says so under "Only the
+agent key". A coding agent can show you
 that plan (`--plan --only agent-key`) but never applies it for you.
 
 The menu row is there once a full `setup --apply` has run, since that is
@@ -321,6 +327,12 @@ Omarchy and the plan says why. Your choice is kept, so
 the steward moves the key without asking again. A key that has
 already moved stays with OATS when the steward is gone: the plan notes it,
 and the key says so when you press it.
+
+**Trying it.** Once the key opens OATS, `setup --apply` ends with the way to
+try it: press SUPER + SHIFT + CTRL + A, or run the launcher in a terminal,
+`setsid ~/.local/bin/omarchy-launch-oats`. Don't use `hyprctl dispatch exec
+omarchy-launch-oats`. On Omarchy's Lua Hyprland config, `hyprctl dispatch`
+is a shorthand for `hl.dispatch(...)`, so that form is a Lua error.
 
 Setup writes the agent key's lines into the same marked block of your
 `bindings.lua` as SUPER + O: they unbind Omarchy's binding and bind the key

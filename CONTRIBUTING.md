@@ -158,7 +158,11 @@ compares them with what is there, and only then writes:
   section (`desiredOnly`, which `desiredParts` hands over to). It implies
   `--agent-key oats` unless `--agent-key omarchy` gives the key back, and
   any other value, `--check`, `--remove`, `--ui` or `--desktop` with it is
-  `E_BAD_ARGS`. The agent key goes through the same gate and checks as in a
+  `E_BAD_ARGS`. Its text output opens with `AGENT_WHY`, the one sentence of
+  why, when the key goes to OATS. An `--apply` that leaves the key with OATS,
+  narrowed or full, ends with `tryAgentKey`: the key, or the launcher under
+  `setsid`, since `hyprctl dispatch exec` is a Lua error under Omarchy's
+  Lua config. The agent key goes through the same gate and checks as in a
   full apply (`agentGate`: the launcher, then the steward; then
   `agentKeyRefusal`, and Hyprland on the whole candidate after the
   confirmation). Over a full setup applied for this computer's list, with

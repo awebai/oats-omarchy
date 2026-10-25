@@ -432,6 +432,11 @@ test("the onboarding prompt names facts only: none of the bootstrap's commands, 
   assert.ok(prompt.includes("/p/setup --plan and /p/setup --check"));
   // The typed command first: the menu row exists only once setup has run.
   assert.ok(prompt.includes("tell them to type /p/setup --apply --only agent-key in a terminal, or, once setup has added it, to choose Setup › Default Agent › OATS"));
+  // One sentence of why goes in front of the command (awebai/oats-omarchy#26).
+  const why = prompt.indexOf("tell them in one sentence why: the agent key, SUPER + SHIFT + CTRL + A, becomes one key that opens the agent that looks after this machine");
+  assert.ok(why >= 0 && why < prompt.indexOf("tell them to type /p/setup --apply --only agent-key"), prompt);
+  // A way to try it that works on Omarchy's Lua Hyprland, where `hyprctl dispatch exec` is a Lua error.
+  assert.ok(prompt.includes("To try it, they press the key or run setsid ~/.local/bin/omarchy-launch-oats in a terminal; never hyprctl dispatch exec"));
   assert.doesNotMatch(prompt, /consent/);
 });
 
