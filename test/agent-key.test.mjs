@@ -18,7 +18,7 @@ import * as files from "../lib/files.mjs";
 import * as keys from "../lib/keys.mjs";
 import * as menu from "../lib/menu.mjs";
 import { shellQuote } from "../lib/quote.mjs";
-import { AGENT_QUESTION, blocksFor, lookUpSteward, NOT_CHOSEN, ONLY_HEADING, setup, UI_QUESTION } from "../lib/setup.mjs";
+import { AGENT_QUESTION, AGENT_WHY, blocksFor, lookUpSteward, NOT_CHOSEN, ONLY_HEADING, setup, tryAgentKey, UI_QUESTION } from "../lib/setup.mjs";
 import { fixture, inSandbox, removeInSandbox, repo, sandbox, snapshot, withStewards, writeExecutable } from "./helpers/sandbox.mjs";
 
 const USER_BINDINGS = '-- My bindings\no.bind("SUPER + RETURN", "Terminal", "uwsm-app -- xdg-terminal-exec")\n';
@@ -975,7 +975,7 @@ test("--plan --only agent-key: its heading, only its parts, no default UI or SUP
   assert.equal(ONLY_HEADING, "Only the agent key: SUPER + O, the launchers, the menu and the hook are left as they are");
   const before = snapshot(s.home);
   const text = s.run(["setup", "--plan", "--only", "agent-key"]).stdout;
-  assert.ok(text.startsWith(`setup --plan --only agent-key (nothing was written)\n\n${ONLY_HEADING}\n  shim      will apply\n            ${p.shim}\n  launcher  will apply\n            ${p.wrapper}\n  agent-key will apply\n            ${file}\n\nAgent key\n  OATS (--only agent-key): SUPER + SHIFT + CTRL + A opens the steward through omarchy-launch-oats\n`), text);
+  assert.ok(text.startsWith(`setup --plan --only agent-key (nothing was written)\n\n${AGENT_WHY}\n\n${ONLY_HEADING}\n  shim      will apply\n            ${p.shim}\n  launcher  will apply\n            ${p.wrapper}\n  agent-key will apply\n            ${file}\n\nAgent key\n  OATS (--only agent-key): SUPER + SHIFT + CTRL + A opens the steward through omarchy-launch-oats\n`), text);
   for (const heading of ["\nParts\n", "\nDefault UI\n", "\nKeys\n"]) assert.ok(!text.includes(heading), heading);
   assert.ok(!text.includes("SUPER+O becomes a prefix"));
   assert.ok(text.endsWith("\nRun `setup --apply --only agent-key` to write the parts marked \"will apply\"; `setup --apply --only agent-key --agent-key omarchy` gives the key back.\n"), text);
@@ -990,6 +990,28 @@ test("--plan --only agent-key: its heading, only its parts, no default UI or SUP
   assert.deepEqual(result.agentKey, { choice: "oats", from: "--agent-key", snippet: keys.agentLua(p.wrapper), format: "lua", file });
   assert.ok(result.notes.includes(caveat(s)));
   assert.deepEqual(snapshot(s.home), before);
+});
+
+test("the agent key's why, one sentence before what the plan changes: never when the key is given back", (t) => {
+  assert.equal(AGENT_WHY, "Why: the agent key, SUPER + SHIFT + CTRL + A, becomes one key that opens the agent that looks after this machine, its OATS steward.");
+  const s = sandbox(t);
+  hypr(s);
+  assert.ok(s.run(["setup", "--plan", "--only", "agent-key"]).stdout.includes(`\n\n${AGENT_WHY}\n\n${ONLY_HEADING}\n`));
+  assert.ok(!s.run(["setup", "--plan", "--only", "agent-key", "--agent-key", "omarchy"]).stdout.includes(AGENT_WHY));
+});
+
+test("after the key moves, setup says how to try it: the key, or the launcher with setsid, never hyprctl dispatch exec (a Lua error on Omarchy's Lua Hyprland)", (t) => {
+  const s = sandbox(t);
+  hypr(s);
+  const p = discoverPaths(s.env);
+  assert.equal(tryAgentKey(p.wrapper), `Try it: press SUPER + SHIFT + CTRL + A, or run setsid ${p.wrapper} in a terminal.`);
+  const r = s.run(ONLY_RUN);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(r.stdout.endsWith(`\n${tryAgentKey(p.wrapper)}\n`), r.stdout);
+  assert.ok(s.run(ONLY_RUN).stdout.endsWith(`\n${tryAgentKey(p.wrapper)}\n`), "already applied: still the way to try it");
+  assert.ok(!s.run(["setup", "--plan", "--only", "agent-key"]).stdout.includes("Try it:"), "the plan has not moved it yet");
+  assert.ok(!s.run([...ONLY_RUN, "--agent-key", "omarchy"]).stdout.includes("Try it:"), "given back: nothing to try");
+  assert.doesNotMatch(r.stdout, /hyprctl dispatch/);
 });
 
 test("--only takes agent-key, with --plan or --apply only, and not with --ui or --desktop (E_BAD_ARGS, exit 2)", (t) => {
