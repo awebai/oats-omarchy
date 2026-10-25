@@ -463,6 +463,50 @@ test("with every act done already there is no screen, and steps 6 and 7 say so",
   assert.deepEqual(setupRuns(w), []);
 });
 
+test("scopes GitHub normalized to a parent count: user covers user:email, write:org or admin:org cover read:org; nothing is asked", (t) => {
+  for (const scopes of [["repo", "read:org", "gist", "admin:ssh_signing_key", "user"], ["repo", "write:org", "gist", "admin:ssh_signing_key", "user:email"], ["repo", "admin:org", "gist", "admin:ssh_signing_key", "user"]]) {
+    const w = world(t);
+    ALL(w);
+    withChannel(w);
+    signedIn(w, { scopes });
+    const { installer } = pluginCopy(w);
+    const r = w.run(["--now", "--harness", "claude"], { installer });
+    assert.equal(r.status, 0, `${scopes}: ${r.out}`);
+    assert.ok(!r.stdout.includes("OATS for this machine"), `${scopes}: no screen`);
+    assert.deepEqual(ghCalls(w).filter((c) => c[1] !== "status"), [], `${scopes}: no sign-in`);
+  }
+});
+
+test("signed in with every scope but git not using gh: the screen says so, and step 6 runs only setup-git", (t) => {
+  const w = world(t);
+  ALL(w);
+  withChannel(w);
+  signedIn(w, { git: false });
+  const { installer } = pluginCopy(w);
+  const r = w.run(["--now", "--harness", "claude"], { installer, input: "y\n" });
+  assert.equal(r.status, 0, r.out);
+  assert.ok(r.stdout.includes(`   What: gh is signed in as octo-person with every scope onboarding needs;
+         git then signs in to github.com through gh (gh auth setup-git).
+`), r.stdout);
+  assert.deepEqual(ghCalls(w).filter((c) => c[1] !== "status"), [["auth", "setup-git", "--hostname", "github.com", "stdin=none"]]);
+  assert.equal(w.log("xdg-open.log"), "", "no browser approval");
+});
+
+test("a setup-git that fails after the sign-in is taken up again on the next run", (t) => {
+  const w = world(t);
+  nothingDone(w);
+  writeFileSync(join(w.root, "gh", "fail-setup-git"), "");
+  const { installer } = pluginCopy(w);
+  const first = w.run(["--now", "--harness", "claude"], { installer, input: "y\n" });
+  assert.equal(first.status, 1);
+  assert.match(first.stderr, /^omarchy-install-oats: step 6 \(github\) failed: gh auth setup-git exited with status 1$/m);
+  rmSync(join(w.root, "gh", "fail-setup-git"));
+  const again = w.run(["--now", "--harness", "claude"], { installer, input: "y\n" });
+  assert.equal(again.status, 0, again.out);
+  assert.ok(again.stdout.includes("git then signs in to github.com through gh (gh auth setup-git)"), "on the screen again");
+  assert.deepEqual(ghCalls(w).filter((c) => c[1] !== "status").map((c) => c[1]), ["login", "setup-git", "setup-git"], "no second sign-in");
+});
+
 test("a sign-in that fails stops at step 6, before the key moves or the agent starts", (t) => {
   const w = world(t);
   nothingDone(w);

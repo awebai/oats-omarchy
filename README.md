@@ -55,8 +55,10 @@ them as you, in your terminal, and nothing asks you again later. They are:
 
 - **Sign in to GitHub, once:** one browser approval (GitHub's device flow)
   for `gh`, with every scope onboarding needs (`repo`, `read:org`, `gist`,
-  `admin:ssh_signing_key`, `user:email`), and git signing in to github.com
-  through gh. Undo: `gh auth logout --hostname github.com`.
+  `admin:ssh_signing_key`, `user:email`; a broader scope that covers one,
+  such as `user` for `user:email`, counts), and git signing in to
+  github.com through gh. With every scope already there, it is only the
+  git part, with no approval. Undo: `gh auth logout --hostname github.com`.
 - **The agent key opens your steward:** SUPER + SHIFT + CTRL + A moves from
   Omarchy's agent to OATS, as `setup --apply --only agent-key` does, before
   the steward exists (onboarding spawns it). Undo: `setup --apply --only

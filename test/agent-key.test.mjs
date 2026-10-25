@@ -1116,6 +1116,19 @@ test("--steward-pending never moves the key past several stewards", (t) => {
   assert.equal(readFileSync(file, "utf8"), USER_BINDINGS);
 });
 
+test("--steward-pending never moves the key when a deployment could not be read: that is not no steward", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  withStewards(s, ["one", "two"]);
+  writeFileSync(join(s.root, "status.mode"), "envelope");
+  const r = s.run([...ONLY_RUN, "--steward-pending", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").status, "skipped");
+  assert.doesNotMatch(part(r, "agent-key").reason, /no steward yet/);
+  assert.ok(!r.json.result.notes.includes(STEWARD_PENDING_NOTE));
+  assert.equal(readFileSync(file, "utf8"), USER_BINDINGS);
+});
+
 test("--steward-pending goes with --plan or --apply, and only when the key goes to OATS (E_BAD_ARGS)", (t) => {
   const s = sandbox(t);
   for (const [args, message] of [

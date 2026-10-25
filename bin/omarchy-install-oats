@@ -438,12 +438,35 @@ channel() {
   esac
 }
 
-# GitHub as gh has it: GH_LOGIN (empty when not signed in), GH_HAVE (the
-# token's scopes, comma-separated) and GH_MISSING (those of GH_SCOPES it
-# lacks). gh's own --jq picks the active github.com account's line, so this
-# needs no node.
+# Whether the token's scopes ($GH_HAVE) grant scope $1. GitHub normalizes a
+# scope its parent covers into the parent (user for user:email, admin:org or
+# write:org for read:org; docs.github.com, "Scopes for OAuth apps",
+# Normalized scopes), and gh auth refresh keeps the token's scopes, so a
+# parent counts as its children.
+scope_covered() {
+  case $1 in
+    read:org) parents="read:org write:org admin:org" ;;
+    write:org) parents="write:org admin:org" ;;
+    user:email | read:user | user:follow) parents="$1 user" ;;
+    read:ssh_signing_key | write:ssh_signing_key) parents="$1 admin:ssh_signing_key" ;;
+    public_repo | repo:status | repo_deployment | repo:invite | security_events) parents="$1 repo" ;;
+    *) parents=$1 ;;
+  esac
+  for p in $parents; do
+    case ",$GH_HAVE," in *",$p,"*) return 0 ;; esac
+  done
+  return 1
+}
+
+# GitHub as gh and git have it: GH_LOGIN (empty when not signed in), GH_HAVE
+# (the token's scopes, comma-separated), GH_MISSING (those of GH_SCOPES the
+# token does not grant) and GH_GIT (yes when git signs in to github.com
+# through gh: its credential helper there is gh's, as gh auth setup-git
+# leaves it). gh's own --jq picks the active github.com account's line, so
+# this needs no node.
 github_state() {
-  GH_LOGIN='' GH_HAVE='' GH_MISSING=$GH_SCOPES
+  GH_LOGIN='' GH_HAVE='' GH_MISSING=$GH_SCOPES GH_GIT=no
+  if git config --get credential.https://github.com.helper 2>/dev/null | grep -q 'auth git-credential$'; then GH_GIT=yes; fi
   detect gh
   [ "$T_STATE" = found ] || return 0
   line=$("$T_CMD" auth status --hostname github.com --active --json hosts \
@@ -455,10 +478,7 @@ github_state() {
   esac
   GH_MISSING=
   for s in $(printf '%s' "$GH_SCOPES" | tr ',' ' '); do
-    case ",$GH_HAVE," in
-      *",$s,"*) ;;
-      *) GH_MISSING=${GH_MISSING:+$GH_MISSING,}$s ;;
-    esac
+    scope_covered "$s" || GH_MISSING=${GH_MISSING:+$GH_MISSING,}$s
   done
 }
 
@@ -475,7 +495,7 @@ key_moved() {
 consent() {
   github_state
   WANT_GITHUB=no WANT_KEY=no
-  [ -n "$GH_MISSING" ] && WANT_GITHUB=yes
+  { [ -n "$GH_MISSING" ] || [ "$GH_GIT" = no ]; } && WANT_GITHUB=yes
   key_moved || WANT_KEY=yes
   [ "$WANT_GITHUB" = yes ] || [ "$WANT_KEY" = yes ] || return 0
   n=0
@@ -486,14 +506,18 @@ consent() {
     n=$((n + 1))
     printf '\n%s. Sign in to GitHub, once\n' "$n"
     printf '   Why:  your agents keep their work in your GitHub repositories and sign their commits.\n'
-    if [ -n "$GH_LOGIN" ]; then
+    if [ -z "$GH_MISSING" ]; then
+      printf '   What: gh is signed in as %s with every scope onboarding needs;\n' "$GH_LOGIN"
+      printf '         git then signs in to github.com through gh (gh auth setup-git).\n'
+    elif [ -n "$GH_LOGIN" ]; then
       printf "   What: gh is signed in as %s; one browser approval (GitHub's device flow)\n" "$GH_LOGIN"
       printf '         adds the scopes it lacks: %s.\n' "$(printf '%s' "$GH_MISSING" | sed 's/,/, /g')"
+      printf '         Git then signs in to github.com through gh.\n'
     else
       printf "   What: one browser approval (GitHub's device flow) for gh, with every scope\n"
       printf '         onboarding needs: %s.\n' "$(printf '%s' "$GH_SCOPES" | sed 's/,/, /g')"
+      printf '         Git then signs in to github.com through gh.\n'
     fi
-    printf '         Git then signs in to github.com through gh.\n'
     printf '   Undo:\n     gh auth logout --hostname github.com\n'
   fi
   if [ "$WANT_KEY" = yes ]; then
@@ -522,17 +546,20 @@ github() {
     return 0
   fi
   gh_cmd=$1
-  if command -v xdg-open >/dev/null 2>&1; then xdg-open "$GH_DEVICE" >/dev/null 2>&1 || :; fi
-  say "approve this machine in your browser, at $GH_DEVICE, with the code gh shows below"
-  if [ -n "$GH_LOGIN" ]; then
-    "$gh_cmd" auth refresh --hostname github.com --scopes "$GH_MISSING" < /dev/null || fail "gh auth refresh exited with status $?"
-  else
-    "$gh_cmd" auth login --hostname github.com --git-protocol https --web --scopes "$GH_SCOPES" < /dev/null || fail "gh auth login exited with status $?"
+  if [ -n "$GH_MISSING" ]; then
+    if command -v xdg-open >/dev/null 2>&1; then xdg-open "$GH_DEVICE" >/dev/null 2>&1 || :; fi
+    say "approve this machine in your browser, at $GH_DEVICE, with the code gh shows below"
+    if [ -n "$GH_LOGIN" ]; then
+      "$gh_cmd" auth refresh --hostname github.com --scopes "$GH_MISSING" < /dev/null || fail "gh auth refresh exited with status $?"
+    else
+      "$gh_cmd" auth login --hostname github.com --git-protocol https --web --scopes "$GH_SCOPES" < /dev/null || fail "gh auth login exited with status $?"
+    fi
   fi
   "$gh_cmd" auth setup-git --hostname github.com < /dev/null || fail "gh auth setup-git exited with status $?"
   github_state
   [ -n "$GH_LOGIN" ] || fail "gh is still not signed in to github.com"
   [ -z "$GH_MISSING" ] || fail "gh still lacks the scopes $GH_MISSING"
+  [ "$GH_GIT" = yes ] || fail "git does not sign in to github.com through gh after gh auth setup-git"
   say "signed in to GitHub as $GH_LOGIN"
 }
 

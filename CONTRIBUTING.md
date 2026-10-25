@@ -493,9 +493,16 @@ not exist yet), whether the agent key opens OATS (`agentKeyMoved`, and
   refuses an agent, are listed together, each with why, what and its undo
   on a line of its own, and one `[y/N]` that only an explicit `y` answers:
   - the GitHub sign-in, unless `github_state` finds gh signed in to
-    github.com with every scope in `GH_SCOPES`. It reads `gh auth status
-    --json hosts --jq …` (gh 2.81.0 and later, `GH_MIN`), so it needs no
-    node;
+    github.com with every scope in `GH_SCOPES` and git signing in there
+    through gh (`git config --get credential.https://github.com.helper` ends
+    in `auth git-credential`, as `gh auth setup-git` leaves it). It reads
+    `gh auth status --json hosts --jq …` (gh 2.81.0 and later, `GH_MIN`), so
+    it needs no node. A scope counts as granted when the token holds it or
+    the parent GitHub normalizes it into (`scope_covered`: `user` for
+    `user:email`, `write:org` or `admin:org` for `read:org`), since gh auth
+    refresh keeps the token's scopes. With every scope there but git not
+    using gh, the act is only `gh auth setup-git`, with no browser
+    approval;
   - the agent key, unless `key_moved` finds it with OATS: setup's state
     records `agentKey: "oats"` and `bindings.lua` holds `agentBindLine`, as
     the Default Agent row's `checked` reads it. Without node setup has never
@@ -504,14 +511,18 @@ not exist yet), whether the agent key opens OATS (`agentKeyMoved`, and
   An act already done is left off; with none, there is no screen.
 - **The acts** run as the person, in their terminal, after the tools:
   - step 6 (`github`): `gh auth login --web --scopes $GH_SCOPES`, or `gh
-    auth refresh --scopes` with only the missing ones, then `gh auth
-    setup-git`, each with stdin from `/dev/null`. Without a terminal gh asks
+    auth refresh --scopes` with only the missing ones (neither when none is
+    missing), then `gh auth setup-git`, each with stdin from `/dev/null`,
+    then the state read back: signed in, every scope, git using gh. Without a terminal gh asks
     nothing (no protocol, no "Authenticate Git", no Enter; cli/cli
     `pkg/cmd/auth/shared/login_flow.go`): it prints the one-time code and
     waits for the approval. The installer opens the device page with
     `xdg-open`, then reads the sign-in back;
   - step 7 (`agent_key`): `setup --apply --only agent-key --agent-key oats
     --steward-pending --yes --json`, before onboarding spawns the steward.
+    `--steward-pending` moves the key only past findSteward's `none: true`,
+    which it gives only when every deployment was read: one it could not
+    read may hold several stewards.
     A key setup leaves with Omarchy is said, and onboarding still starts.
   - The onboarding prompt states what they did (`consentFacts`), never the
     person's consent: an agent passing a yes on is refused as an auto-mode

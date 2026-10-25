@@ -76,6 +76,13 @@ esac
   if (!system) writeExecutable(join(bin, "omarchy-version"), "#!/bin/sh\necho 4.0.4-1\n");
   writeExecutable(join(bin, "omarchy-launch-floating-terminal-with-presentation"), `#!/bin/sh\n${logArgs("floating.log")}\n`);
   writeExecutable(join(bin, "xdg-open"), `#!/bin/sh\n${logArgs("xdg-open.log")}\n`);
+  // git, for the one question the installer asks it: github.com's credential
+  // helper (gh/helper, which gh auth setup-git writes), as \`git config --get\`
+  // answers it, exit 1 when unset.
+  writeExecutable(join(bin, "git"), `#!/bin/sh
+[ "$*" = "config --get credential.https://github.com.helper" ] && { cat '${join(root, "gh", "helper")}' 2>/dev/null || exit 1; exit 0; }
+echo "git: $*" >&2; exit 1
+`);
   const setDefaultAgent = (agent) => writeExecutable(join(bin, "omarchy-default-agent"), `#!/bin/sh\n${agent ? `echo ${agent}` : ""}\n`);
   if (!system) setDefaultAgent(null);
 
@@ -148,7 +155,9 @@ case "$1" in
         all=$(printf '%s' "\${have:+\$have,}$s" | tr ',' '\\n' | sed '/^$/d' | tr '\\n' ',' | sed 's/,$//; s/,/, /g')
         printf '%s %s\\n' "$login" "$all" > "$g/status"
         exit 0 ;;
-      setup-git) exit 0 ;;
+      setup-git)
+        [ -f "$g/fail-setup-git" ] && { echo "failed to set up git credential helper" >&2; exit 1; }
+        echo "!'$0' auth git-credential" > "$g/helper"; exit 0 ;;
     esac ;;
 esac
 echo "gh: $*" >&2; exit 1
@@ -257,11 +266,14 @@ export const ALL = (w, { harness = "claude", node = "26.8.2", aw = "1.36.47", oa
   signedIn(w);
   keyMoved(w);
 };
-// gh at `version`, signed in as `login` with `scopes` (null: not signed in).
-export function signedIn(w, { scopes = GH_SCOPES, login = "octo-person", version = "2.102.0" } = {}) {
-  w.put("gh", "mise", version);
+// gh at `version`, signed in as `login` with `scopes` (null: not signed in),
+// and git signing in to github.com through it unless `git` is false.
+export function signedIn(w, { scopes = GH_SCOPES, login = "octo-person", version = "2.102.0", git = scopes !== null } = {}) {
+  const gh = w.put("gh", "mise", version);
   if (scopes === null) rmSync(join(w.root, "gh", "status"), { force: true });
   else writeFileSync(join(w.root, "gh", "status"), `${login} ${scopes.join(", ")}\n`);
+  if (git) writeFileSync(join(w.root, "gh", "helper"), `!'${gh}' auth git-credential\n`);
+  else rmSync(join(w.root, "gh", "helper"), { force: true });
 }
 // The agent key already with OATS, as setup leaves it: its state records the
 // choice, and bindings.lua holds the key's bind line.
