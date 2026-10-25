@@ -19,7 +19,7 @@ import * as keys from "../lib/keys.mjs";
 import * as menu from "../lib/menu.mjs";
 import { shellQuote } from "../lib/quote.mjs";
 import { AGENT_QUESTION, blocksFor, lookUpSteward, NOT_CHOSEN, ONLY_HEADING, setup, UI_QUESTION } from "../lib/setup.mjs";
-import { fixture, repo, sandbox, snapshot, withStewards, writeExecutable } from "./helpers/sandbox.mjs";
+import { fixture, removeInSandbox, repo, sandbox, snapshot, withStewards, writeExecutable } from "./helpers/sandbox.mjs";
 
 const USER_BINDINGS = '-- My bindings\no.bind("SUPER + RETURN", "Terminal", "uwsm-app -- xdg-terminal-exec")\n';
 const MY_SUPER_O = 'o.bind("SUPER + O", "Mine", "true")\n';
@@ -1122,7 +1122,7 @@ test("--only agent-key again over its own work alone records the node its rewrit
   const p = discoverPaths(s.env);
   assert.equal(s.run(ONLY_RUN).status, 0);
   const old = stateOf(s).node;
-  unlinkSync(old);
+  removeInSandbox(s.root, old);
   const node = join(s.fakebin, "node");
   symlinkSync(process.execPath, node);
   const r = s.run([...ONLY_RUN, "--json"]);
@@ -1190,7 +1190,7 @@ test("--only agent-key giving the key back over its own work alone keeps the nod
   const p = discoverPaths(s.env);
   assert.equal(s.run(ONLY_RUN).status, 0);
   const old = stateOf(s).node;
-  unlinkSync(old);
+  removeInSandbox(s.root, old);
   symlinkSync(process.execPath, join(s.fakebin, "node"));
   const shim = readFileSync(p.shim, "utf8");
   const launcher = readFileSync(p.wrapper, "utf8");
