@@ -430,18 +430,20 @@ same node lookup as `setup`. Without a node it says so on stderr and with
     has a stand-in hyprctl with its replies under a Lua and a hyprlang
     config.
 - **One launch at a time** (`LAUNCH_LOCK`, `launchLockAddress`). The
-  lookup and the launch run under a lock: a Unix socket the holder listens
-  on, held until the launched window claims its handoff, so a second press
+  lookup and the launch run under a lock: a socket the holder listens on,
+  held until the launched window claims its handoff, so a second press
   before the first window maps waits, looks again and focuses that window.
-  On Linux the address is in the abstract namespace: binding fails while a
-  process holds it, and the kernel frees it when the holder ends, so a
-  launch that died leaves nothing behind and nothing is removed on a
-  reading. Elsewhere (macOS, for the tests) it is a socket file in the
-  runtime directory, and one nobody answers on is removed, a development
-  stand-in that can race. Every wait is bounded (`WINDOW_START` plus two
-  hyprctl bounds) and yields; a press that cannot get the lock goes on
-  without it. A prompt for an open window is sent after the lock is
-  released. The abstract-namespace path runs only on Linux, in CI.
+  The kernel owns it: binding fails while a process holds it and it is
+  freed when the holder ends, so a launch that died leaves nothing behind
+  and nothing is ever taken over or removed. On Linux it is a Unix socket
+  in the abstract namespace; elsewhere (macOS, for the tests) a loopback
+  TCP port. Both are named for the user and the runtime directory's hash,
+  so the tests' sandboxes never share one. Every wait is bounded
+  (`WINDOW_START` plus two hyprctl bounds) and yields; a press that cannot
+  get the lock goes on without it. A prompt for an open window is sent
+  after the lock is released. The tests' holder passes the address as JSON,
+  since an abstract name starts with a NUL, which argv cannot carry; the
+  abstract-namespace path runs only on Linux, in CI.
 - **Otherwise the outer process only opens the window.** It checks that
   `omarchy-launch-tui` is on PATH, and makes the handoff: a private directory (0700) under `$XDG_RUNTIME_DIR` (else the temporary
   directory) that holds the prompt, if any. Then it starts

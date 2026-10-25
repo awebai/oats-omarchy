@@ -862,9 +862,11 @@ test("two presses with prompts while the first window starts: the first prompt r
 
 
 // A process holding the launch lock as a launch does: it listens on the
-// lock's address, says so, and waits. → { child, ready }.
+// lock's address, says so, and waits. The address goes in JSON: on Linux it
+// starts with a NUL (the abstract namespace), which argv cannot carry.
+// → { child, ready }.
 function holder(w) {
-  const child = spawn(process.execPath, ["-e", `require("node:net").createServer().listen(process.argv[1], () => process.stdout.write("ready")); setInterval(() => {}, 1000);`, launchLockAddress(w.env)], { stdio: ["ignore", "pipe", "inherit"] });
+  const child = spawn(process.execPath, ["-e", `require("node:net").createServer().listen(JSON.parse(process.argv[1]), () => process.stdout.write("ready")); setInterval(() => {}, 1000);`, JSON.stringify(launchLockAddress(w.env))], { stdio: ["ignore", "pipe", "inherit"] });
   const ready = new Promise((done) => child.stdout.once("data", () => done()));
   return { child, ready };
 }
