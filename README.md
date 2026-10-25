@@ -58,7 +58,10 @@ them as you, in your terminal, and nothing asks you again later. They are:
   `admin:ssh_signing_key`, `user:email`; a broader scope that covers one,
   such as `user` for `user:email`, counts), and git signing in to
   github.com through gh. With every scope already there, it is only the
-  git part, with no approval. Undo: `gh auth logout --hostname github.com`.
+  git part, with no approval. Undo: `gh auth logout --hostname github.com`,
+  then `git config --global --unset-all credential.https://github.com.helper`
+  and the same for `credential.https://gist.github.com.helper`, the two git
+  settings `gh auth setup-git` writes.
 - **The agent key opens your steward:** SUPER + SHIFT + CTRL + A moves from
   Omarchy's agent to OATS, as `setup --apply --only agent-key` does, before
   the steward exists (onboarding spawns it). Undo: `setup --apply --only

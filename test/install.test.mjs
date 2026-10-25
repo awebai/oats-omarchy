@@ -369,6 +369,8 @@ nothing asks you again later, and no API keys are needed.
          Git then signs in to github.com through gh.
    Undo:
      gh auth logout --hostname github.com
+     git config --global --unset-all credential.https://github.com.helper
+     git config --global --unset-all credential.https://gist.github.com.helper
 
 2. The agent key opens your steward
    Why:  one key, SUPER + SHIFT + CTRL + A, opens the agent that looks after this machine.
@@ -397,6 +399,25 @@ for (const [name, input] of [["Enter", "\n"], ["n", "n\n"], ["no answer", ""], [
     assert.equal(existsSync(join(w.root, "harness.json")), false);
   });
 }
+
+test("the GitHub act's undo undoes all of it: run as the screen prints it, gh is signed out and git's helpers for github.com and gist.github.com are gone", (t) => {
+  const w = world(t);
+  nothingDone(w);
+  const { installer } = pluginCopy(w);
+  const r = w.run(["--now", "--harness", "claude"], { installer, input: "y\n" });
+  assert.equal(r.status, 0, r.out);
+  const screen = r.stdout.slice(r.stdout.indexOf("1. Sign in to GitHub"), r.stdout.indexOf("2. The agent key"));
+  const undo = screen.slice(screen.indexOf("   Undo:\n") + "   Undo:\n".length).trim().split("\n").map((l) => l.trim());
+  assert.deepEqual(undo, [
+    "gh auth logout --hostname github.com",
+    "git config --global --unset-all credential.https://github.com.helper",
+    "git config --global --unset-all credential.https://gist.github.com.helper",
+  ]);
+  const get = (key) => spawnSync("git", ["config", "--global", "--get-all", key], { cwd: w.home, env: w.env(), encoding: "utf8" });
+  for (const key of ["credential.https://github.com.helper", "credential.https://gist.github.com.helper"]) assert.match(get(key).stdout, /auth git-credential\n$/, `${key} set by the act`);
+  for (const line of undo.slice(1)) assert.equal(spawnSync("sh", ["-c", line], { cwd: w.home, env: w.env(), encoding: "utf8" }).status, 0, line);
+  for (const key of ["credential.https://github.com.helper", "credential.https://gist.github.com.helper"]) assert.equal(get(key).status, 1, `${key} gone`);
+});
 
 test("the consent screen answered y: gh signs in with every scope, with no terminal question of its own, git uses it, the key moves before the steward exists, then onboarding", (t) => {
   const w = world(t);

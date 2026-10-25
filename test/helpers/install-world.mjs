@@ -150,10 +150,14 @@ case "$1" in
         all=$(printf '%s' "\${have:+\$have,}$s" | tr ',' '\\n' | sed '/^$/d' | tr '\\n' ',' | sed 's/,$//; s/,/, /g')
         printf '%s %s\\n' "$login" "$all" > "$g/status"
         exit 0 ;;
-      # As gh's ConfigureOurs: --global, an empty helper, then gh's.
+      # As gh's ConfigureOurs (cli/cli v2.102.0): for github.com and its gist
+      # host, --global, an empty helper, then gh's.
       setup-git)
         [ -f "$g/fail-setup-git" ] && { echo "failed to set up git credential helper" >&2; exit 1; }
-        git config --global --replace-all credential.https://github.com.helper "" && git config --global --add credential.https://github.com.helper "!'$0' auth git-credential"; exit $? ;;
+        for key in credential.https://github.com.helper credential.https://gist.github.com.helper; do
+          git config --global --replace-all "$key" "" && git config --global --add "$key" "!'$0' auth git-credential" || exit 1
+        done
+        exit 0 ;;
     esac ;;
 esac
 echo "gh: $*" >&2; exit 1

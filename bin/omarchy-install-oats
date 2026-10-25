@@ -519,7 +519,11 @@ consent() {
       printf '         onboarding needs: %s.\n' "$(printf '%s' "$GH_SCOPES" | sed 's/,/, /g')"
       printf '         Git then signs in to github.com through gh.\n'
     fi
+    # gh auth setup-git writes git's global helper for github.com and for its
+    # gist host (cli/cli ConfigureOurs), which gh auth logout leaves.
     printf '   Undo:\n     gh auth logout --hostname github.com\n'
+    printf '     git config --global --unset-all credential.https://github.com.helper\n'
+    printf '     git config --global --unset-all credential.https://gist.github.com.helper\n'
   fi
   if [ "$WANT_KEY" = yes ]; then
     n=$((n + 1))
