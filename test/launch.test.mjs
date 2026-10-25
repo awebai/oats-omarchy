@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { APP_ID, deliverPrompt, launch, LAUNCH_SCRIPT, parseArgs } from "../lib/launch.mjs";
+import { APP_ID, deliverPrompt, findWindow, launch, LAUNCH_SCRIPT, parseArgs } from "../lib/launch.mjs";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import { STATE_SCHEMA } from "../lib/state.mjs";
 import { DETACH_KEY } from "../lib/waiting.mjs";
@@ -666,4 +666,149 @@ test("--inline without omarchy-agent on PATH says so, exit 1", (t) => {
   const r = outer(w, ["--inline"]);
   assert.equal(r.status, 1);
   assert.equal(r.stderr, "omarchy-launch-oats: omarchy-agent is not on PATH: --inline runs Omarchy's own agent\n");
+});
+
+// ---------------------------------------------------------------------------
+// Launch or focus: the key finds the steward's window by its own app-id in
+// `hyprctl clients -j` and focuses it; only without one does it open a window.
+
+// A stand-in `hyprctl` that answers as Hyprland v0.56.2's does (its
+// src/debug/HyprCtl.cpp and hyprctl/src/main.cpp): `clients -j` prints the
+// clients from test/fixtures/hyprctl, and `dispatch` replies "ok" or the
+// dispatcher's error, exiting 0 either way (hyprctl exits non-zero only for
+// a reply that starts with "error:", or when it reaches no Hyprland). Under
+// a Lua config `dispatch <x>` is `hl.dispatch(<x>)`, so the hyprlang form is
+// a Lua error with Hyprland's note; under hyprlang the Lua form is an
+// unknown dispatcher. It logs each call's argv, one per line, then "--".
+const LUA_NOTE = "\n\n → Note: dispatch in lua is a shorthand for hl.dispatch(...), your syntax might need to be updated.";
+function hyprland(w, { clients = "clients-steward.json", config = "lua", running = true, lua, legacy } = {}) {
+  const h = join(w.s.root, "hypr");
+  mkdirSync(h, { recursive: true });
+  if (clients) writeFileSync(join(h, "clients.json"), readFileSync(fixture("hyprctl", clients)));
+  const replies = config === "lua"
+    ? { lua: "ok", legacy: `[string "return hl.dispatch(focuswindow address:0x55d0c2c19a40)"]:1: ')' expected near 'address'${LUA_NOTE}` }
+    : { lua: "Invalid dispatcher", legacy: "ok" };
+  writeFileSync(join(h, "lua.reply"), lua ?? replies.lua);
+  writeFileSync(join(h, "legacy.reply"), legacy ?? replies.legacy);
+  writeExecutable(join(w.s.fakebin, "hyprctl"), `#!/bin/sh
+for a; do printf '%s\\n' "$a"; done >> "${join(h, "calls.log")}"; echo -- >> "${join(h, "calls.log")}"
+${running ? "" : "echo 'HYPRLAND_INSTANCE_SIGNATURE was not set! (Is Hyprland running?) (3)'; exit 3"}
+case "$1 $2" in
+  "clients -j") cat "${join(h, "clients.json")}" ;;
+  "dispatch hl.dsp.focus("*) cat "${join(h, "lua.reply")}"; echo ;;
+  "dispatch focuswindow") cat "${join(h, "legacy.reply")}"; echo ;;
+  *) echo "unexpected: $*"; exit 1 ;;
+esac
+exit 0
+`);
+  return { calls: () => (existsSync(join(h, "calls.log")) ? readFileSync(join(h, "calls.log"), "utf8").split("--\n").slice(0, -1).map((c) => c.split("\n").slice(0, -1)) : []) };
+}
+const STEWARD_WINDOW = "0x55d0c2c19a40";
+const LUA_FOCUS = ["dispatch", `hl.dsp.focus({ window = "address:${STEWARD_WINDOW}" })`];
+
+test("the steward's window has an app-id of its own, inside Omarchy's org.omarchy.* terminal windows", () => {
+  assert.equal(APP_ID, "org.omarchy.agent.oats-steward");
+});
+
+test("findWindow: the steward's window from real hyprctl clients -j output, by its class alone", () => {
+  const read = (name) => readFileSync(fixture("hyprctl", name), "utf8");
+  assert.equal(findWindow(read("clients-steward.json")), STEWARD_WINDOW, "beside another org.omarchy.agent window");
+  assert.equal(findWindow(read("clients-no-steward.json")), null, "an Omarchy agent window is not the steward's");
+  assert.equal(findWindow(read("clients-none.json")), null);
+  const steward = JSON.parse(read("clients-steward.json")).find((c) => c.class === APP_ID);
+  assert.equal(findWindow(JSON.stringify([{ ...steward, title: "merak:steward", class: "org.omarchy.agent" }])), null, "never by its title");
+  assert.equal(findWindow(JSON.stringify([{ ...steward, address: '0x1" }) os.execute("touch pwned") --' }])), null, "an address that is not Hyprland's hex is never dispatched");
+  for (const junk of ["", "not json", "{}", "null", "[null, 3]"]) assert.equal(findWindow(junk), null, JSON.stringify(junk));
+});
+
+test("a second press: the steward's window is focused with Hyprland's Lua dispatcher, and no window or session opens", (t) => {
+  const w = world(t);
+  const h = hyprland(w);
+  const r = outer(w, []);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, "");
+  assert.deepEqual(h.calls(), [["clients", "-j"], LUA_FOCUS]);
+  assert.equal(w.tuiArgs(), null, "no second window");
+  assert.deepEqual(w.k.calls(), [], "no kernel call: no new viewer session");
+  assert.equal(w.notified(), "");
+  assert.deepEqual(readdirSync(w.run), [], "no handoff");
+});
+
+test("a second press under a hyprlang config: the Lua form is an unknown dispatcher, so focuswindow focuses it", (t) => {
+  const w = world(t);
+  const h = hyprland(w, { config: "hyprlang" });
+  const r = outer(w, []);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(h.calls(), [["clients", "-j"], LUA_FOCUS, ["dispatch", "focuswindow", `address:${STEWARD_WINDOW}`]]);
+  assert.equal(w.tuiArgs(), null);
+});
+
+test("a steward's window that Hyprland will not focus is reported, and no second window opens", (t) => {
+  const w = world(t);
+  hyprland(w, { lua: "error: no such window", legacy: `no such window${LUA_NOTE}` });
+  const r = outer(w, []);
+  assert.equal(r.status, 1);
+  const line = "the steward's window is open, but Hyprland did not focus it: no such window";
+  assert.equal(r.stderr, `omarchy-launch-oats: ${line}\n`);
+  assert.equal(w.notified(), `Could not open the OATS steward\n${line}\n--\n`);
+  assert.equal(w.tuiArgs(), null);
+  assert.deepEqual(w.k.calls(), []);
+});
+
+test("with only another org.omarchy.agent window, or none, or no Hyprland to ask, the key opens the steward's window", (t) => {
+  for (const [name, opts] of [["another agent", { clients: "clients-no-steward.json" }], ["no windows", { clients: "clients-none.json" }], ["no Hyprland", { running: false }]]) {
+    const w = world(t);
+    const h = hyprland(w, opts);
+    const r = outer(w, []);
+    assert.equal(r.status, 0, `${name}: ${r.stderr}`);
+    assert.equal(r.stderr, "", name);
+    assert.deepEqual(h.calls(), [["clients", "-j"]], name);
+    assert.equal(w.tuiArgs()[0], `--app-id=${APP_ID}`, name);
+  }
+  const w = world(t);
+  const r = outer(w, []);
+  assert.equal(r.status, 0, "no hyprctl on PATH: " + r.stderr);
+  assert.equal(w.tuiArgs()[0], `--app-id=${APP_ID}`);
+});
+
+test("--prompt with the steward's window open: focused, then the prompt is sent from the launch, once, and the result notified", (t) => {
+  const w = world(t);
+  const h = hyprland(w);
+  const r = outer(w, ["--prompt", TRICKY]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(h.calls(), [["clients", "-j"], LUA_FOCUS]);
+  assert.equal(w.tuiArgs(), null, "no second window");
+  const calls = w.k.calls();
+  assert.deepEqual(calls.map((c) => c.argv.slice(0, 2).join(" ")), ["version --json", "deployments --json", "status --json", "session inspect", "session input"], "no start and no attach: the window has the viewer");
+  const input = calls.find((c) => c.argv[1] === "input");
+  assert.deepEqual(input.argv, ["session", "input", "--home", w.home, "--json"]);
+  assert.equal(Buffer.from(input.stdin, "base64").toString("utf8"), TRICKY);
+  assert.equal(r.stderr, "omarchy-launch-oats: your prompt was sent to the steward\n");
+  assert.equal(w.notified(), "OATS steward\nyour prompt was sent to the steward\n--\n");
+  assert.deepEqual(readdirSync(w.run), [], "no handoff: the prompt never touched a file");
+  assert.ok(!existsSync(join(w.s.home, "pwned")) && !existsSync(join(w.s.home, "ticked")));
+});
+
+test("--prompt with the steward's window open and the steward waiting on you: focused, nothing sent, and the notification says so", (t) => {
+  const w = world(t);
+  hyprland(w);
+  set(w, "inspect.json", JSON.stringify([{ running: true, waitingOnYou: { since: "2026-10-23T10:00:00Z", producer: "oats.core", reason: "permission", message: "Allow Bash?" } }]));
+  const r = outer(w, ["--prompt", "hello"]);
+  assert.equal(r.status, 1);
+  const line = "the steward is waiting on you (Allow Bash?): your prompt was not sent; type it in the steward's window";
+  assert.equal(r.stderr, `omarchy-launch-oats: ${line}\n`);
+  assert.equal(w.notified(), `Could not send your prompt to the OATS steward\n${line}\n--\n`);
+  assert.ok(!argvs(w).some((a) => a[1] === "input"));
+  assert.equal(w.tuiArgs(), null);
+});
+
+test("--prompt with the steward's window open and no steward to find: the step is named in the notification, nothing sent", (t) => {
+  const w = world(t);
+  hyprland(w);
+  writeFileSync(join(w.s.deployment, "status.json"), JSON.stringify({ ...STATUS, agents: [] }));
+  const r = outer(w, ["--prompt", "hello"]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^omarchy-launch-oats: finding the steward: no steward on this machine: .*: your prompt was not sent\n$/);
+  assert.match(w.notified(), /^Could not send your prompt to the OATS steward\nfinding the steward: no steward on this machine/);
+  assert.ok(!argvs(w).some((a) => a[1] === "input"));
 });
