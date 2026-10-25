@@ -22,7 +22,11 @@ bin/omarchy-install-oats the installer (POSIX sh, Omarchy's --check|--now contra
 bin/install.mjs          the installer's node half: the steward line and the found-list handoff
 lib/onboarding-prompt.txt the onboarding agent's prompt, with {{placeholders}}
 docs/found-list.md       what the installer hands the onboarding agent (schemaVersion 1)
-lib/                     their modules (below)
+lib/                     their modules (below), and lib/agent-permissions.json, the
+                         agent permission profile vendored from oats.setup's
+                         oats-agent-permissions skill (test/agent-permissions-vendored.test.mjs
+                         pins it and says how to re-vendor); nothing writes it yet
+                         (awebai/oats#1506)
 assets/                  the icon both launcher entries use
 scripts/lint.mjs         lint
 test/                    node:test suites; test/fixtures holds their inputs (with

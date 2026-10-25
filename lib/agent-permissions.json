@@ -1,0 +1,64 @@
+{
+  "autoMode": {
+    "environment": [
+      "$defaults",
+      "Source control: github.com/<owner> and its repositories, the OATS workspace's members",
+      "Trusted internal domains: <the aweb service host>, the agents' messaging service"
+    ],
+    "allow": [
+      "$defaults",
+      "OATS coordination: in an OATS instance, writing a task file in the agent's own instance home and running `oats spawn --task-file` with it, and mailing other instances with `aw`, is normal multi-agent work"
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(oats status *)",
+      "Bash(oats souls *)",
+      "Bash(oats capabilities *)",
+      "Bash(oats workspace status *)",
+      "Bash(oats inspect *)",
+      "Bash(oats readiness *)",
+      "Bash(oats doctor *)",
+      "Bash(oats instance events *)",
+      "Bash(oats instance git *)",
+      "Bash(oats session inspect *)",
+      "Bash(oats launch-config list *)",
+      "Bash(oats launch-config preview *)",
+      "Bash(oats okf index *)",
+      "Bash(oats okf cat *)",
+      "Bash(oats okf search *)",
+      "Bash(oats okf ls *)",
+      "Bash(oats okf links *)",
+      "Bash(oats okf bases *)",
+      "Bash(oats okf status *)",
+      "Bash(oats instance attention *)",
+      "Bash(oats worktree *)",
+      "Bash(oats spawn *)",
+      "Bash(oats retire * --plan)",
+      "Bash(oats retire * --plan *)",
+      "Bash(oats instance stop * --plan)",
+      "Bash(oats instance stop * --plan *)",
+      "Bash(aw mail inbox *)",
+      "Bash(aw mail show *)",
+      "Bash(aw mail ack *)",
+      "Bash(aw chat pending *)",
+      "Bash(aw chat history *)",
+      "Bash(aw whoami *)",
+      "Bash(aw workspace status *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh issue view *)",
+      "Bash(gh issue list *)",
+      "Bash(gh run view *)",
+      "Bash(gh run list *)"
+    ],
+    "ask": [
+      "Bash(aw *--server-name*)",
+      "Bash(oats spawn *--yolo*)",
+      "Bash(oats spawn *--server*)",
+      "Bash(oats spawn *--wake-*)"
+    ]
+  }
+}
