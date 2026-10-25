@@ -492,6 +492,24 @@ test("signed in with every scope but git not using gh: the screen says so, and s
   assert.equal(w.log("xdg-open.log"), "", "no browser approval");
 });
 
+test("git signing in through gh only in a repository's own config, run from there, is not git using gh: setup-git runs, globally", (t) => {
+  const w = world(t);
+  ALL(w);
+  withChannel(w);
+  signedIn(w, { git: false });
+  const project = join(w.home, "project");
+  mkdirSync(project);
+  const git = (...args) => spawnSync("git", args, { cwd: project, env: w.env(), encoding: "utf8" });
+  assert.equal(git("init", "-q").status, 0);
+  assert.equal(git("config", "credential.https://github.com.helper", "!gh auth git-credential").status, 0);
+  const { installer } = pluginCopy(w);
+  const r = w.run(["--now", "--harness", "claude"], { installer, input: "y\n", cwd: project });
+  assert.equal(r.status, 0, r.out);
+  assert.ok(r.stdout.includes("git then signs in to github.com through gh (gh auth setup-git)"), r.stdout);
+  assert.deepEqual(ghCalls(w).filter((c) => c[1] !== "status").map((c) => c[1]), ["setup-git"]);
+  assert.match(spawnSync("git", ["config", "--global", "--get", "credential.https://github.com.helper"], { cwd: w.home, env: w.env(), encoding: "utf8" }).stdout, /auth git-credential\n$/, "the global config has it");
+});
+
 test("a setup-git that fails after the sign-in is taken up again on the next run", (t) => {
   const w = world(t);
   nothingDone(w);

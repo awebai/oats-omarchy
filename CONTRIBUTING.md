@@ -494,8 +494,10 @@ not exist yet), whether the agent key opens OATS (`agentKeyMoved`, and
   on a line of its own, and one `[y/N]` that only an explicit `y` answers:
   - the GitHub sign-in, unless `github_state` finds gh signed in to
     github.com with every scope in `GH_SCOPES` and git signing in there
-    through gh (`git config --get credential.https://github.com.helper` ends
-    in `auth git-credential`, as `gh auth setup-git` leaves it). It reads
+    through gh (`git config --global --get credential.https://github.com.helper`
+    ends in `auth git-credential`: the global config, where `gh auth
+    setup-git` writes it, so a repository the installer runs from answers
+    nothing). It reads
     `gh auth status --json hosts --jq …` (gh 2.81.0 and later, `GH_MIN`), so
     it needs no node. A scope counts as granted when the token holds it or
     the parent GitHub normalizes it into (`scope_covered`: `user` for
@@ -580,7 +582,9 @@ into `/usr`, an instance's shim), each logging what it was asked and
 modelling refusals. The stand-in `mise use -g` lays out an install only
 when it runs. gh's stand-in answers `auth status --json` from a file and
 signs in as `auth login` and `auth refresh` would, logging whether stdin
-was a terminal. `ALL` leaves both of the person's acts done, so a test sees
+was a terminal; its `auth setup-git` writes the global config as gh does,
+with the host's own git, which reads only this HOME's `~/.gitconfig`
+(`GIT_CONFIG_NOSYSTEM`). `ALL` leaves both of the person's acts done, so a test sees
 the consent screen only when it undoes one; the screen's tests run a copy
 of the plugin whose `bin/setup.mjs` logs its argv, so no real setup runs
 there (setup's `--steward-pending` is `test/agent-key.test.mjs`'s). No

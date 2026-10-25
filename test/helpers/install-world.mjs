@@ -21,7 +21,9 @@ import { STATE_SCHEMA } from "../../lib/state.mjs";
 
 export const INSTALLER = join(repo, "bin", "omarchy-install-oats");
 export const STATUS = JSON.parse(readFileSync(fixture("steward", "status-0.67.1.json"), "utf8"));
-const HOST_TOOLS = ["sh", "grep", "head", "readlink", "dirname", "basename", "mkdir", "cat", "env", "rm", "ln", "mv", "tr", "sort", "printf", "chmod", "sed"];
+// git is the host's own, run against this HOME's ~/.gitconfig only
+// (GIT_CONFIG_NOSYSTEM), for github.com's credential helper.
+const HOST_TOOLS = ["sh", "grep", "head", "readlink", "dirname", "basename", "mkdir", "cat", "env", "rm", "ln", "mv", "tr", "sort", "printf", "chmod", "sed", "git"];
 const NPM_PKG = { aw: "@awebai/aw", oats: "@awebai/oats", claude: "@anthropic-ai/claude-code", codex: "@openai/codex", pi: "@mariozechner/pi-coding-agent" };
 const MISE_DIR = { node: "node", tmux: "tmux", aw: "npm-awebai-aw", oats: "npm-awebai-oats", claude: "claude", codex: "codex", pi: "pi", gh: "gh" };
 // Every scope the installer's GitHub sign-in asks for (GH_SCOPES).
@@ -48,7 +50,7 @@ export function world(t, { npmPrefix, system } = {}) {
   const env = () => ({
     HOME: home, LANG: "C.UTF-8", PATH: [bin, shims, localBin, join(npm, "bin"), ...extra, other, ...(system || [hostbin])].join(":"),
     XDG_DATA_HOME: join(home, ".local", "share"), XDG_STATE_HOME: join(home, ".local", "state"), XDG_CONFIG_HOME: join(home, ".config"),
-    OMARCHY_INSTALL_OATS_TERMINAL: "1",
+    OMARCHY_INSTALL_OATS_TERMINAL: "1", GIT_CONFIG_NOSYSTEM: "1",
   });
   const log = (name) => (existsSync(join(root, name)) ? readFileSync(join(root, name), "utf8") : "");
   const logArgs = (name) => `for a; do printf '%s\\n' "$a"; done >> '${join(root, name)}'; echo -- >> '${join(root, name)}'`;
@@ -76,13 +78,6 @@ esac
   if (!system) writeExecutable(join(bin, "omarchy-version"), "#!/bin/sh\necho 4.0.4-1\n");
   writeExecutable(join(bin, "omarchy-launch-floating-terminal-with-presentation"), `#!/bin/sh\n${logArgs("floating.log")}\n`);
   writeExecutable(join(bin, "xdg-open"), `#!/bin/sh\n${logArgs("xdg-open.log")}\n`);
-  // git, for the one question the installer asks it: github.com's credential
-  // helper (gh/helper, which gh auth setup-git writes), as \`git config --get\`
-  // answers it, exit 1 when unset.
-  writeExecutable(join(bin, "git"), `#!/bin/sh
-[ "$*" = "config --get credential.https://github.com.helper" ] && { cat '${join(root, "gh", "helper")}' 2>/dev/null || exit 1; exit 0; }
-echo "git: $*" >&2; exit 1
-`);
   const setDefaultAgent = (agent) => writeExecutable(join(bin, "omarchy-default-agent"), `#!/bin/sh\n${agent ? `echo ${agent}` : ""}\n`);
   if (!system) setDefaultAgent(null);
 
@@ -155,9 +150,10 @@ case "$1" in
         all=$(printf '%s' "\${have:+\$have,}$s" | tr ',' '\\n' | sed '/^$/d' | tr '\\n' ',' | sed 's/,$//; s/,/, /g')
         printf '%s %s\\n' "$login" "$all" > "$g/status"
         exit 0 ;;
+      # As gh's ConfigureOurs: --global, an empty helper, then gh's.
       setup-git)
         [ -f "$g/fail-setup-git" ] && { echo "failed to set up git credential helper" >&2; exit 1; }
-        echo "!'$0' auth git-credential" > "$g/helper"; exit 0 ;;
+        git config --global --replace-all credential.https://github.com.helper "" && git config --global --add credential.https://github.com.helper "!'$0' auth git-credential"; exit $? ;;
     esac ;;
 esac
 echo "gh: $*" >&2; exit 1
@@ -272,8 +268,9 @@ export function signedIn(w, { scopes = GH_SCOPES, login = "octo-person", version
   const gh = w.put("gh", "mise", version);
   if (scopes === null) rmSync(join(w.root, "gh", "status"), { force: true });
   else writeFileSync(join(w.root, "gh", "status"), `${login} ${scopes.join(", ")}\n`);
-  if (git) writeFileSync(join(w.root, "gh", "helper"), `!'${gh}' auth git-credential\n`);
-  else rmSync(join(w.root, "gh", "helper"), { force: true });
+  const gitconfig = join(w.home, ".gitconfig");
+  if (git) writeFileSync(gitconfig, `[credential "https://github.com"]\n\thelper =\n\thelper = !'${gh}' auth git-credential\n`);
+  else rmSync(gitconfig, { force: true });
 }
 // The agent key already with OATS, as setup leaves it: its state records the
 // choice, and bindings.lua holds the key's bind line.

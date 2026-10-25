@@ -461,12 +461,13 @@ scope_covered() {
 # GitHub as gh and git have it: GH_LOGIN (empty when not signed in), GH_HAVE
 # (the token's scopes, comma-separated), GH_MISSING (those of GH_SCOPES the
 # token does not grant) and GH_GIT (yes when git signs in to github.com
-# through gh: its credential helper there is gh's, as gh auth setup-git
-# leaves it). gh's own --jq picks the active github.com account's line, so
-# this needs no node.
+# through gh: its credential helper there is gh's, in the global config,
+# where gh auth setup-git writes it, so a repository's own config where this
+# runs answers nothing). gh's own --jq picks the active github.com account's
+# line, so this needs no node.
 github_state() {
   GH_LOGIN='' GH_HAVE='' GH_MISSING=$GH_SCOPES GH_GIT=no
-  if git config --get credential.https://github.com.helper 2>/dev/null | grep -q 'auth git-credential$'; then GH_GIT=yes; fi
+  if git config --global --get credential.https://github.com.helper 2>/dev/null | grep -q 'auth git-credential$'; then GH_GIT=yes; fi
   detect gh
   [ "$T_STATE" = found ] || return 0
   line=$("$T_CMD" auth status --hostname github.com --active --json hosts \
