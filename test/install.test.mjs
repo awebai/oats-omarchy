@@ -4,11 +4,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { awEnvironment, gettingStartedSkill, handoff, parseTools, PROMPT_FILE, renderPrompt } from "../lib/install.mjs";
-import { ALL, deployments, found, harnessRun, INSTALLER, miseInstalls, stepLines, withChannel, world } from "./helpers/install-world.mjs";
+import { awEnvironment, consentFacts, gettingStartedSkill, handoff, parseTools, PROMPT_FILE, renderPrompt } from "../lib/install.mjs";
+import { ALL, deployments, found, GH_SCOPES, harnessRun, INSTALLER, keyMoved, miseInstalls, signedIn, stepLines, withChannel, world } from "./helpers/install-world.mjs";
 import { repo, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
 const BOOTSTRAP = ["oats onboard", "oats spawn", "aweb setup", "harness trust"];
@@ -159,7 +159,7 @@ test("bad arguments are refused before anything runs", (t) => {
 // ---------------------------------------------------------------------------
 // --now
 
-test("--now with everything there: six steps, each found and used, then the onboarding agent with the prompt as one argv element", (t) => {
+test("--now with everything there: eight steps, each found and used, then the onboarding agent with the prompt as one argv element", (t) => {
   const w = world(t);
   ALL(w);
   withChannel(w);
@@ -167,12 +167,14 @@ test("--now with everything there: six steps, each found and used, then the onbo
   const r = w.run(["--now", "--harness", "claude"]);
   assert.equal(r.status, 0, r.out);
   assert.deepEqual(stepLines(r.stdout), [
-    "omarchy-install-oats: step 1/6: the harness your agents run on",
-    "omarchy-install-oats: step 2/6: node, claude and tmux",
-    "omarchy-install-oats: step 3/6: aw, the aweb CLI",
-    "omarchy-install-oats: step 4/6: the OATS CLI",
-    "omarchy-install-oats: step 5/6: Claude's aweb channel plugin",
-    "omarchy-install-oats: step 6/6: the onboarding agent, in ~/Work",
+    "omarchy-install-oats: step 1/8: the harness your agents run on",
+    "omarchy-install-oats: step 2/8: node, claude and tmux",
+    "omarchy-install-oats: step 3/8: aw, the aweb CLI",
+    "omarchy-install-oats: step 4/8: the OATS CLI",
+    "omarchy-install-oats: step 5/8: Claude's aweb channel plugin",
+    "omarchy-install-oats: step 6/8: GitHub",
+    "omarchy-install-oats: step 7/8: the agent key",
+    "omarchy-install-oats: step 8/8: the onboarding agent, in ~/Work",
   ]);
   for (const line of ["found node 26.8.2 (mise): using it", "found claude 2.1.308 (local-bin): using it", "found tmux 3.5a (other): using it", "found aw 1.36.47 (npm-global): using it", "found oats 0.67.1 (npm-global): using it", "found the awebai-marketplace marketplace: using it", "found aweb-channel@awebai-marketplace: using it"]) {
     assert.ok(r.stdout.includes(`omarchy-install-oats: ${line}\n`), line);
@@ -185,7 +187,7 @@ test("--now with everything there: six steps, each found and used, then the onbo
   assert.deepEqual(h.argv.slice(0, 5), ["--permission-mode", "auto", "--dangerously-load-development-channels", "plugin:aweb-channel@awebai-marketplace", "--"]);
   const prompt = h.argv[5];
   const list = found(w);
-  assert.equal(prompt, renderPrompt({ skill: list.gettingStartedSkill, hostname: hostname(), harness: "claude", pluginDir: repo, pluginVersion: list.plugin.version, foundList: join(w.home, ".local", "state", "oats-omarchy", "found.json") }));
+  assert.equal(prompt, renderPrompt({ skill: list.gettingStartedSkill, hostname: hostname(), harness: "claude", pluginDir: repo, pluginVersion: list.plugin.version, foundList: join(w.home, ".local", "state", "oats-omarchy", "found.json"), ...consentFacts({ githubLogin: "octo-person", githubScopes: GH_SCOPES, agentKey: "moved", pluginDir: repo }) }));
   for (const name of BOOTSTRAP) assert.ok(!prompt.includes(name), name);
   assert.deepEqual(list.deployments, [
     { dir: a, name: "merak", state: "ok", steward: true },
@@ -202,10 +204,13 @@ test("--now installs what is missing with mise, says so, and the found-list says
   miseInstalls(w, "pi", "pi", "0.40.1");
   miseInstalls(w, "aw", "npm:@awebai/aw", "1.36.47");
   miseInstalls(w, "oats", "npm:@awebai/oats", "0.67.1");
-  const r = w.run(["--now", "--harness", "pi"]);
+  signedIn(w);
+  // Without node, setup has never run here: the key is on the screen.
+  const { installer } = pluginCopy(w);
+  const r = w.run(["--now", "--harness", "pi"], { installer, input: "y\n" });
   assert.equal(r.status, 0, r.out);
   assert.deepEqual(w.log("mise.log").split("--\n").filter((x) => x.startsWith("use\n")).map((x) => x.split("\n")[2]), ["node@lts", "pi", "npm:@awebai/aw", "npm:@awebai/oats"]);
-  for (const line of ["installing node with mise (mise use -g node@lts)", "installed node 24.3.0 (mise)", "installed pi 0.40.1 (mise)", "installed aw 1.36.47 (mise)", "installed oats 0.67.1 (mise)", "step 5/6: skipped: the aweb channel plugin is for claude, and pi needs none"]) {
+  for (const line of ["installing node with mise (mise use -g node@lts)", "installed node 24.3.0 (mise)", "installed pi 0.40.1 (mise)", "installed aw 1.36.47 (mise)", "installed oats 0.67.1 (mise)", "step 5/8: skipped: the aweb channel plugin is for claude, and pi needs none"]) {
     assert.ok(r.stdout.includes(`omarchy-install-oats: ${line}\n`), line);
   }
   assert.equal(w.log("wrapper.log"), "", "Omarchy's wrapper never ran");
@@ -301,20 +306,186 @@ test("--now run again skips every step that is done and still starts the onboard
   assert.ok(existsSync(join(w.root, "harness.json")));
 });
 
-test("--now asks for the harness, offering Omarchy's default agent first; Enter takes it", (t) => {
+test("--now takes Omarchy's default agent as the harness without asking; it asks only when that is none of the three, claude first", (t) => {
   const w = world(t);
   ALL(w, { harness: "codex" });
   w.setDefaultAgent("codex");
-  const r = w.run(["--now"], { input: "\n" });
+  const r = w.run(["--now"]);
   assert.equal(r.status, 0, r.out);
-  assert.match(r.stdout, /Which harness should your agents run on\? \[codex\/claude\/pi\] omarchy-install-oats: using codex\n/);
+  assert.ok(r.stdout.includes("omarchy-install-oats: using codex (Omarchy's default agent)\n"), r.stdout);
+  assert.doesNotMatch(r.stdout, /Which harness/);
   assert.deepEqual(harnessRun(w).argv.slice(0, 2), ["--approve-for-me", "--"]);
   const w2 = world(t);
   ALL(w2, { harness: "pi" });
   w2.setDefaultAgent("opencode");
   const r2 = w2.run(["--now"], { input: "pi\n" });
-  assert.match(r2.stdout, /\[claude\/codex\/pi\] /, "a default agent outside the three: claude first");
+  assert.match(r2.stdout, /Which harness should your agents run on\? \[claude\/codex\/pi\] /, "a default agent outside the three: asked, claude first");
   assert.equal(r2.status, 0, r2.out);
+});
+
+// ---------------------------------------------------------------------------
+// The consent screen (awebai/oats-omarchy#27): every act that is the
+// person's, on one screen at the start, before anything is installed.
+
+// A copy of the plugin whose bin/setup.mjs is a stand-in: it logs its argv
+// and answers `answer` as setup --json does, so the installer's agent-key
+// act is seen without a real setup on this machine (setup's own
+// --steward-pending is test/agent-key.test.mjs's).
+function pluginCopy(w, answer = { ok: true, schemaVersion: 1, result: { parts: [{ part: "agent-key", status: "applied", paths: [] }] } }) {
+  const dir = join(w.root, "plugins", "ai.aweb.oats");
+  cpSync(repo, dir, { recursive: true, filter: (src) => !/[/\\](\.git|node_modules)$/.test(src) });
+  writeFileSync(join(dir, "bin", "setup.mjs"), `import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(join(w.root, "setup.log"))}, JSON.stringify(process.argv.slice(2)) + "\\n");
+process.stdout.write(${JSON.stringify(JSON.stringify(answer))} + "\\n");
+`);
+  return { dir, installer: join(dir, "bin", "omarchy-install-oats") };
+}
+// Nothing done yet: gh not signed in, the key with Omarchy.
+function nothingDone(w) {
+  ALL(w);
+  withChannel(w);
+  signedIn(w, { scopes: null });
+  rmSync(join(w.home, ".local", "state", "oats-omarchy", "state.json"));
+}
+const setupRuns = (w) => w.log("setup.log").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+const ghCalls = (w) => w.log("gh.log").split("--\n").filter(Boolean).map((c) => c.trim().split("\n"));
+const SCREEN_END = "Make these changes? [y/N] ";
+
+test("one consent screen before anything is installed: each act with why, what and its undo on a line of its own; [y/N]", (t) => {
+  const w = world(t);
+  nothingDone(w);
+  const { dir, installer } = pluginCopy(w);
+  const r = w.run(["--now", "--harness", "claude"], { installer, input: "\n" });
+  const screen = r.stdout.slice(r.stdout.indexOf("OATS for this machine"), r.stdout.indexOf(SCREEN_END) + SCREEN_END.length);
+  assert.equal(screen, `OATS for this machine
+
+To set up OATS, these changes are made as you, in this terminal. You answer once:
+nothing asks you again later, and no API keys are needed.
+
+1. Sign in to GitHub, once
+   Why:  your agents keep their work in your GitHub repositories and sign their commits.
+   What: one browser approval (GitHub's device flow) for gh, with every scope
+         onboarding needs: repo, read:org, gist, admin:ssh_signing_key, user:email.
+         Git then signs in to github.com through gh.
+   Undo:
+     gh auth logout --hostname github.com
+
+2. The agent key opens your steward
+   Why:  one key, SUPER + SHIFT + CTRL + A, opens the agent that looks after this machine.
+   What: Omarchy's "Agent" binding on that key moves to OATS (lines in
+         ~/.config/hypr/bindings.lua and a launcher in ~/.local/bin).
+   Undo:
+     ${dir}/setup --apply --only agent-key --agent-key omarchy
+
+${SCREEN_END}`);
+  assert.ok(r.stdout.indexOf("OATS for this machine") > r.stdout.indexOf("step 1/8"), "after the harness is known");
+  assert.ok(!r.stdout.includes("step 2/8"), "and before any tool is looked at");
+});
+
+for (const [name, input] of [["Enter", "\n"], ["n", "n\n"], ["no answer", ""], ["anything but y", "sure\n"]]) {
+  test(`the consent screen answered with ${name}: nothing was changed, nothing installed, no agent started`, (t) => {
+    const w = world(t);
+    nothingDone(w);
+    w.put("tmux", "other", "3.5a");
+    const { installer } = pluginCopy(w);
+    const r = w.run(["--now", "--harness", "claude"], { installer, input });
+    assert.equal(r.status, 1, r.out);
+    assert.ok(r.stdout.endsWith(`${SCREEN_END}omarchy-install-oats: Nothing was changed. Run omarchy-install-oats --now again when you're ready.\n`), r.stdout);
+    assert.equal(w.log("mise.log").includes("use"), false);
+    assert.deepEqual(ghCalls(w).filter((c) => c[1] !== "status"), [], "no sign-in");
+    assert.deepEqual(setupRuns(w), [], "the key is not moved");
+    assert.equal(existsSync(join(w.root, "harness.json")), false);
+  });
+}
+
+test("the consent screen answered y: gh signs in with every scope, with no terminal question of its own, git uses it, the key moves before the steward exists, then onboarding", (t) => {
+  const w = world(t);
+  nothingDone(w);
+  const { installer } = pluginCopy(w);
+  const r = w.run(["--now", "--harness", "claude"], { installer, input: "y\n" });
+  assert.equal(r.status, 0, r.out);
+  // The answer's newline is the terminal's echo: here the next line follows the prompt.
+  assert.deepEqual(stepLines(r.stdout.replace(SCREEN_END, `${SCREEN_END}\n`)), [
+    "omarchy-install-oats: step 1/8: the harness your agents run on",
+    "omarchy-install-oats: step 2/8: node, claude, tmux and gh",
+    "omarchy-install-oats: step 3/8: aw, the aweb CLI",
+    "omarchy-install-oats: step 4/8: the OATS CLI",
+    "omarchy-install-oats: step 5/8: Claude's aweb channel plugin",
+    "omarchy-install-oats: step 6/8: GitHub",
+    "omarchy-install-oats: step 7/8: the agent key",
+    "omarchy-install-oats: step 8/8: the onboarding agent, in ~/Work",
+  ]);
+  assert.deepEqual(ghCalls(w).filter((c) => c[1] !== "status"), [
+    ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web", "--scopes", GH_SCOPES.join(","), "stdin=none"],
+    ["auth", "setup-git", "--hostname", "github.com", "stdin=none"],
+  ]);
+  assert.equal(w.log("xdg-open.log"), "https://github.com/login/device\n--\n", "the browser opens at the device page");
+  assert.ok(r.stdout.includes("omarchy-install-oats: approve this machine in your browser, at https://github.com/login/device, with the code gh shows below\n"), r.stdout);
+  assert.ok(r.stdout.includes("omarchy-install-oats: signed in to GitHub as octo-person\n"));
+  assert.deepEqual(setupRuns(w), [["--apply", "--only", "agent-key", "--agent-key", "oats", "--steward-pending", "--yes", "--json"]]);
+  assert.ok(r.stdout.includes("omarchy-install-oats: the agent key opens the steward (SUPER + SHIFT + CTRL + A)\n"));
+  assert.deepEqual(found(w).github, { login: "octo-person", scopes: GH_SCOPES });
+  const prompt = harnessRun(w).argv.at(-1);
+  assert.ok(prompt.includes("gh is signed in to GitHub as octo-person with every scope onboarding needs"), prompt);
+  assert.ok(prompt.includes("The agent key, SUPER + SHIFT + CTRL + A, already opens the steward"), prompt);
+});
+
+test("signed in but short of scopes: the screen says which, and one refresh adds only those", (t) => {
+  const w = world(t);
+  nothingDone(w);
+  signedIn(w, { scopes: ["gist", "read:org", "repo"] });
+  keyMoved(w);
+  const { installer } = pluginCopy(w);
+  const r = w.run(["--now", "--harness", "claude"], { installer, input: "y\n" });
+  assert.equal(r.status, 0, r.out);
+  assert.ok(r.stdout.includes(`   What: gh is signed in as octo-person; one browser approval (GitHub's device flow)
+         adds the scopes it lacks: admin:ssh_signing_key, user:email.
+`), r.stdout);
+  assert.ok(!r.stdout.includes("2. The agent key"), "the key already opens OATS: left off");
+  assert.deepEqual(ghCalls(w).filter((c) => c[1] !== "status").map((c) => c.slice(0, 6)), [
+    ["auth", "refresh", "--hostname", "github.com", "--scopes", "admin:ssh_signing_key,user:email"],
+    ["auth", "setup-git", "--hostname", "github.com", "stdin=none"],
+  ]);
+  assert.deepEqual(setupRuns(w), [], "nothing to do for the key");
+  assert.deepEqual(found(w).github.scopes, ["gist", "read:org", "repo", "admin:ssh_signing_key", "user:email"]);
+});
+
+test("with every act done already there is no screen, and steps 6 and 7 say so", (t) => {
+  const w = world(t);
+  ALL(w);
+  withChannel(w);
+  const { installer } = pluginCopy(w);
+  const r = w.run(["--now", "--harness", "claude"], { installer });
+  assert.equal(r.status, 0, r.out);
+  assert.ok(!r.stdout.includes("OATS for this machine"));
+  assert.ok(r.stdout.includes("omarchy-install-oats: found gh signed in to GitHub as octo-person with every scope onboarding needs: using it\n"), r.stdout);
+  assert.ok(r.stdout.includes("omarchy-install-oats: the agent key already opens the steward\n"));
+  assert.deepEqual(setupRuns(w), []);
+});
+
+test("a sign-in that fails stops at step 6, before the key moves or the agent starts", (t) => {
+  const w = world(t);
+  nothingDone(w);
+  writeFileSync(join(w.root, "gh", "fail"), "");
+  const { installer } = pluginCopy(w);
+  const r = w.run(["--now", "--harness", "claude"], { installer, input: "y\n" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^omarchy-install-oats: step 6 \(github\) failed: gh auth login exited with status 1$/m);
+  assert.deepEqual(setupRuns(w), []);
+  assert.equal(existsSync(join(w.root, "harness.json")), false);
+});
+
+test("a key setup leaves with Omarchy is said, and onboarding still starts, its prompt saying so", (t) => {
+  const w = world(t);
+  nothingDone(w);
+  signedIn(w);
+  const reason = "SUPER + SHIFT + CTRL + A is bound in your bindings.lua";
+  const { installer } = pluginCopy(w, { ok: true, schemaVersion: 1, result: { parts: [{ part: "agent-key", status: "skipped", reason, paths: [] }] } });
+  const r = w.run(["--now", "--harness", "claude"], { installer, input: "y\n" });
+  assert.equal(r.status, 0, r.out);
+  assert.ok(r.stdout.includes(`omarchy-install-oats: the agent key stays with Omarchy: ${reason}\n`), r.stdout);
+  const prompt = harnessRun(w).argv.at(-1);
+  assert.ok(prompt.includes(`The agent key stays with Omarchy: ${reason}.`), prompt);
 });
 
 test("--now with no terminal runs again in Omarchy's floating terminal, as omarchy-default-agent does", (t) => {
@@ -356,14 +527,15 @@ for (const [name, set, expect, after] of [
   ["step 5 (channel): the marketplace cannot be added", (w) => { ALL(w); writeFileSync(join(w.root, "claude", "fail-marketplace"), ""); }, /failed to clone awebai\/claude-plugins\nomarchy-install-oats: step 5 \(channel\) failed: claude plugin marketplace add awebai\/claude-plugins exited with status 1$/m],
   ["step 5 (channel): the plugin is installed and disabled, and stays so", (w) => { ALL(w); withChannel(w, { enabled: false }); }, /^omarchy-install-oats: step 5 \(channel\) failed: aweb-channel@awebai-marketplace it is installed and disabled for ~\/Work; enable it with: cd ~\/Work && claude plugin enable aweb-channel@awebai-marketplace$/m,
     (w) => assert.ok(!w.log("claude-plugin.log").includes("install\n"), "not installed again")],
-  ["step 6 (onboarding): a deployment whose status cannot be read is not a deployment without a steward", (w) => { ALL(w); withChannel(w); const { a } = deployments(w); writeFileSync(join(a, "status.mode"), "envelope:E_LOCK"); }, /^the deployment merak \(.*\/Agents\/merak\) could not be read: oats status --json: the kernel refused status \(E_LOCK\)\nomarchy-install-oats: step 6 \(onboarding\) failed: the found-list could not be written$/m,
+  ["step 8 (onboarding): a deployment whose status cannot be read is not a deployment without a steward", (w) => { ALL(w); withChannel(w); const { a } = deployments(w); writeFileSync(join(a, "status.mode"), "envelope:E_LOCK"); }, /^the deployment merak \(.*\/Agents\/merak\) could not be read: oats status --json: the kernel refused status \(E_LOCK\)\nomarchy-install-oats: step 8 \(onboarding\) failed: the found-list could not be written$/m,
     (w) => assert.ok(!existsSync(join(w.home, ".local", "state", "oats-omarchy", "found.json")), "no found-list")],
-  ["step 6 (onboarding): a deployment whose status is not JSON", (w) => { ALL(w); withChannel(w); const { b } = deployments(w); writeFileSync(join(b, "status.json"), "not json"); }, /^the deployment acme \(.*\/Work\/acme\) could not be read: oats status --json: .*JSON/m],
-  ["step 6 (onboarding): ~/Work is a file", (w) => { ALL(w); withChannel(w); writeFileSync(join(w.home, "Work"), "notes"); }, /^omarchy-install-oats: step 6 \(onboarding\) failed: .*\/Work is there and is not a directory$/m],
+  ["step 8 (onboarding): a deployment whose status is not JSON", (w) => { ALL(w); withChannel(w); const { b } = deployments(w); writeFileSync(join(b, "status.json"), "not json"); }, /^the deployment acme \(.*\/Work\/acme\) could not be read: oats status --json: .*JSON/m],
+  ["step 8 (onboarding): ~/Work is a file", (w) => { ALL(w); withChannel(w); writeFileSync(join(w.home, "Work"), "notes"); }, /^omarchy-install-oats: step 8 \(onboarding\) failed: .*\/Work is there and is not a directory$/m],
 ]) test(`--now stops at the failing step with its reason: ${name}`, (t) => {
   const w = world(t);
   set(w);
-  const r = w.run(["--now", "--harness", "claude"]);
+  // A machine with an act still to do answers the consent screen y.
+  const r = w.run(["--now", "--harness", "claude"], { input: "y\n" });
   assert.equal(r.status, 1, r.out);
   assert.match(r.stderr, expect);
   assert.ok(!existsSync(join(w.root, "harness.json")), "no onboarding agent");
@@ -400,7 +572,8 @@ test("the found-list: the shape docs/found-list.md fixes, written 0600, with a d
   const path = join(w.home, ".local", "state", "oats-omarchy", "found.json");
   assert.equal(statSync(path).mode & 0o777, 0o600);
   const list = found(w);
-  assert.deepEqual(Object.keys(list), ["schemaVersion", "writtenAt", "machine", "harness", "plugin", "gettingStartedSkill", "tools", "awIdentity", "deployments"]);
+  assert.deepEqual(Object.keys(list), ["schemaVersion", "writtenAt", "machine", "harness", "plugin", "gettingStartedSkill", "tools", "github", "awIdentity", "deployments"]);
+  assert.deepEqual(list.github, { login: "octo-person", scopes: GH_SCOPES });
   assert.equal(list.schemaVersion, 1);
   assert.ok(!Number.isNaN(Date.parse(list.writtenAt)));
   assert.deepEqual(list.machine, { hostname: hostname(), platform: "omarchy", omarchyVersion: "4.0.4-1" });
@@ -421,7 +594,8 @@ test("the found-list: the shape docs/found-list.md fixes, written 0600, with a d
 test("the onboarding prompt names facts only: none of the bootstrap's commands, every placeholder filled", () => {
   const template = readFileSync(PROMPT_FILE, "utf8");
   for (const name of BOOTSTRAP) assert.ok(!template.includes(name), name);
-  const prompt = renderPrompt({ skill: "/s/SKILL.md", hostname: `it's "merak"; $(x)`, harness: "pi", pluginDir: "/p", pluginVersion: "0.7.0", foundList: "/f/found.json" });
+  const values = { skill: "/s/SKILL.md", hostname: `it's "merak"; $(x)`, harness: "pi", pluginDir: "/p", pluginVersion: "0.7.0", foundList: "/f/found.json" };
+  const prompt = renderPrompt({ ...values, ...consentFacts({ githubLogin: "octo-person", githubScopes: GH_SCOPES, agentKey: "moved", pluginDir: "/p" }) });
   assert.ok(prompt.includes(`Its hostname is it's "merak"; $(x).`), "a hostname with a quote, as it is");
   assert.ok(prompt.includes("/s/SKILL.md") && prompt.includes("/f/found.json") && prompt.includes("/p, version 0.7.0"));
   assert.ok(!/\{\{/.test(prompt));
@@ -430,14 +604,21 @@ test("the onboarding prompt names facts only: none of the bootstrap's commands, 
   // the agent key is the person's to move.
   assert.ok(prompt.includes("Never run the plugin's setup with --apply or --remove"));
   assert.ok(prompt.includes("/p/setup --plan and /p/setup --check"));
-  // The typed command first: the menu row exists only once setup has run.
-  assert.ok(prompt.includes("tell them to type /p/setup --apply --only agent-key in a terminal, or, once setup has added it, to choose Setup › Default Agent › OATS"));
-  // One sentence of why goes in front of the command (awebai/oats-omarchy#26).
-  const why = prompt.indexOf("tell them in one sentence why: the agent key, SUPER + SHIFT + CTRL + A, becomes one key that opens the agent that looks after this machine");
-  assert.ok(why >= 0 && why < prompt.indexOf("tell them to type /p/setup --apply --only agent-key"), prompt);
+  // What the installer did in the person's terminal, stated as facts.
+  assert.ok(prompt.includes("gh is signed in to GitHub as octo-person with every scope onboarding needs (repo, read:org, gist, admin:ssh_signing_key, user:email)"), prompt);
+  assert.ok(prompt.includes("The agent key, SUPER + SHIFT + CTRL + A, already opens the steward"), prompt);
   // A way to try it that works on Omarchy's Lua Hyprland, where `hyprctl dispatch exec` is a Lua error.
-  assert.ok(prompt.includes("To try it, they press the key or run setsid ~/.local/bin/omarchy-launch-oats in a terminal; never hyprctl dispatch exec"));
+  assert.ok(prompt.includes("the person presses it or runs setsid ~/.local/bin/omarchy-launch-oats in a terminal; never hyprctl dispatch exec"), prompt);
   assert.doesNotMatch(prompt, /consent/);
+  // A key setup left with Omarchy: the person's own act, the typed command
+  // first (the menu row exists only once setup has run).
+  const kept = renderPrompt({ ...values, ...consentFacts({ githubLogin: "octo-person", githubScopes: GH_SCOPES, agentKey: "SUPER + SHIFT + CTRL + A is bound in your bindings.lua", pluginDir: "/p" }) });
+  assert.ok(kept.includes("The agent key stays with Omarchy: SUPER + SHIFT + CTRL + A is bound in your bindings.lua."), kept);
+  assert.ok(kept.includes("tell them to type /p/setup --apply --only agent-key in a terminal, or, once setup has added it, to choose Setup › Default Agent › OATS"));
+  // One sentence of why goes in front of the command (awebai/oats-omarchy#26).
+  const why = kept.indexOf("tell them in one sentence why: the agent key, SUPER + SHIFT + CTRL + A, becomes one key that opens the agent that looks after this machine");
+  assert.ok(why >= 0 && why < kept.indexOf("tell them to type /p/setup --apply --only agent-key"), kept);
+  assert.doesNotMatch(kept, /consent/);
 });
 
 test("handoff: a hostname with a quote reaches the found-list and the prompt as it is", async (t) => {

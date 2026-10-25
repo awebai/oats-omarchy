@@ -10,6 +10,12 @@
 # workspace, its identities and the steward are that agent's, never this
 # script's.
 #
+# The person's own acts come first, on one consent screen (consent): the
+# GitHub sign-in and the agent key, each with why, what and how to undo it,
+# and one [y/N]. An agent cannot do them (Claude's auto mode refuses them),
+# so --now does them as the person, in this terminal, once they say y. An act
+# already done is left off the screen, and with none left there is no screen.
+#
 # Found first: a tool already on PATH at or above its minimum is used as it
 # is, never replaced and never shadowed by a second copy (a `mise use -g`
 # in front of the person's own install). Only what is missing is installed:
@@ -27,7 +33,13 @@ NAME=omarchy-install-oats
 NODE_MIN=22
 AW_MIN=1.36.33
 OATS_MIN=0.67.1
-STEPS=6
+# `gh auth status --json` (cli/cli v2.81.0) is how the sign-in is read.
+GH_MIN=2.81.0
+# Every scope onboarding needs: gh's defaults, and those OATS's Git setup
+# uses to sign commits (awebai/oats#1478).
+GH_SCOPES=repo,read:org,gist,admin:ssh_signing_key,user:email
+GH_DEVICE=https://github.com/login/device
+STEPS=8
 CHANNEL=aweb-channel@awebai-marketplace
 MARKETPLACE=awebai-marketplace
 MARKETPLACE_SOURCE=awebai/claude-plugins
@@ -108,6 +120,7 @@ spec() {
     claude) T_NPM=@anthropic-ai/claude-code T_MISE=claude ;;
     codex) T_NPM=@openai/codex T_MISE=codex ;;
     pi) T_MISE=pi ;;
+    gh) T_MISE=gh T_PAC=github-cli T_MIN=$GH_MIN ;;
   esac
 }
 
@@ -311,6 +324,7 @@ record() {
     oats) REC_oats=$rec ;;
     harness) REC_harness=$rec ;;
     plugin) REC_plugin=$rec ;;
+    gh) REC_gh=$rec ;;
   esac
 }
 
@@ -383,7 +397,10 @@ choose_harness() {
     refuse "--now needs --harness claude|codex|pi without a terminal to ask in"
   fi
   default=$(omarchy-default-agent 2>/dev/null) || default=
-  case $default in claude | codex | pi) ;; *) default=claude ;; esac
+  case $default in
+    claude | codex | pi) harness=$default; say "using $harness (Omarchy's default agent)"; return 0 ;;
+    *) default=claude ;;
+  esac
   others=
   for h in claude codex pi; do [ "$h" = "$default" ] || others=$others/$h; done
   printf 'Which harness should your agents run on? [%s%s] ' "$default" "$others"
@@ -421,6 +438,125 @@ channel() {
   esac
 }
 
+# GitHub as gh has it: GH_LOGIN (empty when not signed in), GH_HAVE (the
+# token's scopes, comma-separated) and GH_MISSING (those of GH_SCOPES it
+# lacks). gh's own --jq picks the active github.com account's line, so this
+# needs no node.
+github_state() {
+  GH_LOGIN='' GH_HAVE='' GH_MISSING=$GH_SCOPES
+  detect gh
+  [ "$T_STATE" = found ] || return 0
+  line=$("$T_CMD" auth status --hostname github.com --active --json hosts \
+    --jq '.hosts["github.com"][]? | select(.state == "success") | .login + " " + .scopes' 2>/dev/null | head -n 1)
+  [ -n "$line" ] || return 0
+  case $line in
+    *" "*) GH_LOGIN=${line%% *} GH_HAVE=$(printf '%s' "${line#* }" | tr -d ' ') ;;
+    *) GH_LOGIN=$line ;;
+  esac
+  GH_MISSING=
+  for s in $(printf '%s' "$GH_SCOPES" | tr ',' ' '); do
+    case ",$GH_HAVE," in
+      *",$s,"*) ;;
+      *) GH_MISSING=${GH_MISSING:+$GH_MISSING,}$s ;;
+    esac
+  done
+}
+
+# Whether the agent key already opens OATS (bin/install.mjs agent-key). It
+# needs node; without node setup has never run, so it does not.
+key_moved() {
+  detect node
+  [ "$T_STATE" = found ] && [ "$("$T_CMD" "$plugin/bin/install.mjs" agent-key 2>/dev/null)" = oats ]
+}
+
+# The consent screen: every act still to do, then one [y/N], which only an
+# explicit y answers. Anything else changes nothing. → WANT_GITHUB and
+# WANT_KEY, yes or no.
+consent() {
+  github_state
+  WANT_GITHUB=no WANT_KEY=no
+  [ -n "$GH_MISSING" ] && WANT_GITHUB=yes
+  key_moved || WANT_KEY=yes
+  [ "$WANT_GITHUB" = yes ] || [ "$WANT_KEY" = yes ] || return 0
+  n=0
+  printf '\n%s\n\n%s\n%s\n' "OATS for this machine" \
+    "To set up OATS, these changes are made as you, in this terminal. You answer once:" \
+    "nothing asks you again later, and no API keys are needed."
+  if [ "$WANT_GITHUB" = yes ]; then
+    n=$((n + 1))
+    printf '\n%s. Sign in to GitHub, once\n' "$n"
+    printf '   Why:  your agents keep their work in your GitHub repositories and sign their commits.\n'
+    if [ -n "$GH_LOGIN" ]; then
+      printf "   What: gh is signed in as %s; one browser approval (GitHub's device flow)\n" "$GH_LOGIN"
+      printf '         adds the scopes it lacks: %s.\n' "$(printf '%s' "$GH_MISSING" | sed 's/,/, /g')"
+    else
+      printf "   What: one browser approval (GitHub's device flow) for gh, with every scope\n"
+      printf '         onboarding needs: %s.\n' "$(printf '%s' "$GH_SCOPES" | sed 's/,/, /g')"
+    fi
+    printf '         Git then signs in to github.com through gh.\n'
+    printf '   Undo:\n     gh auth logout --hostname github.com\n'
+  fi
+  if [ "$WANT_KEY" = yes ]; then
+    n=$((n + 1))
+    printf '\n%s. The agent key opens your steward\n' "$n"
+    printf '   Why:  one key, SUPER + SHIFT + CTRL + A, opens the agent that looks after this machine.\n'
+    printf "   What: Omarchy's \"Agent\" binding on that key moves to OATS (lines in\n"
+    printf '         ~/.config/hypr/bindings.lua and a launcher in ~/.local/bin).\n'
+    printf '   Undo:\n     %s/setup --apply --only agent-key --agent-key omarchy\n' "$plugin"
+  fi
+  printf '\nMake these changes? [y/N] '
+  read -r answer || answer=
+  case $answer in
+    y | Y | yes | Yes | YES) ;;
+    *) say "Nothing was changed. Run $NAME --now again when you're ready."; exit 1 ;;
+  esac
+}
+
+# Step 6: gh signed in to github.com with every scope, and git using it. gh
+# runs with no terminal on stdin, so it asks nothing of its own (no git
+# protocol, no "Authenticate Git", no Enter): it prints the one-time code
+# and waits for the approval, and this opens the browser at the device page.
+github() {
+  if [ "$WANT_GITHUB" = no ]; then
+    say "found gh signed in to GitHub as $GH_LOGIN with every scope onboarding needs: using it"
+    return 0
+  fi
+  gh_cmd=$1
+  if command -v xdg-open >/dev/null 2>&1; then xdg-open "$GH_DEVICE" >/dev/null 2>&1 || :; fi
+  say "approve this machine in your browser, at $GH_DEVICE, with the code gh shows below"
+  if [ -n "$GH_LOGIN" ]; then
+    "$gh_cmd" auth refresh --hostname github.com --scopes "$GH_MISSING" < /dev/null || fail "gh auth refresh exited with status $?"
+  else
+    "$gh_cmd" auth login --hostname github.com --git-protocol https --web --scopes "$GH_SCOPES" < /dev/null || fail "gh auth login exited with status $?"
+  fi
+  "$gh_cmd" auth setup-git --hostname github.com < /dev/null || fail "gh auth setup-git exited with status $?"
+  github_state
+  [ -n "$GH_LOGIN" ] || fail "gh is still not signed in to github.com"
+  [ -z "$GH_MISSING" ] || fail "gh still lacks the scopes $GH_MISSING"
+  say "signed in to GitHub as $GH_LOGIN"
+}
+
+# Step 7: the agent key to OATS, through the plugin's own setup, as the
+# person said y on the screen. The steward does not exist yet (onboarding
+# spawns it), hence --steward-pending. A key setup leaves with Omarchy (the
+# person's own binding of it, say) is said, and onboarding still starts.
+# → KEY_LINE, what the onboarding prompt says about the key.
+agent_key() {
+  if [ "$WANT_KEY" = no ]; then
+    say "the agent key already opens the steward"
+    KEY_LINE=moved
+    return 0
+  fi
+  KEY_LINE=$("$1" "$plugin/bin/setup.mjs" --apply --only agent-key --agent-key oats --steward-pending --yes --json 2>&1 |
+    "$1" "$plugin/bin/install.mjs" agent-key-result) || :
+  [ -n "$KEY_LINE" ] || KEY_LINE="setup gave no answer"
+  if [ "$KEY_LINE" = moved ]; then
+    say "the agent key opens the steward (SUPER + SHIFT + CTRL + A)"
+  else
+    say "the agent key stays with Omarchy: $KEY_LINE"
+  fi
+}
+
 # The onboarding agent, inline in this terminal, with the prompt as one argv
 # element. These are the unattended flags of Omarchy's own agent launcher
 # (/usr/share/omarchy/bin/omarchy-agent); claude also loads the aweb channel
@@ -439,17 +575,20 @@ now() {
     refuse "--now needs --harness claude|codex|pi without a terminal to ask in"
   fi
   in_terminal
-  REC_node='' REC_tmux='' REC_aw='' REC_oats='' REC_harness='' REC_plugin=''
+  REC_node='' REC_tmux='' REC_aw='' REC_oats='' REC_harness='' REC_plugin='' REC_gh=''
 
   step 1 harness "the harness your agents run on"
   choose_harness
+  consent
 
-  step 2 tools "node, $harness and tmux"
+  if [ "$WANT_GITHUB" = yes ]; then step 2 tools "node, $harness, tmux and gh"; else step 2 tools "node, $harness and tmux"; fi
   ensure node node
   node_cmd=$T_CMD
   ensure "$harness" harness
   harness_cmd=$T_CMD
   ensure tmux tmux
+  gh_cmd=
+  if [ "$WANT_GITHUB" = yes ]; then ensure gh gh; gh_cmd=$T_CMD; fi
 
   step 3 aw "aw, the aweb CLI"
   ensure aw aw
@@ -466,16 +605,23 @@ now() {
     step 5 channel "skipped: the aweb channel plugin is for claude, and $harness needs none"
   fi
 
-  step 6 onboarding "the onboarding agent, in ~/Work"
+  step 6 github "GitHub"
+  github "$gh_cmd"
+
+  step 7 agent-key "the agent key"
+  agent_key "$node_cmd"
+
+  step 8 onboarding "the onboarding agent, in ~/Work"
   work=$HOME/Work
   if [ -e "$work" ] && [ ! -d "$work" ]; then fail "$work is there and is not a directory"; fi
   mkdir -p "$work" || fail "mkdir $work exited with status $?"
   tools=
-  for r in "$REC_node" "$REC_tmux" "$REC_aw" "$REC_oats" "$REC_harness" "$REC_plugin"; do
+  for r in "$REC_node" "$REC_tmux" "$REC_aw" "$REC_oats" "$REC_harness" "$REC_plugin" "$REC_gh"; do
     [ -n "$r" ] && tools="$tools$r
 "
   done
-  prompt=$(printf '%s' "$tools" | "$node_cmd" "$plugin/bin/install.mjs" handoff --harness "$harness" --oats "$oats_path" --aw "$aw_cmd") ||
+  prompt=$(printf '%s' "$tools" | "$node_cmd" "$plugin/bin/install.mjs" handoff --harness "$harness" --oats "$oats_path" --aw "$aw_cmd" \
+    --github-login "$GH_LOGIN" --github-scopes "$GH_HAVE" --agent-key "$KEY_LINE") ||
     fail "the found-list could not be written"
   cd "$work" || fail "cd $work exited with status $?"
   say "starting $harness in $work"

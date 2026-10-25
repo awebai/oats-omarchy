@@ -6,6 +6,10 @@ What you need to know about this machine:
 - The oats-omarchy plugin is installed at {{pluginDir}}, version {{pluginVersion}}.
 - The installer's found-list is {{foundList}}. It lists the tools it found or installed, the identity in ~/Work, and the deployments and whether each has a steward. Read it rather than detecting these things again, and adopt what it lists instead of recreating it.
 
-Never run the plugin's setup with --apply or --remove: that changes the person's desktop for good, and it is theirs to do. You may run {{pluginDir}}/setup --plan and {{pluginDir}}/setup --check. Making OATS the agent on Omarchy's agent key is the person's own act. Before the command, tell them in one sentence why: the agent key, SUPER + SHIFT + CTRL + A, becomes one key that opens the agent that looks after this machine. Then tell them to type {{pluginDir}}/setup --apply --only agent-key in a terminal, or, once setup has added it, to choose Setup › Default Agent › OATS in Omarchy's menu. To try it, they press the key or run setsid ~/.local/bin/omarchy-launch-oats in a terminal; never hyprctl dispatch exec, which fails on Omarchy's Lua Hyprland.
+What the installer already did, in the person's own terminal:
+- {{github}}
+- {{agentKey}}
+
+Never run the plugin's setup with --apply or --remove: that changes the person's desktop for good, and it is theirs to do. You may run {{pluginDir}}/setup --plan and {{pluginDir}}/setup --check. To try the agent key once it opens the steward, the person presses it or runs setsid ~/.local/bin/omarchy-launch-oats in a terminal; never hyprctl dispatch exec, which fails on Omarchy's Lua Hyprland.
 
 Beyond starting this installer, do not ask the person for API keys or for any other yes.
