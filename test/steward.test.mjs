@@ -7,7 +7,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import { STATE_SCHEMA } from "../lib/state.mjs";
-import { findSteward, STEWARD_AGENT, STEWARD_KEY, stewardsIn } from "../lib/steward.mjs";
+import { findSteward, stewardsIn } from "../lib/steward.mjs";
+import { STEWARD_AGENT, STEWARD_KEY } from "../lib/steward-agent.mjs";
 import { ALL_FEATURES, fakeKernel, gone } from "./helpers/fake-kernel.mjs";
 import { fixture, sandbox } from "./helpers/sandbox.mjs";
 

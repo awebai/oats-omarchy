@@ -69,7 +69,7 @@ test("plugin.json: its path as setup finds it, and only what setup writes is rea
   assert.equal(W.pluginFilePath("/h", "/x/state"), "/x/state/oats-omarchy/plugin.json");
   assert.equal(W.pluginFilePath("/h", "relative"), "/h/.local/state/oats-omarchy/plugin.json");
   const good = { deployment: "/d", tui: ["t"], desktop: null, ui: "tui", waiting: ["n", "w"], attach: ["s", "--home"], setup: ["n", "s"] };
-  assert.deepEqual(W.parsePlugin(JSON.stringify(good)), good);
+  assert.deepEqual(W.parsePlugin(JSON.stringify(good)), { ...good, launcher: null });
   // The default UI: as setup chose it, when that one is set up; a file from
   // before 0.5.0 has none, and reads as the TUI, else the Desktop.
   const two = { ...good, desktop: ["d"] };
@@ -88,7 +88,7 @@ test("plugin.json: its path as setup finds it, and only what setup writes is rea
 test("the read: the rows waiting on you, or why it failed", () => {
   const rows = [{ instance: "a", home: "/h/a" }, { instance: "b", home: "/h/b" }];
   const two = W.parseWaiting(JSON.stringify({ ok: true, count: 2, rows }));
-  const groups = [{ title: "", rows: rows.map((r) => ({ ...r, label: r.instance, waitingOnYou: null })), unknown: [] }];
+  const groups = [{ title: "", rows: rows.map((r) => ({ ...r, steward: false, label: r.instance, waitingOnYou: null })), unknown: [] }];
   assert.deepEqual(two, { known: true, count: 2, rows, groups, note: "" });
   assert.deepEqual(W.parseWaiting(JSON.stringify({ ok: true, count: 0, rows: [] })), { known: true, count: 0, rows: [], groups: [], note: "" });
   const failed = W.parseWaiting(JSON.stringify({ ok: false, reason: "oats-lock.json is unreadable" }));
@@ -121,8 +121,8 @@ test("the popup's rows: every card of every group in order, with its group's tit
   });
   const read = W.parseWaiting(text);
   assert.deepEqual(W.popupRows(read), [
-    { group: "acme/one", label: "alpha", home: "/h/a", waitingOnYou: w },
-    { group: "acme/two", label: "beta", home: "/h/b", waitingOnYou: null },
+    { group: "acme/one", label: "alpha", home: "/h/a", steward: false, waitingOnYou: w },
+    { group: "acme/two", label: "beta", home: "/h/b", steward: false, waitingOnYou: null },
   ]);
   assert.deepEqual(W.popupNotes(read), ["three: unreadable"]);
   for (const nothing of [null, { known: false, reason: "x" }]) assert.deepEqual([W.popupRows(nothing), W.popupNotes(nothing)], [[], []]);
@@ -167,7 +167,7 @@ function world(t) {
   for (const name of ["omarchy-launch-or-focus-tui", "omarchy-launch-or-focus"]) exe(join(bin, name), logger(name));
   // As Omarchy 4.0.4's launcher does: its arguments are one bash command line.
   exe(join(bin, "omarchy-launch-floating-terminal-with-presentation"), `#!/bin/bash\ncmd="$*"\nexec bash -c "$cmd"\n`);
-  for (const name of ["shim", "node", "setup"]) exe(join(odd, name), logger(name));
+  for (const name of ["shim", "node", "setup", "omarchy-launch-oats"]) exe(join(odd, name), logger(name));
   // The installer beside setup: it logs, and --check answers ready (exit 0)
   // unless the test wrote another status to <dir>/check-status.
   mkdirSync(join(odd, "bin"));
@@ -180,6 +180,7 @@ function world(t) {
     waiting: [join(odd, "node"), join(odd, "waiting.mjs"), "--dir", join(odd, "deployment")],
     attach: [join(odd, "shim"), "session", "attach", "--detach-key", "C-\\", "--home"],
     setup: [join(odd, "node"), join(odd, "setup.mjs"), "--dir", join(odd, "deployment")],
+    launcher: [join(odd, "omarchy-launch-oats")],
   };
   // The bar's run: `bash -lc <line>`; -c here, so no profile of this machine is read.
   const run = (line) => {
@@ -217,12 +218,39 @@ test("the panel's TUI and Desktop run the argv setup recorded, word for word", (
 test("a waiting row opens its session in the floating terminal: the home reaches the kernel as one argument", (t) => {
   const w = world(t);
   const home = join(w.odd, "instances", "with space 'and' $(quotes)");
-  assert.deepEqual(w.run(W.attachCommand(w.plugin, home)), ["shim", "session", "attach", "--detach-key", "C-\\", "--home", home]);
+  assert.deepEqual(w.run(W.openCommand(w.plugin, { home, steward: false })), ["shim", "session", "attach", "--detach-key", "C-\\", "--home", home]);
   assert.equal(W.detachKey(w.plugin), true);
   const without = { ...w.plugin, attach: [join(w.odd, "shim"), "session", "attach", "--home"] };
-  assert.deepEqual(w.run(W.attachCommand(without, home)), ["shim", "session", "attach", "--home", home]);
+  assert.deepEqual(w.run(W.openCommand(without, { home, steward: false })), ["shim", "session", "attach", "--home", home]);
   assert.equal(W.detachKey(without), false, "no feature: no key, and no hint");
   assert.equal(W.detachHint(without), "");
+});
+
+test("the steward's card runs the launcher, which focuses its open window or opens it; without a launcher recorded, its session as any other", (t) => {
+  const w = world(t);
+  const home = join(w.odd, "instances", "steward");
+  assert.deepEqual(w.run(W.openCommand(w.plugin, { home, steward: true })), ["omarchy-launch-oats"], "no floating terminal, no second viewer");
+  assert.deepEqual(w.runArgv(W.openArgv(w.plugin, { home, steward: true })), ["omarchy-launch-oats"]);
+  const older = { ...w.plugin, launcher: null };
+  assert.deepEqual(w.run(W.openCommand(older, { home, steward: true })), ["shim", "session", "attach", "--detach-key", "C-\\", "--home", home]);
+  assert.deepEqual(w.runArgv(W.openArgv(older, { home, steward: true })), ["shim", "session", "attach", "--detach-key", "C-\\", "--home", home]);
+});
+
+test("plugin.json's launcher: an argv, or null; a file setup wrote without one reads as null, and a launcher that is not an argv is not setup's file", () => {
+  const plugin = { deployment: "/d", tui: ["t"], desktop: null, ui: "tui", waiting: ["n", "w"], attach: ["s", "--home"], setup: ["n", "s"], launcher: ["/l"] };
+  assert.deepEqual(W.parsePlugin(JSON.stringify(plugin)).launcher, ["/l"]);
+  assert.equal(W.parsePlugin(JSON.stringify({ ...plugin, launcher: null })).launcher, null);
+  const { launcher: _, ...before } = plugin;
+  assert.equal(W.parsePlugin(JSON.stringify(before)).launcher, null);
+  for (const bad of ["/l", [], [1], {}]) assert.equal(W.parsePlugin(JSON.stringify({ ...plugin, launcher: bad })), null, JSON.stringify(bad));
+});
+
+test("the steward mark reaches the panel's rows and the popup's, one or many deployments", () => {
+  const one = W.parseWaiting(JSON.stringify({ ok: true, count: 2, rows: [{ instance: "steward", home: "/h/s", waitingOnYou: null, steward: true }, { instance: "dev", home: "/h/d", waitingOnYou: null, steward: false }] }));
+  assert.deepEqual(one.groups[0].rows.map((x) => x.steward), [true, false]);
+  assert.deepEqual(W.popupRows(one).map((x) => [x.home, x.steward]), [["/h/s", true], ["/h/d", false]]);
+  const many = W.parseWaiting(JSON.stringify({ ok: true, count: 2, rows: [{ instance: "steward", home: "/h/s", waitingOnYou: null, steward: true, deployment: "/a", workspace: "w" }, { instance: "dev", home: "/h/d", waitingOnYou: null, deployment: "/b", workspace: "v" }], deployments: [{ path: "/a", name: "a", workspace: "w", ok: true }, { path: "/b", name: "b", workspace: "v", ok: true }] }));
+  assert.deepEqual(W.popupRows(many).map((x) => [x.home, x.steward]), [["/h/s", true], ["/h/d", false]], "a row without the mark (an older waiting.mjs) is not the steward's");
 });
 
 test("the hint names the detach key plugin.json records: Ctrl+\\ from setup now, Alt+O from a plugin.json setup 0.6.0 wrote", (t) => {
@@ -245,7 +273,7 @@ test("setup from the panel: --apply for the recorded deployment; before it has r
 test("the popup's commands run as argv: a session by its home, and setup", (t) => {
   const w = world(t);
   const home = join(w.odd, "instances", "with space 'and' $(quotes)");
-  assert.deepEqual(w.runArgv(W.attachArgv(w.plugin, home)), ["shim", "session", "attach", "--detach-key", "C-\\", "--home", home]);
+  assert.deepEqual(w.runArgv(W.openArgv(w.plugin, { home, steward: false })), ["shim", "session", "attach", "--detach-key", "C-\\", "--home", home]);
   assert.deepEqual(w.runArgv(W.setupArgv(null, join(w.odd, "setup"))), SETUP);
   w.ready(false);
   assert.deepEqual(w.runArgv(W.setupArgv(null, join(w.odd, "setup"))), INSTALL);

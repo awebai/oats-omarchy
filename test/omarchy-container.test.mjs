@@ -601,7 +601,7 @@ test("the bar panel's row opens the same session through the real floating termi
   const plugin = widget.parsePlugin(readFileSync(join(s.home, ".local/state/oats-omarchy/plugin.json"), "utf8"));
   assert.ok(plugin, "setup wrote what the widget reads");
   // The bar's run: bash -lc <line>.
-  const r = spawnSync("bash", ["-lc", widget.attachCommand(plugin, home)], { env: s.env, cwd: s.root, encoding: "utf8", timeout: 30_000 });
+  const r = spawnSync("bash", ["-lc", widget.openCommand(plugin, { home, steward: false })], { env: s.env, cwd: s.root, encoding: "utf8", timeout: 30_000 });
   assert.equal(r.status, 0, r.stderr);
   const log = join(s.root, "kernel.log");
   waitFor(log, 1);

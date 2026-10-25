@@ -48,6 +48,8 @@ function isArgv(value) {
 // when setup uses this computer's list of deployments. `ui` is the default
 // UI, "tui" or "desktop" (null when neither is set up); a file from before
 // 0.5.0 has none, and reads as the TUI, or the Desktop when only it is set up.
+// `launcher` is the argv the steward's card runs, null when the launcher is
+// not set up or the file has none.
 export function parsePlugin(text) {
   var p
   try { p = JSON.parse(String(text)) } catch (e) { return null }
@@ -55,8 +57,10 @@ export function parsePlugin(text) {
   if (!isArgv(p.waiting) || !isArgv(p.attach) || !isArgv(p.setup)) return null
   if (p.tui !== null && !isArgv(p.tui)) return null
   if (p.desktop !== null && !isArgv(p.desktop)) return null
+  var launcher = p.launcher === undefined ? null : p.launcher
+  if (launcher !== null && !isArgv(launcher)) return null
   var ui = p.ui === "desktop" && p.desktop ? "desktop" : p.ui === "tui" && p.tui ? "tui" : p.tui ? "tui" : p.desktop ? "desktop" : null
-  return { deployment: p.deployment, tui: p.tui, desktop: p.desktop, ui: ui, waiting: p.waiting, attach: p.attach, setup: p.setup }
+  return { deployment: p.deployment, tui: p.tui, desktop: p.desktop, ui: ui, waiting: p.waiting, attach: p.attach, setup: p.setup, launcher: launcher }
 }
 
 // The read when the panel opens: `waiting --json`, run as argv (no shell).
@@ -96,7 +100,7 @@ export function parseWaiting(text) {
 }
 
 // The panel's rows by workspace, in the list's order: [{ title, rows:
-// [{ instance, home, label, waitingOnYou }], unknown: [text] }]. A group is a workspace,
+// [{ instance, home, steward, label, waitingOnYou }], unknown: [text] }]. A group is a workspace,
 // or, for a deployment that could not be read (it has no workspace), that
 // deployment alone, by its path; its title is the workspace key or the
 // deployment's name. One deployment (or a read of one deployment, `listed`
@@ -104,7 +108,7 @@ export function parseWaiting(text) {
 // its deployment when its group has more than one, and its path when even
 // that would not tell two rows apart.
 export function groups(rows, listed) {
-  if (!listed) return rows.length ? [{ title: "", rows: rows.map(function(x) { return { instance: x.instance, home: x.home, label: x.instance, waitingOnYou: claim(x.waitingOnYou) } }), unknown: [] }] : []
+  if (!listed) return rows.length ? [{ title: "", rows: rows.map(function(x) { return { instance: x.instance, home: x.home, steward: x.steward === true, label: x.instance, waitingOnYou: claim(x.waitingOnYou) } }), unknown: [] }] : []
   var out = []
   var keyOf = function(d) { return d.ok && d.workspace ? "workspace " + d.workspace : "deployment " + d.path }
   var find = function(key) { for (var i = 0; i < out.length; i++) if (out[i].key === key) return out[i]; return null }
@@ -118,7 +122,7 @@ export function groups(rows, listed) {
   rows.forEach(function(x) {
     var d = listed.filter(function(y) { return y.path === x.deployment })[0]
     var g = d ? find(keyOf(d)) : null
-    if (g) g.rows.push({ instance: x.instance, home: x.home, name: d.name, path: d.path, waitingOnYou: claim(x.waitingOnYou) })
+    if (g) g.rows.push({ instance: x.instance, home: x.home, steward: x.steward === true, name: d.name, path: d.path, waitingOnYou: claim(x.waitingOnYou) })
   })
   var shown = out.filter(function(g) { return g.rows.length || g.unknown.length })
   return shown.map(function(g) {
@@ -127,7 +131,7 @@ export function groups(rows, listed) {
       title: shown.length > 1 ? g.title : "",
       rows: g.rows.map(function(x, i) {
         var clash = first.indexOf(first[i]) !== first.lastIndexOf(first[i])
-        return { instance: x.instance, home: x.home, label: clash ? x.instance + " (" + x.path + ")" : first[i], waitingOnYou: x.waitingOnYou }
+        return { instance: x.instance, home: x.home, steward: x.steward, label: clash ? x.instance + " (" + x.path + ")" : first[i], waitingOnYou: x.waitingOnYou }
       }),
       unknown: g.unknown,
     }
@@ -183,7 +187,7 @@ export function popupRows(waiting) {
   if (!waiting || !waiting.known) return []
   var out = []
   waiting.groups.forEach(function(g) {
-    g.rows.forEach(function(x) { out.push({ group: g.title, label: x.label, home: x.home, waitingOnYou: x.waitingOnYou }) })
+    g.rows.forEach(function(x) { out.push({ group: g.title, label: x.label, home: x.home, steward: x.steward, waitingOnYou: x.waitingOnYou }) })
   })
   return out
 }
@@ -238,9 +242,13 @@ export function desktopCommand(plugin) {
   return plugin && plugin.desktop ? "exec " + commandLine(plugin.desktop) : ""
 }
 
-// The session of a row waiting on you, in the floating terminal.
-export function attachCommand(plugin, home) {
-  return inTerminal(commandLine(plugin.attach.concat([home])))
+// What a row waiting on you opens: the steward's, the launcher, which
+// focuses the steward's window when it is open (no second viewer); any
+// other, and the steward's without a launcher recorded, its session in the
+// floating terminal.
+export function openCommand(plugin, row) {
+  if (row.steward && plugin.launcher) return "exec " + commandLine(plugin.launcher)
+  return inTerminal(commandLine(plugin.attach.concat([row.home])))
 }
 
 // The default UI's line: the TUI or the Desktop, as setup chose; "" when
@@ -251,9 +259,10 @@ export function defaultCommand(plugin) {
 }
 
 // The popup's commands, each an argv it runs with no shell (Omarchy's
-// Util.execArgv): a session in the floating terminal, and setup.
-export function attachArgv(plugin, home) {
-  return ["omarchy-launch-floating-terminal-with-presentation", commandLine(plugin.attach.concat([home]))]
+// Util.execArgv): what a row opens, as openCommand says, and setup.
+export function openArgv(plugin, row) {
+  if (row.steward && plugin.launcher) return plugin.launcher
+  return ["omarchy-launch-floating-terminal-with-presentation", commandLine(plugin.attach.concat([row.home]))]
 }
 
 // Whether the viewer the panel opens takes a detach key.

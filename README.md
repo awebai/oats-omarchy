@@ -463,11 +463,22 @@ then point at that clone, and the plan says so.
 
 `omarchy-launch-oats` opens this machine's OATS steward the way Omarchy's
 `omarchy-agent` opens the default coding agent. It is one window, through
-`omarchy-launch-tui --app-id=org.omarchy.agent`, so it shares the agent
-windows' class for Omarchy's window rules and themes. In that window it
-finds the steward, starts it when it is stopped, and attaches to its
+`omarchy-launch-tui --app-id=org.omarchy.agent.oats-steward`. In that window
+it finds the steward, starts it when it is stopped, and attaches to its
 session. `Ctrl+\` leaves the viewer, and the steward keeps running. The
 command is `bin/omarchy-launch-oats` in the plugin's directory.
+
+It launches or focuses. When the steward's window is already open, the
+command (the agent key, the bar's card for the steward) focuses that window
+and opens nothing else. Once it is closed, the next press opens it again.
+The window is found by its own app-id in `hyprctl clients -j`, never by its
+title. Other agent windows share the class `org.omarchy.agent`, and the
+title depends on your tmux configuration. The app-id is still one of
+Omarchy's `org.omarchy.*` terminal windows, so its terminal window rules
+apply. One thing does not: Omarchy's `omarchy-hyprland-focus-app` finds agent
+windows by the exact class `org.omarchy.agent` when you click a
+notification, so it does not find this window. The plugin's own way in,
+the bar's card for the steward, runs the launcher, which focuses it.
 
 It needs two things:
 
@@ -485,7 +496,9 @@ It needs two things:
 Flags:
 
 - **`--prompt <text>`** is your own turn in the steward's session, as if you
-  typed it. It is sent once the steward runs, and never twice. A steward
+  typed it. It is sent once the steward runs, and never twice. With the
+  steward's window already open, the window is focused and the result is a
+  notification. A steward
   that is waiting on you (a permission prompt or a question) gets nothing,
   since the Enter could answer it. The window says so, and you type it
   yourself. A steward in the middle of a turn gets it as typed input, and
@@ -505,7 +518,9 @@ What each failure says:
   - `omarchy-launch-tui is not on PATH: it opens the agent window`;
   - `omarchy-launch-tui: exited with status <n> before the window started`,
     after the launcher's own message;
-  - `omarchy-launch-tui: the window did not start within 30 s`.
+  - `omarchy-launch-tui: the window did not start within 30 s`;
+  - `the steward's window is open, but Hyprland did not focus it: <its
+    reply>`. No second window is opened.
 - **In the window,** one line naming the step, then Enter closes the window:
   - `finding the steward: no steward on this machine: spawn one with …`.
     Any deployment whose `oats status` failed is named. A steward in
@@ -525,6 +540,12 @@ What each failure says:
   - On success, `your prompt was sent to the steward`. When the OATS CLI
     could not see the prompt arrive, the line adds that it is not sent
     again.
+- **The prompt, with the steward's window already open,** the same lines
+  on stderr and in a notification, headed "OATS steward" when it was sent
+  and "Could not send your prompt to the OATS steward" otherwise. A steward
+  waiting on you gets `…: your prompt was not sent; type it in the steward's
+  window`, and a failure to find the steward names that step, ending `: your
+  prompt was not sent`.
 
 The plan and its progress are tracked in
 [awebai/oats#1311](https://github.com/awebai/oats/issues/1311).

@@ -311,7 +311,7 @@ Panel {
                       dim: root.dim
                       fontFamily: root.fontFamily
                       onActivated: {
-                        root.runLine(Widget.attachCommand(root.plugin, modelData.home))
+                        root.runLine(Widget.openCommand(root.plugin, modelData))
                         root.close()
                       }
                     }
