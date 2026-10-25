@@ -32,7 +32,7 @@ const HOST_TOOLS = ["sh", "bash", "cat", "echo", "printf", "mkdir", "head", "env
 
 // The kernel stand-in's `status --json` (run without --dir, as findSteward
 // runs it in each deployment) lists these instances of oats.machine's
-// steward agent (lib/steward.mjs STEWARD_AGENT): setup moves the agent key
+// steward agent (lib/steward-agent.mjs STEWARD_AGENT): setup moves the agent key
 // to OATS only when it finds exactly one.
 export function withStewards(s, names = ["steward"]) {
   const home = (name) => join(s.deployment, "agents", "oats-machine--steward", "instances", name);
