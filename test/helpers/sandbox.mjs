@@ -2,7 +2,7 @@
 // running the plugin's setup and waiting without touching the machine. Each fake models
 // the real tool's output and its refusals, not only its success.
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, symlinkSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, symlinkSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,24 @@ const HOST_TOOLS = ["sh", "bash", "cat", "echo", "printf", "mkdir", "head", "env
 export function withStewards(s, names = ["steward"]) {
   const home = (name) => join(s.deployment, "agents", "oats-machine--steward", "instances", name);
   writeFileSync(join(s.root, "status.json"), JSON.stringify({ root: join(s.deployment, "agents"), agents: [{ name: "oats-machine--steward", instances: names.map((instance) => ({ instance, home: home(instance) })) }] }));
+}
+
+// Removes `path`, a file or link the test made, only when it is inside the
+// sandbox `root`: its directory, resolved, is under it. A path setup recorded
+// can be the host's own (the node, which the stable-node rule may record as
+// Homebrew's /opt/homebrew/opt/node/bin/node, a link into the real keg), and
+// a test must never delete that, so anything else throws.
+export function removeInSandbox(root, path) {
+  if (!inSandbox(root, path)) throw new Error(`refusing to remove ${path}: it is outside the sandbox ${root} (in ${realpathSync.native(dirname(path))})`);
+  unlinkSync(path);
+}
+
+// Whether `path`'s directory, resolved, is the sandbox `root` or under it.
+// The OS's own realpath resolves it, as unlink will: a link followed by ".."
+// leaves the link's target, where realpathSync would drop the ".." first.
+export function inSandbox(root, path) {
+  const dir = realpathSync.native(dirname(path));
+  return dir === root || dir.startsWith(`${root}/`);
 }
 
 export function writeExecutable(path, text) {
