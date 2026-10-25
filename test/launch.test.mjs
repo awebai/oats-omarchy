@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { APP_ID, deliverPrompt, findWindow, launch, LAUNCH_LOCK, LAUNCH_SCRIPT, parseArgs } from "../lib/launch.mjs";
+import { APP_ID, deliverPrompt, findWindow, launch, LAUNCH_LOCK, LAUNCH_SCRIPT, parseArgs, reclaimLaunchLock } from "../lib/launch.mjs";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import { STATE_SCHEMA } from "../lib/state.mjs";
 import { DETACH_KEY } from "../lib/waiting.mjs";
@@ -866,4 +866,36 @@ test("a launch lock left by a launch that died is taken over", async (t) => {
   const r = outer(w, []);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(w.tuiArgs()[0], `--app-id=${APP_ID}`);
+});
+
+test("two presses over the same dead holder's lock: one reclaims it, and one window opens", async (t) => {
+  const w = world(t);
+  const h = hyprland(w, { clients: "clients-none.json" });
+  slowWindow(w);
+  const dead = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" }).stdout;
+  writeFileSync(join(w.run, LAUNCH_LOCK), `${dead}\n`);
+  const [a, b] = await Promise.all([outerAsync(w, []), outerAsync(w, [])]);
+  assert.deepEqual([a.status, b.status], [0, 0], a.stderr + b.stderr);
+  assert.deepEqual(launcherLog(w).trim().split("\n"), ["launched -"], "exactly one window");
+  assert.ok(h.calls().some((c) => c[0] === "dispatch"));
+  assert.deepEqual(readdirSync(w.run).filter((f) => !f.startsWith("oats-omarchy-launch-")), [], "no lock or takeover token left");
+});
+
+test("reclaimLaunchLock removes only the lock it saw, and only while it holds the takeover token", (t) => {
+  const w = world(t);
+  const lock = join(w.run, LAUNCH_LOCK);
+  const live = String(process.pid);
+  // A press that read a dead holder, while another took the lock over since.
+  writeFileSync(lock, `${live}\n`);
+  reclaimLaunchLock(lock, "999999999\n");
+  assert.equal(readFileSync(lock, "utf8"), `${live}\n`, "a fresh lock is never removed on an old reading");
+  // A takeover in progress (its token held by a live press): nothing is removed.
+  writeFileSync(lock, "999999999\n");
+  writeFileSync(`${lock}.takeover`, `${live}\n`);
+  reclaimLaunchLock(lock, "999999999\n");
+  assert.equal(readFileSync(lock, "utf8"), "999999999\n");
+  rmSync(`${lock}.takeover`);
+  reclaimLaunchLock(lock, "999999999\n");
+  assert.equal(existsSync(lock), false, "the dead holder's lock, seen as it is, goes");
+  assert.equal(existsSync(`${lock}.takeover`), false, "and the token with it");
 });
