@@ -25,7 +25,7 @@ test("--apply writes plugin.json: the key's and the menu's commands as argv; --r
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const p = discoverPaths(s.env);
   const plugin = readPlugin(s);
-  assert.deepEqual(Object.keys(plugin), ["deployment", "tui", "desktop", "ui", "waiting", "attach", "setup"]);
+  assert.deepEqual(Object.keys(plugin), ["deployment", "tui", "desktop", "ui", "waiting", "attach", "setup", "launcher"]);
   assert.equal(plugin.deployment, s.deployment);
   assert.deepEqual(plugin.tui, files.tuiArgv({ shimPath: p.shim, deployment: s.deployment }));
   assert.equal(plugin.desktop, null, "no Desktop found");
@@ -34,6 +34,7 @@ test("--apply writes plugin.json: the key's and the menu's commands as argv; --r
   const node = plugin.waiting[0];
   assert.deepEqual(plugin.waiting, [node, `${PLUGIN_DIR}/bin/waiting.mjs`, "--dir", s.deployment]);
   assert.deepEqual(plugin.setup, [node, `${PLUGIN_DIR}/bin/setup.mjs`, "--dir", s.deployment]);
+  assert.deepEqual(plugin.launcher, [p.wrapper], "the steward's card runs the launcher");
   assert.equal(statSync(pluginPath(s)).mode & 0o777, 0o644);
   // The bar widget finds it where setup wrote it, and reads all of it.
   assert.equal(pluginFilePath(s.env.HOME, s.env.XDG_STATE_HOME), pluginPath(s));

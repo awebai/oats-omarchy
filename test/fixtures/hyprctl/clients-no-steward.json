@@ -51,7 +51,7 @@
     "class": "org.omarchy.agent",
     "title": "merak:~/Work",
     "initialClass": "org.omarchy.agent",
-    "initialTitle": "Alacritty",
+    "initialTitle": "omarchy-launch-tui",
     "pid": 2402,
     "xwayland": false,
     "pinned": false,
