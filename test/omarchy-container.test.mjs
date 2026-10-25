@@ -30,7 +30,7 @@ import { agentBindLine } from "../lib/keys.mjs";
 import { fixture, repo, sandbox, snapshot, withStewards, writeExecutable } from "./helpers/sandbox.mjs";
 import * as widget from "../widget.mjs";
 import { appRow, loadMenuModel, search } from "./helpers/omarchy-search.mjs";
-import { found as foundList, harnessRun, miseInstalls, stepLines, world as installWorld } from "./helpers/install-world.mjs";
+import { found as foundList, harnessRun, keyMoved, miseInstalls, signedIn, stepLines, world as installWorld } from "./helpers/install-world.mjs";
 
 const enabled = process.env.OATS_OMARCHY_CONTAINER === "1";
 const OMARCHY = process.env.OMARCHY_PATH || "/usr/share/omarchy";
@@ -612,7 +612,7 @@ test("the bar panel's row opens the same session through the real floating termi
 // the container's own sh, coreutils and node (pacman's), and stand-ins for
 // everything that installs: mise, omarchy-pkg-add, aw, the OATS CLI and the
 // harness (test/helpers/install-world.mjs). Nothing is installed.
-test("the installer: --check is not ready without aw and the OATS CLI; --now --harness pi runs its six steps and starts pi in ~/Work with the prompt", { skip }, (t) => {
+test("the installer: --check is not ready without aw and the OATS CLI; --now --harness pi runs its eight steps and starts pi in ~/Work with the prompt", { skip }, (t) => {
   const w = installWorld(t, { system: [join(OMARCHY, "bin"), "/usr/bin", "/bin"] });
   // tmux, when the container has none: what omarchy-pkg-add would put on PATH.
   writeFileSync(join(w.root, "pkg-plan"), `printf '#!/bin/sh\\necho "tmux 3.5a"\\n' > '${join(w.other, "tmux")}'\nchmod 755 '${join(w.other, "tmux")}'\n`);
@@ -626,11 +626,14 @@ test("the installer: --check is not ready without aw and the OATS CLI; --now --h
   miseInstalls(w, "pi", "pi", "0.40.1");
   miseInstalls(w, "aw", "npm:@awebai/aw", "1.36.47");
   miseInstalls(w, "oats", "npm:@awebai/oats", "0.67.1");
+  // The person's acts done already, so there is no consent screen to answer.
+  signedIn(w);
+  keyMoved(w);
   const r = w.run(["--now", "--harness", "pi"]);
   process.stdout.write(r.out.replace(/^/gm, "# "));
   assert.equal(r.status, 0, r.out);
-  assert.deepEqual(stepLines(r.stdout).map((l) => l.match(/^omarchy-install-oats: step \d\/6/)[0]), [1, 2, 3, 4, 5, 6].map((n) => `omarchy-install-oats: step ${n}/6`));
-  assert.match(r.stdout, /^omarchy-install-oats: step 5\/6: skipped: /m);
+  assert.deepEqual(stepLines(r.stdout).map((l) => l.match(/^omarchy-install-oats: step \d\/8/)[0]), [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `omarchy-install-oats: step ${n}/8`));
+  assert.match(r.stdout, /^omarchy-install-oats: step 5\/8: skipped: /m);
   assert.match(r.stdout, /^omarchy-install-oats: installed oats 0\.67\.1 \(mise\)$/m);
   const h = harnessRun(w);
   assert.equal(h.cwd, join(w.home, "Work"));

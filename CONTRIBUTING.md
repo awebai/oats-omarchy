@@ -485,7 +485,37 @@ OATS is ready, `--now` installs, and the `omarchy:` header comments describe
 it. It is POSIX sh, because it runs before node may exist; node does only
 what needs it, through `bin/install.mjs` (`lib/install.mjs`): the steward
 line (`findSteward` through the `oats` it found, since setup's shim does
-not exist yet) and the handoff.
+not exist yet), whether the agent key opens OATS (`agentKeyMoved`, and
+`agentKeyResult` for setup's answer) and the handoff.
+
+- **The consent screen** (`consent`), after the harness is known and before
+  anything is installed. The person's own acts, which Claude's auto mode
+  refuses an agent, are listed together, each with why, what and its undo
+  on a line of its own, and one `[y/N]` that only an explicit `y` answers:
+  - the GitHub sign-in, unless `github_state` finds gh signed in to
+    github.com with every scope in `GH_SCOPES`. It reads `gh auth status
+    --json hosts --jq …` (gh 2.81.0 and later, `GH_MIN`), so it needs no
+    node;
+  - the agent key, unless `key_moved` finds it with OATS: setup's state
+    records `agentKey: "oats"` and `bindings.lua` holds `agentBindLine`, as
+    the Default Agent row's `checked` reads it. Without node setup has never
+    run, so it is on the screen.
+
+  An act already done is left off; with none, there is no screen.
+- **The acts** run as the person, in their terminal, after the tools:
+  - step 6 (`github`): `gh auth login --web --scopes $GH_SCOPES`, or `gh
+    auth refresh --scopes` with only the missing ones, then `gh auth
+    setup-git`, each with stdin from `/dev/null`. Without a terminal gh asks
+    nothing (no protocol, no "Authenticate Git", no Enter; cli/cli
+    `pkg/cmd/auth/shared/login_flow.go`): it prints the one-time code and
+    waits for the approval. The installer opens the device page with
+    `xdg-open`, then reads the sign-in back;
+  - step 7 (`agent_key`): `setup --apply --only agent-key --agent-key oats
+    --steward-pending --yes --json`, before onboarding spawns the steward.
+    A key setup leaves with Omarchy is said, and onboarding still starts.
+  - The onboarding prompt states what they did (`consentFacts`), never the
+    person's consent: an agent passing a yes on is refused as an auto-mode
+    bypass, and the prompt test holds that it never says "consent".
 
 - **Found first.** `detect` resolves each tool on PATH (`readlink -f`; a
   mise shim through `mise which`), names its origin from the resolved path
@@ -537,7 +567,13 @@ XDG directories and a PATH of stand-ins laid out the way each origin is
 (mise installs and its shims, an npm prefix, `~/.local/bin`, nvm, a link
 into `/usr`, an instance's shim), each logging what it was asked and
 modelling refusals. The stand-in `mise use -g` lays out an install only
-when it runs. No real install, mise or harness runs.
+when it runs. gh's stand-in answers `auth status --json` from a file and
+signs in as `auth login` and `auth refresh` would, logging whether stdin
+was a terminal. `ALL` leaves both of the person's acts done, so a test sees
+the consent screen only when it undoes one; the screen's tests run a copy
+of the plugin whose `bin/setup.mjs` logs its argv, so no real setup runs
+there (setup's `--steward-pending` is `test/agent-key.test.mjs`'s). No
+real install, mise, gh or harness runs.
 
 ### The bar widget and the waiting popup
 
