@@ -52,6 +52,11 @@ Rules the checks hold:
   `omarchy-launch-floating-terminal-with-presentation`), which run the user's
   default terminal through `xdg-terminal-exec`.
   `test/no-terminal-names.test.mjs` scans every file and holds the list.
+- **The README's pin command works as written.** `omarchy plugin update`
+  runs `git fetch origin HEAD` and a fast-forward, which bring no tags, so
+  the command fetches the release's tag before it checks it out.
+  `test/pin-release.test.mjs` replays Omarchy's add and update with real
+  git and runs the README's command, the same one everywhere it appears.
 
 ## How setup is built
 
