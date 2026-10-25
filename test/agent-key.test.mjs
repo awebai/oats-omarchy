@@ -1014,6 +1014,21 @@ test("after the key moves, setup says how to try it: the key, or the launcher wi
   assert.doesNotMatch(r.stdout, /hyprctl dispatch/);
 });
 
+test("the try-it line's launcher is one shell word, for a home with spaces and $: bash runs it as one argument", (t) => {
+  const s = sandbox(t);
+  const home = join(s.root, "my home $HOME");
+  Object.assign(s.env, { HOME: home, XDG_DATA_HOME: join(home, ".local/share"), XDG_STATE_HOME: join(home, ".local/state"), XDG_CONFIG_HOME: join(home, ".config") });
+  hypr(s, USER_BINDINGS, { home });
+  const wrapper = join(home, ".local/bin/omarchy-launch-oats");
+  const r = s.run(ONLY_RUN);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const line = r.stdout.trim().split("\n").at(-1);
+  assert.equal(line, tryAgentKey(wrapper));
+  const command = /run (setsid .*) in a terminal\.$/.exec(line)[1];
+  const argv = spawnSync("bash", ["-c", `printf '%s\\0' ${command}`], { encoding: "utf8" }).stdout.split("\0").slice(0, -1);
+  assert.deepEqual(argv, ["setsid", wrapper]);
+});
+
 test("--only takes agent-key, with --plan or --apply only, and not with --ui or --desktop (E_BAD_ARGS, exit 2)", (t) => {
   const s = sandbox(t);
   const cases = [
