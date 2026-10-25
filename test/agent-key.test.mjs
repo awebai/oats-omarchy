@@ -18,7 +18,7 @@ import * as files from "../lib/files.mjs";
 import * as keys from "../lib/keys.mjs";
 import * as menu from "../lib/menu.mjs";
 import { shellQuote } from "../lib/quote.mjs";
-import { AGENT_QUESTION, AGENT_WHY, blocksFor, lookUpSteward, NOT_CHOSEN, ONLY_HEADING, setup, tryAgentKey, UI_QUESTION } from "../lib/setup.mjs";
+import { AGENT_QUESTION, AGENT_WHY, blocksFor, lookUpSteward, NOT_CHOSEN, ONLY_HEADING, setup, STEWARD_PENDING_NOTE, tryAgentKey, UI_QUESTION } from "../lib/setup.mjs";
 import { fixture, inSandbox, removeInSandbox, repo, sandbox, snapshot, withStewards, writeExecutable } from "./helpers/sandbox.mjs";
 
 const USER_BINDINGS = '-- My bindings\no.bind("SUPER + RETURN", "Terminal", "uwsm-app -- xdg-terminal-exec")\n';
@@ -1087,6 +1087,46 @@ test("--only agent-key keeps the steward gate: with no steward the key stays wit
   const again = s.run([...ONLY_RUN, "--json"]);
   assert.equal(part(again, "agent-key").status, "applied");
   assert.ok(agentLines(file));
+});
+
+// The installer's consent screen moves the key before onboarding spawns
+// the steward (awebai/oats-omarchy#27): --steward-pending lets it move with
+// no steward yet, never past several.
+test("--steward-pending moves the key with no steward yet, and says the key opens the steward once it is spawned", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  withStewards(s, []);
+  const r = s.run([...ONLY_RUN, "--steward-pending", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").status, "applied");
+  assert.ok(agentLines(file), "the key's lines are written");
+  assert.equal(stateOf(s).agentKey, "oats");
+  assert.ok(r.json.result.notes.includes(STEWARD_PENDING_NOTE), JSON.stringify(r.json.result.notes));
+  assert.match(STEWARD_PENDING_NOTE, /no steward yet/);
+});
+
+test("--steward-pending never moves the key past several stewards", (t) => {
+  const s = sandbox(t);
+  const file = hypr(s);
+  withStewards(s, ["one", "two"]);
+  const r = s.run([...ONLY_RUN, "--steward-pending", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(part(r, "agent-key").status, "skipped");
+  assert.match(part(r, "agent-key").reason, /several stewards on this machine/);
+  assert.equal(readFileSync(file, "utf8"), USER_BINDINGS);
+});
+
+test("--steward-pending goes with --plan or --apply, and only when the key goes to OATS (E_BAD_ARGS)", (t) => {
+  const s = sandbox(t);
+  for (const [args, message] of [
+    [["--check", "--steward-pending"], "--steward-pending goes with --plan or --apply"],
+    [["--apply", "--only", "agent-key", "--agent-key", "omarchy", "--steward-pending"], "--steward-pending is for moving the agent key to OATS (--agent-key oats or --only agent-key)"],
+    [["--apply", "--steward-pending"], "--steward-pending is for moving the agent key to OATS (--agent-key oats or --only agent-key)"],
+  ]) {
+    const r = s.run(["setup", ...args, "--json"], {}, { yes: false });
+    assert.equal(r.status, 2, args.join(" "));
+    assert.deepEqual([r.json.error.code, r.json.error.message], ["E_BAD_ARGS", message], args.join(" "));
+  }
 });
 
 test("--only agent-key keeps the stock-binding check and Hyprland's verification", (t) => {

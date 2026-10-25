@@ -87,7 +87,7 @@ test("one steward in the list's deployments: its home, and the deployment it is 
 
 test("no steward: how to spawn one; a deployment that could not be read is named", async (t) => {
   const w = world(t, { a: status({ stewards: [] }), b: status({ stewards: [] }) });
-  assert.deepEqual(await w.find(), { ok: false, reason: "no steward on this machine: spawn one with `oats spawn oats.machine/steward --name steward` in the machine's deployment" });
+  assert.deepEqual(await w.find(), { ok: false, none: true, reason: "no steward on this machine: spawn one with `oats spawn oats.machine/steward --name steward` in the machine's deployment" });
   const failed = world(t, { a: status({ stewards: [] }), b: "envelope:E_LOCK" });
   const r = await failed.find();
   assert.equal(r.ok, false);
