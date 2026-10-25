@@ -45,13 +45,15 @@ export function withStewards(s, names = ["steward"]) {
 // Homebrew's /opt/homebrew/opt/node/bin/node, a link into the real keg), and
 // a test must never delete that, so anything else throws.
 export function removeInSandbox(root, path) {
-  if (!inSandbox(root, path)) throw new Error(`refusing to remove ${path}: it is outside the sandbox ${root} (in ${realpathSync(dirname(path))})`);
+  if (!inSandbox(root, path)) throw new Error(`refusing to remove ${path}: it is outside the sandbox ${root} (in ${realpathSync.native(dirname(path))})`);
   unlinkSync(path);
 }
 
 // Whether `path`'s directory, resolved, is the sandbox `root` or under it.
+// The OS's own realpath resolves it, as unlink will: a link followed by ".."
+// leaves the link's target, where realpathSync would drop the ".." first.
 export function inSandbox(root, path) {
-  const dir = realpathSync(dirname(path));
+  const dir = realpathSync.native(dirname(path));
   return dir === root || dir.startsWith(`${root}/`);
 }
 

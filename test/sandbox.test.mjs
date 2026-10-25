@@ -35,5 +35,13 @@ test("removeInSandbox: a file or link inside the sandbox goes; a path whose dire
   assert.throws(() => removeInSandbox(root, join(root, "opt", "bin", "node")), /refusing to remove .*: it is outside the sandbox/);
   assert.throws(() => removeInSandbox(root, node), /outside the sandbox/);
   assert.equal(existsSync(node), true, "the host's file is kept");
+  // A link followed by "..": the OS follows the link first, so this names a
+  // file beside the link's target, outside the sandbox (never path.join,
+  // which would drop the ".." before anything resolves).
+  symlinkSync(host, join(root, "bin"));
+  const beside = join(base, "host", "Cellar", "node", "sentinel");
+  writeFileSync(beside, "the host's file");
+  assert.throws(() => removeInSandbox(root, `${root}/bin/../sentinel`), /outside the sandbox/);
+  assert.equal(existsSync(beside), true, "the host's file beside the link's target is kept");
   assert.deepEqual([inSandbox(root, join(root, "x")), inSandbox(root, join(root, "opt", "bin", "node")), inSandbox(root, node)], [true, false, false]);
 });
