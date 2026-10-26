@@ -79,11 +79,12 @@ One JSON object, with no secrets:
   state the status is not read, and `steward` is null. When an `ok`
   deployment's status cannot be read, no found-list is written and the
   installer stops, naming it: a `steward: false` was always read.
-  - **`stewardAddress`** is the steward's global aweb address when the
-    deployment lists exactly one steward and its home records one: the
-    `oats.aweb` identity in its `instance.json` (`capabilityMeta`), whose
-    `mode` is `global` for a seat on a GLOBAL resident. Otherwise, a local
-    identity or a record that cannot be read included, it is null.
+  - **`stewardAddress`** is the steward's aweb address when the deployment
+    lists exactly one steward: its row's `identityAddress` in that
+    deployment's `oats status --json` (the kernel's `desktop-facts`). It is
+    an address only when the kernel reports one in namespace/alias form; a
+    bare alias is not an address. Otherwise, a local identity or a row
+    without the field included, it is null.
 
 ## Versioning
 

@@ -51,9 +51,9 @@ test("STEWARD_AGENT is the agent name the kernel gives oats.machine/steward", ()
 });
 
 test("stewardsIn: the steward agent's instances only, not an instance named steward elsewhere", () => {
-  assert.deepEqual(stewardsIn(JSON.stringify(STATUS)), [{ instance: "steward", home: STEWARD_HOME }]);
+  assert.deepEqual(stewardsIn(JSON.stringify(STATUS)), [{ instance: "steward", home: STEWARD_HOME, address: null }]);
   const decoy = { ...STATUS.agents[0], name: "helper", instances: [{ ...STATUS.agents[0].instances[0], instance: "steward", home: "/h/helper/steward" }] };
-  assert.deepEqual(stewardsIn(JSON.stringify(status({ extra: [decoy] }))), [{ instance: "steward", home: STEWARD_HOME }]);
+  assert.deepEqual(stewardsIn(JSON.stringify(status({ extra: [decoy] }))), [{ instance: "steward", home: STEWARD_HOME, address: null }]);
   assert.deepEqual(stewardsIn(JSON.stringify(status({ stewards: [] }))), []);
   assert.throws(() => stewardsIn(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_LOCK", message: "oats-lock.json is unreadable" } })), /oats-lock.json is unreadable/);
 });
@@ -69,18 +69,18 @@ test("stewardsIn: the agent row's soul key decides when it has one; its name onl
   for (const key of [null, undefined]) {
     const row = { ...steward, instances: [instance] };
     if (key === null) row.key = null; else delete row.key;
-    assert.deepEqual(stewardsIn(JSON.stringify({ ...STATUS, agents: [row] })), [{ instance: "other", home: "/h/other" }], String(key));
+    assert.deepEqual(stewardsIn(JSON.stringify({ ...STATUS, agents: [row] })), [{ instance: "other", home: "/h/other", address: null }], String(key));
   }
   // The key is matched even under another agent name.
   const renamed = { ...steward, name: "something-else", instances: [instance] };
-  assert.deepEqual(stewardsIn(JSON.stringify({ ...STATUS, agents: [renamed] })), [{ instance: "other", home: "/h/other" }]);
+  assert.deepEqual(stewardsIn(JSON.stringify({ ...STATUS, agents: [renamed] })), [{ instance: "other", home: "/h/other", address: null }]);
   assert.throws(() => stewardsIn("{}"), /no agents list/);
 });
 
 test("one steward in the list's deployments: its home, and the deployment it is in; status runs in each deployment", async (t) => {
   const w = world(t, { a: STATUS, b: status({ stewards: [] }) });
   const found = await w.find();
-  assert.deepEqual(found, { ok: true, instance: "steward", home: STEWARD_HOME, deployment: { path: w.paths[0], name: "machine" }, unread: [] });
+  assert.deepEqual(found, { ok: true, instance: "steward", home: STEWARD_HOME, address: null, deployment: { path: w.paths[0], name: "machine" }, unread: [] });
   const calls = w.k.calls();
   assert.deepEqual(calls.map((c) => c.argv.join(" ")), ["version --json", "deployments --json", "status --json", "status --json"]);
   assert.deepEqual(calls.slice(2).map((c) => c.cwd), w.paths);
@@ -133,7 +133,7 @@ test("a kernel without deployments-list: the deployment setup's state records, e
   const stateDir = join(w.s.env.XDG_STATE_HOME, "oats-omarchy");
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(join(stateDir, "state.json"), JSON.stringify({ schemaVersion: 1, deployment: w.paths[0], files: [] }));
-  assert.deepEqual(await w.find(), { ok: true, instance: "steward", home: STEWARD_HOME, deployment: { path: w.paths[0], name: w.paths[0] }, unread: [] });
+  assert.deepEqual(await w.find(), { ok: true, instance: "steward", home: STEWARD_HOME, address: null, deployment: { path: w.paths[0], name: w.paths[0] }, unread: [] });
   assert.ok(!w.k.calls().some((c) => c.argv[0] === "deployments"), "the list is not asked for");
 });
 
@@ -180,7 +180,7 @@ test("recordedFirst: one steward in the recorded deployment is taken from one st
   // scan, without recordedFirst, reports both).
   const w = world(t, { a: STATUS, b: status({ stewards: [["second", "/h/second"]] }) });
   recorded(w, w.paths[0]);
-  assert.deepEqual(await w.find({ recordedFirst: true }), { ok: true, instance: "steward", home: STEWARD_HOME, deployment: { path: w.paths[0], name: w.paths[0] }, unread: [] });
+  assert.deepEqual(await w.find({ recordedFirst: true }), { ok: true, instance: "steward", home: STEWARD_HOME, address: null, deployment: { path: w.paths[0], name: w.paths[0] }, unread: [] });
   assert.deepEqual(statusReads(w), [w.paths[0]]);
   assert.equal(listReads(w), 0);
   const full = await w.find();
