@@ -165,7 +165,7 @@ for (const version of Object.keys(VERSIONS)) {
     assert.equal(hyprCalls(s), verifiedBefore + (keysChange ? 2 : 0), keysChange ? "the unchanged copy, then the copy with the new block" : "an unchanged key block is not verified again");
 
     const state = JSON.parse(readFileSync(statePath(s), "utf8"));
-    assert.equal(state.version, "0.7.0");
+    assert.equal(state.version, "0.8.0");
     assert.ok(Object.hasOwn(state, "agentKey"));
     assert.equal(state.agentKey, null, "nobody picked: the agent key stays with Omarchy");
     const keys = state.files.find((f) => f.role === "keys");

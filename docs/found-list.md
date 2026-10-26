@@ -23,7 +23,7 @@ One JSON object, with no secrets:
   "writtenAt": "2026-10-23T12:00:00.000Z",
   "machine": { "hostname": "merak", "platform": "omarchy", "omarchyVersion": "4.0.4-1" },
   "harness": "claude",
-  "plugin": { "dir": "/home/u/.config/omarchy/plugins/ai.aweb.oats", "version": "0.7.0" },
+  "plugin": { "dir": "/home/u/.config/omarchy/plugins/ai.aweb.oats", "version": "0.8.0" },
   "gettingStartedSkill": "/abs/path/@awebai/oats/skills/oats-getting-started/SKILL.md",
   "tools": [
     { "name": "node",   "version": "26.8.2",  "origin": "mise",       "path": "/abs/node",         "state": "found" },

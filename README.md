@@ -203,7 +203,7 @@ the tag, then enable it:
 
 ```bash
 omarchy plugin add https://github.com/awebai/oats-omarchy
-git -C ~/.config/omarchy/plugins/ai.aweb.oats fetch origin tag v0.7.0 && git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.7.0
+git -C ~/.config/omarchy/plugins/ai.aweb.oats fetch origin tag v0.8.0 && git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.8.0
 omarchy plugin enable ai.aweb.oats
 ```
 
@@ -305,7 +305,7 @@ themselves. The same goes for the agent key's lines under "Agent key".
   Updating moves a pinned checkout to the tip of the default branch. It
   updates an installed plugin only: on a machine without
   `~/.config/omarchy/plugins/ai.aweb.oats`, add it as in step 3.
-- **Pin a release:** `git -C ~/.config/omarchy/plugins/ai.aweb.oats fetch origin tag v0.7.0 && git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.7.0`.
+- **Pin a release:** `git -C ~/.config/omarchy/plugins/ai.aweb.oats fetch origin tag v0.8.0 && git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.8.0`.
   Pin again after any `omarchy plugin update`.
 - **Remove:** `setup --remove` first, then `omarchy plugin remove ai.aweb.oats`.
   The other order leaves the launchers, the menu and the hook behind.
@@ -479,7 +479,7 @@ Then it asks who the agent key opens (see "The agent key").
   `omarchy update`.
 
 **Pinning a release.** The plugin is a plain git checkout:
-`git -C ~/.config/omarchy/plugins/ai.aweb.oats fetch origin tag v0.7.0 && git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.7.0`.
+`git -C ~/.config/omarchy/plugins/ai.aweb.oats fetch origin tag v0.8.0 && git -C ~/.config/omarchy/plugins/ai.aweb.oats checkout v0.8.0`.
 The command fetches the release's tag first, because `omarchy plugin update`
 fetches no tags. `omarchy plugin update` fast-forwards the checkout to the
 tip of the default branch, so pin again after an update.
@@ -585,14 +585,19 @@ What each failure says:
 The plan and its progress are tracked in
 [awebai/oats#1311](https://github.com/awebai/oats/issues/1311).
 
-Status: v0.7.0 is released. It is v0.6.0 with OATS as the standard on
-Omarchy: `omarchy-launch-oats`, which opens this machine's steward; the
-agent key, SUPER + SHIFT + CTRL + A, which opens it too once you pick OATS
+Status: v0.8.0 is released. v0.7.0 made OATS the standard on Omarchy:
+`omarchy-launch-oats`, which opens this machine's steward; the agent key,
+SUPER + SHIFT + CTRL + A, which opens it too once you pick OATS
 (`setup --apply --only agent-key`, or the OATS row in Omarchy's Default
 Agent menu); `omarchy-install-oats`, which installs what is missing and
 hands its found-list to an onboarding agent; and `Ctrl+\` to leave a
-session's viewer.
+session's viewer. v0.8.0 makes onboarding safer: `omarchy-install-oats`
+shows one consent screen before it changes anything and takes its answers
+from the terminal, never stdin; the agent key focuses the steward's window
+when it is open and opens it otherwise, one press at a time; `--check` and
+the found-list give the steward's global address; and the pin command
+fetches the release's tag, so it works after `omarchy plugin update`.
 `omarchy plugin add` installs the tip of the default branch; to stay on
-v0.7.0, pin it as described under "Pinning a release".
+v0.8.0, pin it as described under "Pinning a release".
 
 Developing it: [CONTRIBUTING.md](CONTRIBUTING.md).
