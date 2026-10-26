@@ -3,12 +3,11 @@
 // test/fixtures/steward, shaped like 0.67.1's), through setup's shim.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import { STATE_SCHEMA } from "../lib/state.mjs";
-import { findSteward, stewardAddress, stewardsIn } from "../lib/steward.mjs";
+import { findSteward, stewardsIn } from "../lib/steward.mjs";
 import { STEWARD_AGENT, STEWARD_KEY } from "../lib/steward-agent.mjs";
 import { ALL_FEATURES, fakeKernel, gone } from "./helpers/fake-kernel.mjs";
 import { fixture, sandbox } from "./helpers/sandbox.mjs";
@@ -52,9 +51,9 @@ test("STEWARD_AGENT is the agent name the kernel gives oats.machine/steward", ()
 });
 
 test("stewardsIn: the steward agent's instances only, not an instance named steward elsewhere", () => {
-  assert.deepEqual(stewardsIn(JSON.stringify(STATUS)), [{ instance: "steward", home: STEWARD_HOME }]);
+  assert.deepEqual(stewardsIn(JSON.stringify(STATUS)), [{ instance: "steward", home: STEWARD_HOME, address: null }]);
   const decoy = { ...STATUS.agents[0], name: "helper", instances: [{ ...STATUS.agents[0].instances[0], instance: "steward", home: "/h/helper/steward" }] };
-  assert.deepEqual(stewardsIn(JSON.stringify(status({ extra: [decoy] }))), [{ instance: "steward", home: STEWARD_HOME }]);
+  assert.deepEqual(stewardsIn(JSON.stringify(status({ extra: [decoy] }))), [{ instance: "steward", home: STEWARD_HOME, address: null }]);
   assert.deepEqual(stewardsIn(JSON.stringify(status({ stewards: [] }))), []);
   assert.throws(() => stewardsIn(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_LOCK", message: "oats-lock.json is unreadable" } })), /oats-lock.json is unreadable/);
 });
@@ -70,18 +69,18 @@ test("stewardsIn: the agent row's soul key decides when it has one; its name onl
   for (const key of [null, undefined]) {
     const row = { ...steward, instances: [instance] };
     if (key === null) row.key = null; else delete row.key;
-    assert.deepEqual(stewardsIn(JSON.stringify({ ...STATUS, agents: [row] })), [{ instance: "other", home: "/h/other" }], String(key));
+    assert.deepEqual(stewardsIn(JSON.stringify({ ...STATUS, agents: [row] })), [{ instance: "other", home: "/h/other", address: null }], String(key));
   }
   // The key is matched even under another agent name.
   const renamed = { ...steward, name: "something-else", instances: [instance] };
-  assert.deepEqual(stewardsIn(JSON.stringify({ ...STATUS, agents: [renamed] })), [{ instance: "other", home: "/h/other" }]);
+  assert.deepEqual(stewardsIn(JSON.stringify({ ...STATUS, agents: [renamed] })), [{ instance: "other", home: "/h/other", address: null }]);
   assert.throws(() => stewardsIn("{}"), /no agents list/);
 });
 
 test("one steward in the list's deployments: its home, and the deployment it is in; status runs in each deployment", async (t) => {
   const w = world(t, { a: STATUS, b: status({ stewards: [] }) });
   const found = await w.find();
-  assert.deepEqual(found, { ok: true, instance: "steward", home: STEWARD_HOME, deployment: { path: w.paths[0], name: "machine" }, unread: [] });
+  assert.deepEqual(found, { ok: true, instance: "steward", home: STEWARD_HOME, address: null, deployment: { path: w.paths[0], name: "machine" }, unread: [] });
   const calls = w.k.calls();
   assert.deepEqual(calls.map((c) => c.argv.join(" ")), ["version --json", "deployments --json", "status --json", "status --json"]);
   assert.deepEqual(calls.slice(2).map((c) => c.cwd), w.paths);
@@ -134,7 +133,7 @@ test("a kernel without deployments-list: the deployment setup's state records, e
   const stateDir = join(w.s.env.XDG_STATE_HOME, "oats-omarchy");
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(join(stateDir, "state.json"), JSON.stringify({ schemaVersion: 1, deployment: w.paths[0], files: [] }));
-  assert.deepEqual(await w.find(), { ok: true, instance: "steward", home: STEWARD_HOME, deployment: { path: w.paths[0], name: w.paths[0] }, unread: [] });
+  assert.deepEqual(await w.find(), { ok: true, instance: "steward", home: STEWARD_HOME, address: null, deployment: { path: w.paths[0], name: w.paths[0] }, unread: [] });
   assert.ok(!w.k.calls().some((c) => c.argv[0] === "deployments"), "the list is not asked for");
 });
 
@@ -181,7 +180,7 @@ test("recordedFirst: one steward in the recorded deployment is taken from one st
   // scan, without recordedFirst, reports both).
   const w = world(t, { a: STATUS, b: status({ stewards: [["second", "/h/second"]] }) });
   recorded(w, w.paths[0]);
-  assert.deepEqual(await w.find({ recordedFirst: true }), { ok: true, instance: "steward", home: STEWARD_HOME, deployment: { path: w.paths[0], name: w.paths[0] }, unread: [] });
+  assert.deepEqual(await w.find({ recordedFirst: true }), { ok: true, instance: "steward", home: STEWARD_HOME, address: null, deployment: { path: w.paths[0], name: w.paths[0] }, unread: [] });
   assert.deepEqual(statusReads(w), [w.paths[0]]);
   assert.equal(listReads(w), 0);
   const full = await w.find();
@@ -226,24 +225,30 @@ test("recordedFirst: no recorded deployment, or no list: as without it", async (
   assert.deepEqual(statusReads(old), [old.paths[0]], "read once, as the state's one deployment");
 });
 
-// stewardAddress: the address the oats.aweb provider records in the steward's
-// home (instance.json capabilityMeta."oats.aweb".identity) for a seat on a
-// GLOBAL resident; null for anything else, never a throw.
-test("stewardAddress: a global identity's address, else null", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "oats-omarchy-address-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const home = (name, text) => {
-    const dir = join(root, name);
-    mkdirSync(dir);
-    if (text !== undefined) writeFileSync(join(dir, "instance.json"), text);
-    return dir;
-  };
-  const record = (identity) => JSON.stringify({ instance: "steward", capabilityMeta: { "oats.aweb": { identity } } });
-  assert.equal(stewardAddress(home("global", record({ mode: "global", alias: "steward", address: "merak.aweb.ai/steward", resident: "steward" }))), "merak.aweb.ai/steward");
-  assert.equal(stewardAddress(home("local", record({ mode: "local", alias: "steward", address: null, resident: null }))), null);
-  assert.equal(stewardAddress(home("global-without-address", record({ mode: "global", alias: "steward", address: null }))), null);
-  assert.equal(stewardAddress(home("no-messaging", JSON.stringify({ instance: "steward", capabilityMeta: {} }))), null);
-  assert.equal(stewardAddress(home("not-json", "{")), null);
-  assert.equal(stewardAddress(home("no-record")), null);
-  assert.equal(stewardAddress(join(root, "no-home")), null);
+// The steward's address: the row's `identityAddress` (the kernel's
+// desktop-facts) when it is an aweb namespace/alias and the kernel
+// advertises desktop-facts; a bare alias (a local identity), or none, is no
+// address.
+test("stewardsIn: the address is the row's identityAddress in namespace/alias form, else null", () => {
+  const withAddress = (identityAddress) => status({ stewards: [["steward", STEWARD_HOME]] }).agents.map((a) => (a.name === STEWARD_AGENT ? { ...a, instances: a.instances.map((i) => ({ ...i, identityAddress })) } : a));
+  const rowOf = (identityAddress, features = ALL_FEATURES) => stewardsIn(JSON.stringify({ ...STATUS, agents: withAddress(identityAddress) }), features)[0];
+  assert.deepEqual(rowOf("merak.aweb.ai/steward"), { instance: "steward", home: STEWARD_HOME, address: "merak.aweb.ai/steward" });
+  assert.equal(rowOf("steward").address, null, "a local identity's alias is not an address");
+  assert.equal(rowOf(null).address, null);
+  assert.equal(rowOf(undefined).address, null, "a row without identityAddress");
+  assert.equal(rowOf(7).address, null);
+  assert.equal(rowOf("merak.aweb.ai/steward", ALL_FEATURES.filter((f) => f !== "desktop-facts")).address, null, "a kernel without desktop-facts");
+  assert.equal(stewardsIn(JSON.stringify({ ...STATUS, agents: withAddress("merak.aweb.ai/steward") }))[0].address, null, "features not given");
+});
+
+test("findSteward: the address only from a kernel that advertises desktop-facts", async (t) => {
+  const row = (s) => ({ ...s, agents: s.agents.map((a) => (a.name === STEWARD_AGENT ? { ...a, instances: a.instances.map((i) => ({ ...i, identityAddress: "merak.aweb.ai/steward" })) } : a)) });
+  const facts = world(t, { a: row(STATUS), b: status({ stewards: [] }) });
+  assert.equal((await facts.find()).address, "merak.aweb.ai/steward");
+  recorded(facts, facts.paths[0]);
+  assert.equal((await facts.find({ recordedFirst: true })).address, "merak.aweb.ai/steward", "the launcher's fast path");
+  const old = world(t, { a: row(STATUS), b: status({ stewards: [] }), features: ALL_FEATURES.filter((f) => f !== "desktop-facts") });
+  assert.equal((await old.find()).address, null);
+  recorded(old, old.paths[0]);
+  assert.equal((await old.find({ recordedFirst: true })).address, null, "the launcher's fast path");
 });

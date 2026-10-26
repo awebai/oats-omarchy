@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeExecutable } from "./sandbox.mjs";
 
-export const ALL_FEATURES = ["deployments-list", "session-attach-detach-key", "session-inspect-running", "waiting-on-you"];
+export const ALL_FEATURES = ["deployments-list", "desktop-facts", "session-attach-detach-key", "session-inspect-running", "waiting-on-you"];
 
 // The CLI. <k> is its directory; a test writes there:
 //   version.json            `version --json` (else 0.67.1 with ALL_FEATURES)

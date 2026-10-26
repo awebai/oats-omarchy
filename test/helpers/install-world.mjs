@@ -23,6 +23,15 @@ export const INSTALLER = join(repo, "bin", "omarchy-install-oats");
 const TTY = join(repo, "test", "helpers", "tty.py");
 // The host's python3, which runs it (the sandbox's PATH has none).
 const PYTHON = (process.env.PATH || "").split(":").filter(Boolean).map((d) => join(d, "python3")).find((f) => existsSync(f));
+// The features the stand-in OATS CLI advertises (`version --json`), as 0.67.1's.
+export const KERNEL_FEATURES = ["deployments-list", "desktop-facts", "session-attach-detach-key", "session-inspect-running", "waiting-on-you"];
+// Without desktop-facts: an `oats status --json` row's identityAddress is not
+// the kernel's to rely on.
+export const withoutDesktopFacts = (w) => {
+  const file = join(w.kernel.k, "version.json");
+  const version = JSON.parse(readFileSync(file, "utf8"));
+  writeFileSync(file, JSON.stringify({ ...version, features: version.features.filter((f) => f !== "desktop-facts") }));
+};
 export const STATUS = JSON.parse(readFileSync(fixture("steward", "status-0.67.1.json"), "utf8"));
 // git is the host's own, run against this HOME's ~/.gitconfig only
 // (GIT_CONFIG_NOSYSTEM), for github.com's credential helper.
@@ -178,7 +187,7 @@ echo "gh: $*" >&2; exit 1
     mkdirSync(join(pkg, "skills", "oats-getting-started"), { recursive: true });
     writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@awebai/oats", version }));
     writeFileSync(join(pkg, "skills", "oats-getting-started", "SKILL.md"), "# getting started\n");
-    writeFileSync(join(kernel.k, "version.json"), JSON.stringify({ schemaVersion: 1, name: "@awebai/oats", version, features: ["deployments-list", "session-attach-detach-key", "session-inspect-running", "waiting-on-you"] }));
+    writeFileSync(join(kernel.k, "version.json"), JSON.stringify({ schemaVersion: 1, name: "@awebai/oats", version, features: KERNEL_FEATURES }));
     writeExecutable(join(pkg, "bin", "oats.mjs"), `#!/bin/sh\nexec '${process.execPath}' '${join(kernel.k, "oats.mjs")}' "$@"\n`);
     return join(pkg, "bin", "oats.mjs");
   };
@@ -304,19 +313,14 @@ export const withChannel = (w, entry = {}) => {
 };
 // One deployment with a steward, one without, and one the kernel lists as
 // missing (its status is never read).
-// `identity`, when given, is the steward's oats.aweb identity record: its home
-// is then a real directory under the world, with an instance.json holding it.
-export function deployments(w, { steward = true, identity } = {}) {
+// `identityAddress`, when given, is the steward row's in `oats status --json`
+// (the kernel's desktop-facts).
+export function deployments(w, { steward = true, identityAddress } = {}) {
   const a = join(w.root, "Agents", "merak");
   const b = join(w.root, "Work", "acme");
   for (const d of [a, b]) mkdirSync(d, { recursive: true });
   let status = steward ? STATUS : { ...STATUS, agents: STATUS.agents.filter((x) => x.key !== "oats.machine/steward") };
-  if (identity) {
-    const home = join(a, "agents", "oats-machine--steward", "instances", "steward");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "instance.json"), JSON.stringify({ instance: "steward", capabilityMeta: { "oats.aweb": { identity } } }));
-    status = { ...status, agents: status.agents.map((x) => (x.key === "oats.machine/steward" ? { ...x, instances: x.instances.map((i) => ({ ...i, home })) } : x)) };
-  }
+  if (identityAddress !== undefined) status = { ...status, agents: status.agents.map((x) => (x.key === "oats.machine/steward" ? { ...x, instances: x.instances.map((i) => ({ ...i, identityAddress })) } : x)) };
   writeFileSync(join(a, "status.json"), JSON.stringify(status));
   writeFileSync(join(b, "status.json"), JSON.stringify({ ...STATUS, agents: STATUS.agents.filter((x) => x.key !== "oats.machine/steward") }));
   writeFileSync(join(w.kernel.k, "deployments.json"), JSON.stringify({ deploymentsApi: 1, file: join(w.home, ".oats", "config", "deployments.json"), deployments: [{ path: a, name: "merak", state: "ok" }, { path: b, name: "acme", state: "ok" }, { path: join(w.root, "Gone", "old"), name: "old", state: "missing" }], imports: {} }));

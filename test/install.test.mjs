@@ -8,7 +8,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkS
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { awEnvironment, consentFacts, gettingStartedSkill, handoff, parseTools, PROMPT_FILE, renderPrompt } from "../lib/install.mjs";
-import { ALL, deployments, found, GH_SCOPES, harnessRun, INSTALLER, keyMoved, miseInstalls, signedIn, stepLines, withChannel, world } from "./helpers/install-world.mjs";
+import { ALL, deployments, found, GH_SCOPES, harnessRun, INSTALLER, keyMoved, miseInstalls, signedIn, stepLines, withChannel, withoutDesktopFacts, world } from "./helpers/install-world.mjs";
 import { repo, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
 const BOOTSTRAP = ["oats onboard", "oats spawn", "aweb setup", "harness trust"];
@@ -44,17 +44,24 @@ test("--check: nothing installed, exit 1; without node, oats and the steward can
   assert.equal(r.stdout, "node: missing\ntmux: missing\naw: missing\noats: missing: node is needed to run it\nsteward: missing: node and the OATS CLI are needed to look for it\n");
 });
 
-test("--check: a steward on a global resident shows its address; a local one shows none", (t) => {
+test("--check: the steward's address only when the kernel reports one in namespace/alias form", (t) => {
   const global = world(t);
   ALL(global);
-  deployments(global, { identity: { mode: "global", alias: "steward", team: "default:merak.aweb.ai", address: "merak.aweb.ai/steward", resident: "steward" } });
+  deployments(global, { identityAddress: "merak.aweb.ai/steward" });
   const r = global.run(["--check"]);
   assert.equal(r.status, 0, r.out);
   assert.match(r.stdout, /^steward: found steward @ merak, address merak\.aweb\.ai\/steward$/m);
-  const local = world(t);
-  ALL(local);
-  deployments(local, { identity: { mode: "local", alias: "steward", team: "default:merak.aweb.ai", address: null, resident: null } });
-  assert.match(local.run(["--check"]).stdout, /^steward: found steward @ merak$/m);
+  for (const identityAddress of ["steward", undefined]) {
+    const local = world(t);
+    ALL(local);
+    deployments(local, { identityAddress });
+    assert.match(local.run(["--check"]).stdout, /^steward: found steward @ merak$/m, String(identityAddress));
+  }
+  const old = world(t);
+  ALL(old);
+  withoutDesktopFacts(old);
+  deployments(old, { identityAddress: "merak.aweb.ai/steward" });
+  assert.match(old.run(["--check"]).stdout, /^steward: found steward @ merak$/m, "a kernel without desktop-facts");
 });
 
 test("--check: no steward in any deployment is not ready, and says how to spawn one", (t) => {
@@ -214,14 +221,27 @@ test("--now with everything there: eight steps, each found and used, then the on
   ]);
 });
 
-test("--now: the found-list gives the steward's global address, from its home's oats.aweb identity", (t) => {
+test("--now: the found-list gives the steward's address from its oats status row, not a bare alias", (t) => {
   const w = world(t);
   ALL(w);
   withChannel(w);
-  const { a } = deployments(w, { identity: { mode: "global", alias: "steward", team: "default:merak.aweb.ai", address: "merak.aweb.ai/steward", resident: "steward" } });
+  const { a } = deployments(w, { identityAddress: "merak.aweb.ai/steward" });
   const r = w.run(["--now", "--harness", "claude"]);
   assert.equal(r.status, 0, r.out);
   assert.deepEqual(found(w).deployments[0], { dir: a, name: "merak", state: "ok", steward: true, stewardAddress: "merak.aweb.ai/steward" });
+  const local = world(t);
+  ALL(local);
+  withChannel(local);
+  deployments(local, { identityAddress: "steward" });
+  assert.equal(local.run(["--now", "--harness", "claude"]).status, 0);
+  assert.equal(found(local).deployments[0].stewardAddress, null, "a local identity's alias is not an address");
+  const old = world(t);
+  ALL(old);
+  withChannel(old);
+  withoutDesktopFacts(old);
+  deployments(old, { identityAddress: "merak.aweb.ai/steward" });
+  assert.equal(old.run(["--now", "--harness", "claude"]).status, 0);
+  assert.equal(found(old).deployments[0].stewardAddress, null, "a kernel without desktop-facts");
 });
 
 test("--now installs what is missing with mise, says so, and the found-list says installed", (t) => {
