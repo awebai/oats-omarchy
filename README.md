@@ -591,12 +591,24 @@ SUPER + SHIFT + CTRL + A, which opens it too once you pick OATS
 (`setup --apply --only agent-key`, or the OATS row in Omarchy's Default
 Agent menu); `omarchy-install-oats`, which installs what is missing and
 hands its found-list to an onboarding agent; and `Ctrl+\` to leave a
-session's viewer. v0.8.0 makes onboarding safer: `omarchy-install-oats`
-shows one consent screen before it changes anything and takes its answers
-from the terminal, never stdin; the agent key focuses the steward's window
-when it is open and opens it otherwise, one press at a time; `--check` and
-the found-list give the steward's global address; and the pin command
-fetches the release's tag, so it works after `omarchy plugin update`.
+session's viewer. v0.8.0 adds:
+
+- **GitHub sign-in.** `omarchy-install-oats` can sign `gh` in to GitHub,
+  with the scopes onboarding needs, and run `gh auth setup-git`. It shows
+  that, and the agent-key move, on one consent screen before it changes
+  anything. It reads your answers from the terminal; with no terminal it
+  changes nothing.
+- **The steward's own window.** It has the app-id
+  `org.omarchy.agent.oats-steward`. Hyprland rules keyed on the class
+  `org.omarchy.agent` no longer match it, and clicking an Omarchy
+  notification doesn't focus it. The agent key focuses the window when it's
+  open and opens it otherwise; two quick presses open one window.
+- **The steward's address.** `--check` and the found-list give the
+  steward's global address when it has one.
+
+After updating from v0.7.0, run `setup --apply` again. Until you do, the
+bar's card for the steward opens a second viewer instead of focusing the
+window. The README's pin command now fetches the tag first.
 `omarchy plugin add` installs the tip of the default branch; to stay on
 v0.8.0, pin it as described under "Pinning a release".
 
