@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "ai.aweb.oats",
   "name": "OATS",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "author": "OATS Framework",
   "license": "MIT",
-  "description": "OATS on Omarchy: an OATS icon in the bar whose panel shows the agents waiting on you as cards, read when you open it, and opens their sessions, the TUI and the Desktop; a setup script for launchers, keys, and the OATS row in SUPER + SPACE that opens the default UI; omarchy-launch-oats and the agent key, which open the machine's steward; and omarchy-install-oats, which installs OATS and hands over to an onboarding agent.",
+  "description": "OATS on Omarchy: an OATS icon in the bar whose panel shows the agents waiting on you as cards, read when you open it, and opens their sessions, the TUI and the Desktop; a setup script for launchers, keys, and the OATS row in SUPER + SPACE that opens the default UI; omarchy-launch-oats and the agent key, which open the machine's steward; and omarchy-install-oats, which asks before it signs in to GitHub or moves the agent key, then installs OATS and hands over to an onboarding agent.",
   "kinds": [
     "bar-widget",
     "overlay"
