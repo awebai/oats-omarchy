@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { APP_ID, deliverPrompt, findWindow, launch, launchLockAddress, LAUNCH_SCRIPT, parseArgs } from "../lib/launch.mjs";
+import { APP_ID, deliverPrompt, findWindow, launch, LAUNCH_LOCK, LAUNCH_SCRIPT, LOCK_BUSY, parseArgs } from "../lib/launch.mjs";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import { STATE_SCHEMA } from "../lib/state.mjs";
 import { DETACH_KEY } from "../lib/waiting.mjs";
@@ -16,6 +16,9 @@ import { ALL_FEATURES, fakeKernel, gone } from "./helpers/fake-kernel.mjs";
 import { fixture, repo, sandbox, writeExecutable } from "./helpers/sandbox.mjs";
 
 const LAUNCHER = join(repo, "bin", "omarchy-launch-oats");
+// The launch lock is flock(1), util-linux's: Linux, where the plugin runs.
+const REAL_FLOCK = ["/usr/bin/flock", "/bin/flock"].find((f) => existsSync(f)) || null;
+const lockSkip = REAL_FLOCK ? false : "flock(1) is util-linux's and this host has none: CI on Linux runs the lock itself";
 const STATUS = JSON.parse(readFileSync(fixture("steward", "status-0.67.1.json"), "utf8"));
 // Every character a shell or an option parser would take for its own.
 const TRICKY = "-n 'single' \"double\" $(touch pwned) `touch ticked`; rm -rf ~\nand a second line\n";
@@ -36,6 +39,13 @@ function world(t, { features = ALL_FEATURES, kernel = true } = {}) {
   }
   const run = join(s.root, "run");
   mkdirSync(run, { mode: 0o700 });
+  // Without the host's flock (macOS), a stand-in that runs the command and
+  // excludes nothing, so the rest of the launcher is tested; the lock's own
+  // behaviour is tested only with the real one (lockSkip).
+  if (!REAL_FLOCK) writeExecutable(join(s.fakebin, "flock"), `#!/bin/sh
+while [ $# -gt 0 ]; do case $1 in -w) shift 2 ;; -o | -n) shift ;; *) break ;; esac; done
+shift; exec "$@"
+`);
   const env = { ...s.env, XDG_RUNTIME_DIR: run };
   // Omarchy's launcher: logs its argv and, as the window does when it
   // starts, claims the handoff, keeps what the prompt file held
@@ -83,6 +93,9 @@ const promptFile = (w, text) => {
   return path;
 };
 const argvs = (w) => w.k.calls().map((c) => c.argv);
+// What is in the runtime directory but the launch lock's file, which flock
+// keeps there by design (the lock is the flock on it, never the file).
+const runtimeEntries = (w) => readdirSync(w.run).filter((f) => f !== LAUNCH_LOCK);
 const set = (w, name, text) => writeFileSync(join(w.k.k, name), text);
 async function waitFor(check, ms = 10_000) {
   const end = Date.now() + ms;
@@ -104,7 +117,7 @@ test("no arguments: one window, omarchy-launch-tui --app-id=org.omarchy.agent <n
   assert.match(argv[5], new RegExp(`^${w.run}/oats-omarchy-launch-[^/]+/claim$`), "under XDG_RUNTIME_DIR");
   assert.equal(LAUNCH_SCRIPT, join(repo, "bin", "launch.mjs"));
   assert.deepEqual(w.k.calls(), [], "the outer process runs no kernel command: the window does");
-  assert.deepEqual(readdirSync(w.run), [], "the window removed the handoff it claimed");
+  assert.deepEqual(runtimeEntries(w), [], "the window removed the handoff it claimed");
 });
 
 test("--prompt: the text reaches the window in a new 0600 file in a private directory under XDG_RUNTIME_DIR, never in argv", (t) => {
@@ -122,18 +135,25 @@ test("--prompt: the text reaches the window in a new 0600 file in a private dire
   assert.match(file, /^-rw------- /);
   assert.match(dir, /^drwx------ /);
   assert.ok(!argv.some((a) => a.includes("pwned")), "no part of the prompt in argv");
-  assert.deepEqual(readdirSync(w.run), []);
+  assert.deepEqual(runtimeEntries(w), []);
 });
 
-test("--prompt without XDG_RUNTIME_DIR: the handoff goes in the temporary directory", (t) => {
+test("without a usable XDG_RUNTIME_DIR, or without flock, nothing opens and the notification says what is missing", (t) => {
   const w = world(t);
-  const tmp = join(w.s.root, "tmp");
-  mkdirSync(tmp);
-  const r = outer(w, ["--prompt", "hello"], { XDG_RUNTIME_DIR: "", TMPDIR: tmp });
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(w.tuiArgs()[7], new RegExp(`^${tmp}/oats-omarchy-launch-[^/]+/prompt$`));
-  assert.equal(readFileSync(join(w.s.root, "prompt.seen"), "utf8"), "hello");
-  assert.deepEqual(readdirSync(tmp), []);
+  for (const runtime of ["", "relative", join(w.s.root, "gone")]) {
+    const r = outer(w, ["--prompt", "hello"], { XDG_RUNTIME_DIR: runtime });
+    assert.equal(r.status, 1, JSON.stringify(runtime));
+    const line = "$XDG_RUNTIME_DIR is not a directory: the launch lock lives there, so nothing was opened";
+    assert.equal(r.stderr, `omarchy-launch-oats: ${line}: your prompt was not sent\n`);
+    assert.ok(w.notified().endsWith(`Could not open the OATS steward\n${line}: your prompt was not sent\n--\n`));
+  }
+  const noFlock = join(w.s.root, "no-flock");
+  mkdirSync(noFlock);
+  for (const dir of [w.s.fakebin, join(w.s.root, "hostbin")]) for (const f of readdirSync(dir)) if (f !== "flock") symlinkSync(join(dir, f), join(noFlock, f));
+  const r = outer(w, [], { PATH: noFlock });
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "omarchy-launch-oats: flock is not on PATH (util-linux): the launch lock needs it, so nothing was opened\n");
+  assert.equal(w.tuiArgs(), null, "no window, ever, without the lock");
 });
 
 test("an empty or blank --prompt, or a bad argument, is refused before any window opens", (t) => {
@@ -144,7 +164,7 @@ test("an empty or blank --prompt, or a bad argument, is refused before any windo
     assert.match(r.stderr, /^omarchy-launch-oats: .*\nusage: omarchy-launch-oats /);
   }
   assert.equal(w.tuiArgs(), null);
-  assert.equal(readdirSync(w.run).length, 0, "no prompt file left behind");
+  assert.equal(runtimeEntries(w).length, 0, "no prompt file left behind");
 });
 
 test("parseArgs: a prompt that starts with a dash is the prompt; --prompt=<text> works too", () => {
@@ -202,7 +222,7 @@ test("before the window: a launcher that fails at once says so after its own mes
   const line = "omarchy-launch-tui: exited with status 1 before the window started: your prompt was not sent";
   assert.equal(r.stderr, `xdg-terminal-exec: configured terminal could not start\nomarchy-launch-oats: ${line}\n`);
   assert.equal(w.notified(), `Could not open the OATS steward\n${line}\n--\n`);
-  assert.deepEqual(readdirSync(w.run), [], "the handoff and the prompt are gone");
+  assert.deepEqual(runtimeEntries(w), [], "the handoff and the prompt are gone");
 });
 
 test("before the window: a launcher that fails later, but before the window claims the handoff, is a failure too", (t) => {
@@ -212,7 +232,7 @@ test("before the window: a launcher that fails later, but before the window clai
   assert.equal(r.status, 1);
   assert.match(r.stderr, /omarchy-launch-oats: omarchy-launch-tui: exited with status 1 before the window started\n$/);
   assert.match(w.notified(), /^Could not open the OATS steward\n/);
-  assert.deepEqual(readdirSync(w.run), []);
+  assert.deepEqual(runtimeEntries(w), []);
 });
 
 test("a window that started and ended at once (detached with Ctrl+\\, status 20) is a launch that worked", (t) => {
@@ -235,7 +255,7 @@ process.exit(0);`);
   const r = outer(w, ["--prompt", "hello"]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(w.notified(), "");
-  assert.deepEqual(readdirSync(w.run), []);
+  assert.deepEqual(runtimeEntries(w), []);
 });
 
 test("a launcher still running with no claim from the window by the deadline: the window did not start; the prompt is withdrawn", async (t) => {
@@ -246,7 +266,7 @@ test("a launcher still running with no claim from the window by the deadline: th
   assert.equal(code, 1);
   assert.equal(err.join(""), "omarchy-launch-oats: omarchy-launch-tui: the window did not start within 1 s: your prompt was not sent\n");
   assert.match(w.notified(), /did not start within 1 s/);
-  assert.deepEqual(readdirSync(w.run), [], "the prompt is withdrawn");
+  assert.deepEqual(runtimeEntries(w), [], "the prompt is withdrawn");
   process.kill(Number(launcherLog(w).trim()), "SIGKILL");
 });
 
@@ -259,7 +279,7 @@ test("a launcher still running once the window claimed the handoff is the open w
   assert.equal(seen, "hello");
   process.kill(Number(pid), 0);
   process.kill(Number(pid), "SIGKILL");
-  assert.deepEqual(readdirSync(w.run), []);
+  assert.deepEqual(runtimeEntries(w), []);
 });
 
 test("a window claim that only the deadline sees (after the last poll) is a window that started; the handoff is the window's", async (t) => {
@@ -267,7 +287,7 @@ test("a window claim that only the deadline sees (after the last poll) is a wind
   launcherDoing(w, "writeFileSync(claim, 'window\\n', { flag: 'wx' }); log(String(process.pid)); setTimeout(() => {}, 60_000);");
   const code = await launch(["--prompt", "hello"], w.env, { err: { write: () => {} }, windowStartMs: 3000, pollMs: 60_000 });
   assert.equal(code, 0);
-  const [handoff] = readdirSync(w.run);
+  const [handoff] = runtimeEntries(w);
   assert.equal(readFileSync(join(w.run, handoff, "claim"), "utf8"), "window\n", "the launch did not take it back");
   assert.equal(readFileSync(join(w.run, handoff, "prompt"), "utf8"), "hello", "nor remove the window's prompt");
   process.kill(Number(launcherLog(w).trim()), "SIGKILL");
@@ -455,7 +475,7 @@ test("--prompt end to end: the window reads the file, deletes it, and the kernel
   const input = calls.find((c) => c.argv[1] === "input");
   assert.deepEqual(input.argv, ["session", "input", "--home", w.home, "--json"], "stdin, never --text-file");
   assert.equal(Buffer.from(input.stdin, "base64").toString("utf8"), TRICKY);
-  assert.deepEqual(readdirSync(w.run), [], "the prompt and the handoff are gone");
+  assert.deepEqual(runtimeEntries(w), [], "the prompt and the handoff are gone");
   assert.equal(readFileSync(join(w.s.root, "window.out"), "utf8"), "omarchy-launch-oats: your prompt was sent to the steward\nexit 0\n");
   assert.ok(!existsSync(join(w.s.home, "pwned")) && !existsSync(join(w.s.deployment, "pwned")) && !existsSync(join(w.s.home, "ticked")));
 });
@@ -584,18 +604,22 @@ test("deliverPrompt: a failed input is never sent again", async (t) => {
 });
 
 // Every kernel call the window adds, hanging with a child: ended at its
-// bound, the kernel and its child gone, the step named.
+// bound, the kernel and its child gone, the step named. The bound leaves a
+// node child room to start, and write its pids, on a loaded host.
+const HANG_MS = 2000;
 for (const [cmd, line] of [
-  ["version", /^omarchy-launch-oats: finding the steward: oats version --json failed: timed out after 400 ms\n/],
-  ["start", /^omarchy-launch-oats: starting the steward \(.*\): timed out after 400 ms\n/],
+  ["version", new RegExp(`^omarchy-launch-oats: finding the steward: oats version --json failed: timed out after ${HANG_MS} ms\n`)],
+  ["start", new RegExp(`^omarchy-launch-oats: starting the steward \\(.*\\): timed out after ${HANG_MS} ms\n`)],
   // Retried until the readiness deadline: each hanging read ended at its bound.
-  ["inspect", /^omarchy-launch-oats: sending your prompt: the steward's session could not be inspected within 5 s: timed out after 400 ms: your prompt was not sent\n/],
-  ["input", /^omarchy-launch-oats: sending your prompt: timed out after 400 ms: it may or may not have gone in, and it is not sent again\n/],
+  ["inspect", new RegExp(`^omarchy-launch-oats: sending your prompt: the steward's session could not be inspected within 5 s: timed out after ${HANG_MS} ms: your prompt was not sent\n`)],
+  ["input", new RegExp(`^omarchy-launch-oats: sending your prompt: timed out after ${HANG_MS} ms: it may or may not have gone in, and it is not sent again\n`)],
 ]) test(`a hanging session ${cmd} is ended at its bound with its child, and the window says so`, async (t) => {
   const w = world(t);
   set(w, `${cmd}.mode`, "hang");
   const start = Date.now();
-  const r = await inner(w, ["--prompt-file", promptFile(w, "hello")], { timeouts: { version: 400, start: 400, inspect: 400, input: 400, ready: 5000 } });
+  // Only the hanging call has the tight bound: the others, which answer, have
+  // room to on a loaded host.
+  const r = await inner(w, ["--prompt-file", promptFile(w, "hello")], { timeouts: { version: 5000, start: 5000, inspect: 5000, input: 5000, [cmd]: HANG_MS, ready: 5000 } });
   assert.ok(Date.now() - start < 15_000);
   assert.match(r.err, line);
   assert.equal(r.pauses, 1);
@@ -626,7 +650,7 @@ test("--inline runs omarchy-agent --inline, the prompt one argv element, and pas
   assert.equal(r.status, 7, r.stderr);
   assert.deepEqual(JSON.parse(readFileSync(join(w.s.root, "agent.log"), "utf8")), ["--inline", "--prompt", TRICKY]);
   assert.equal(w.tuiArgs(), null, "no window");
-  assert.deepEqual(readdirSync(w.run), [], "no prompt file");
+  assert.deepEqual(runtimeEntries(w), [], "no prompt file");
   const plain = outer(w, ["--prompt", "x", "--inline"]);
   assert.equal(plain.status, 7);
   assert.deepEqual(JSON.parse(readFileSync(join(w.s.root, "agent.log"), "utf8").trim().split("\n")[1]), ["--inline", "--prompt", "x"]);
@@ -731,7 +755,7 @@ test("a second press: the steward's window is focused with Hyprland's Lua dispat
   assert.equal(w.tuiArgs(), null, "no second window");
   assert.deepEqual(w.k.calls(), [], "no kernel call: no new viewer session");
   assert.equal(w.notified(), "");
-  assert.deepEqual(readdirSync(w.run), [], "no handoff");
+  assert.deepEqual(runtimeEntries(w), [], "no handoff");
 });
 
 test("a second press under a hyprlang config: the Lua form is an unknown dispatcher, so focuswindow focuses it", (t) => {
@@ -785,7 +809,7 @@ test("--prompt with the steward's window open: focused, then the prompt is sent 
   assert.equal(Buffer.from(input.stdin, "base64").toString("utf8"), TRICKY);
   assert.equal(r.stderr, "omarchy-launch-oats: your prompt was sent to the steward\n");
   assert.equal(w.notified(), "OATS steward\nyour prompt was sent to the steward\n--\n");
-  assert.deepEqual(readdirSync(w.run), [], "no handoff: the prompt never touched a file");
+  assert.deepEqual(runtimeEntries(w), [], "no handoff: the prompt never touched a file");
   assert.ok(!existsSync(join(w.s.home, "pwned")) && !existsSync(join(w.s.home, "ticked")));
 });
 
@@ -833,7 +857,7 @@ const outerAsync = (w, args) => new Promise((done) => {
   child.once("exit", (status) => done({ status, stderr: err }));
 });
 
-test("two presses while the first window is still starting: one window; the second waits for it and focuses it", async (t) => {
+test("two presses while the first window is still starting: one window; the second waits for it and focuses it", { skip: lockSkip }, async (t) => {
   const w = world(t);
   const h = hyprland(w, { clients: "clients-none.json" });
   slowWindow(w);
@@ -841,10 +865,10 @@ test("two presses while the first window is still starting: one window; the seco
   assert.deepEqual([a.status, b.status], [0, 0], a.stderr + b.stderr);
   assert.deepEqual(launcherLog(w).trim().split("\n"), ["launched -"], "exactly one window");
   assert.ok(h.calls().some((c) => c[0] === "dispatch"), "the second press focused it");
-  assert.deepEqual(readdirSync(w.run).filter((f) => !f.startsWith("oats-omarchy-launch-")), [], "nothing left in the runtime directory");
+  assert.deepEqual(runtimeEntries(w), [], "no handoff left");
 });
 
-test("two presses with prompts while the first window starts: the first prompt reaches the window, the second is sent to the steward", async (t) => {
+test("two presses with prompts while the first window starts: the first prompt reaches the window, the second is sent to the steward", { skip: lockSkip }, async (t) => {
   const w = world(t);
   hyprland(w, { clients: "clients-none.json" });
   slowWindow(w);
@@ -858,56 +882,55 @@ test("two presses with prompts while the first window starts: the first prompt r
   assert.equal(Buffer.from(input.stdin, "base64").toString("utf8"), "second");
 });
 
-
-
-
-// A process holding the launch lock as a launch does: it listens on the
-// lock's address, says so, and waits. The address goes in JSON: on Linux it
-// starts with a NUL (the abstract namespace), which argv cannot carry.
-// → { child, ready }.
-function holder(w) {
-  const child = spawn(process.execPath, ["-e", `require("node:net").createServer().listen(JSON.parse(process.argv[1]), () => process.stdout.write("ready")); setInterval(() => {}, 1000);`, JSON.stringify(launchLockAddress(w.env))], { stdio: ["ignore", "pipe", "inherit"] });
-  const ready = new Promise((done) => child.stdout.once("data", () => done()));
-  return { child, ready };
+// A process holding the launch lock: flock(1) on it, running sleep, with
+// the lock's descriptor closed in sleep (-o), so killing flock frees it.
+async function lockHolder(w) {
+  const lock = join(w.run, LAUNCH_LOCK);
+  const child = spawn(REAL_FLOCK, ["-o", lock, "sleep", "60"], { stdio: "ignore" });
+  const held = () => spawnSync(REAL_FLOCK, ["-n", "-o", lock, "true"]).status !== 0;
+  assert.ok(await waitFor(held), "the holder has the lock");
+  return { child, lock, held };
 }
 
-test("a launch that died holding the lock leaves nothing in the way: the next press opens the window at once", async (t) => {
+test("a press while another holds the lock past the bound opens nothing, and says to try again", { skip: lockSkip }, async (t) => {
   const w = world(t);
   hyprland(w, { clients: "clients-none.json" });
-  const h = holder(w);
-  await h.ready;
+  const h = await lockHolder(w);
+  t.after(() => h.child.kill("SIGKILL"));
+  const err = [];
+  const started = Date.now();
+  const code = await launch(["--prompt", "hello"], w.env, { err: { write: (x) => err.push(x) }, windowStartMs: 300, timeouts: { hyprctl: 100 } });
+  assert.equal(code, 1);
+  assert.ok(Date.now() - started < 5_000, `${Date.now() - started} ms`);
+  const line = "another press is still opening the steward; try again in a moment";
+  assert.equal(err.join(""), `omarchy-launch-oats: ${line}: your prompt was not sent\n`);
+  assert.equal(w.notified(), `Could not open the OATS steward\n${line}: your prompt was not sent\n--\n`);
+  assert.equal(line, LOCK_BUSY);
+  assert.equal(w.tuiArgs(), null);
+  assert.deepEqual(w.k.calls(), [], "nothing sent");
+});
+
+test("a holder of the lock that died frees it: the next press opens the window at once", { skip: lockSkip }, async (t) => {
+  const w = world(t);
+  hyprland(w, { clients: "clients-none.json" });
+  const h = await lockHolder(w);
   h.child.kill("SIGKILL");
-  await new Promise((done) => h.child.once("exit", done));
+  assert.ok(await waitFor(() => !h.held()), "the kernel freed it");
   const started = Date.now();
   const r = outer(w, []);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(w.tuiArgs()[0], `--app-id=${APP_ID}`);
-  assert.ok(Date.now() - started < 5_000, "no wait for a holder that is gone");
+  assert.ok(Date.now() - started < 5_000);
 });
 
-test("two presses after a launch died holding the lock: one window", async (t) => {
-  const w = world(t);
-  const hc = hyprland(w, { clients: "clients-none.json" });
-  slowWindow(w);
-  const h = holder(w);
-  await h.ready;
-  h.child.kill("SIGKILL");
-  await new Promise((done) => h.child.once("exit", done));
-  const [a, b] = await Promise.all([outerAsync(w, []), outerAsync(w, [])]);
-  assert.deepEqual([a.status, b.status], [0, 0], a.stderr + b.stderr);
-  assert.deepEqual(launcherLog(w).trim().split("\n"), ["launched -"], "exactly one window");
-  assert.ok(hc.calls().some((c) => c[0] === "dispatch"));
-});
-
-test("a press waits for a live holder of the lock only as long as its bound, then goes on", async (t) => {
+test("the window never holds the lock: once its press is done, the lock is free while the window runs", { skip: lockSkip }, async (t) => {
   const w = world(t);
   hyprland(w, { clients: "clients-none.json" });
-  const h = holder(w);
-  t.after(() => h.child.kill("SIGKILL"));
-  await h.ready;
-  const started = Date.now();
-  const code = await launch([], w.env, { err: { write: () => {} }, windowStartMs: 300, pollMs: 20, timeouts: { hyprctl: 100 } });
-  assert.equal(code, 0);
-  assert.ok(Date.now() - started < 3_000, `${Date.now() - started} ms`);
-  assert.equal(w.tuiArgs()[0], `--app-id=${APP_ID}`, "it opened the window, without the lock");
+  launcherDoing(w, "log(String(process.pid)); writeFileSync(claim, 'window', { flag: 'wx' }); require('node:fs').rmSync(require('node:path').dirname(claim), { recursive: true }); setTimeout(() => {}, 60_000);");
+  const r = outer(w, []);
+  assert.equal(r.status, 0, r.stderr);
+  const pid = Number(launcherLog(w).trim());
+  t.after(() => { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } });
+  process.kill(pid, 0);
+  assert.equal(spawnSync(REAL_FLOCK, ["-n", "-o", join(w.run, LAUNCH_LOCK), "true"]).status, 0, "free while the window is alive");
 });

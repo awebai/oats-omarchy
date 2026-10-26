@@ -429,24 +429,34 @@ same node lookup as `setup`. Without a node it says so on stderr and with
     v0.56.2 prints it (`CHyprCtl::getWindowData`), and `test/launch.test.mjs`
     has a stand-in hyprctl with its replies under a Lua and a hyprlang
     config.
-- **One launch at a time** (`LAUNCH_LOCK`, `launchLockAddress`). The
-  lookup and the launch run under a lock: a socket the holder listens on,
-  held until the launched window claims its handoff, so a second press
-  before the first window maps waits, looks again and focuses that window.
-  The kernel owns it: binding fails while a process holds it and it is
-  freed when the holder ends, so a launch that died leaves nothing behind
-  and nothing is ever taken over or removed. On Linux it is a Unix socket
-  in the abstract namespace; elsewhere (macOS, for the tests) a loopback
-  TCP port. Both are named for the user and the runtime directory's hash,
-  so the tests' sandboxes never share one. Every wait is bounded
-  (`WINDOW_START` plus two hyprctl bounds) and yields; a press that cannot
-  get the lock goes on without it. A prompt for an open window is sent
-  after the lock is released. The tests' holder passes the address as JSON,
-  since an abstract name starts with a NUL, which argv cannot carry; the
-  abstract-namespace path runs only on Linux, in CI.
+- **One launch at a time** (`LAUNCH_LOCK`, `takeLaunchLock`). The lookup
+  and the launch run under flock(1) on
+  `$XDG_RUNTIME_DIR/oats-omarchy-launch.lock`, held until the launched
+  window claims its handoff, so a second press before the first window maps
+  waits, looks again and focuses that window. Node has no flock, so the
+  launch spawns a holder, `flock -w <secs> -o <lock> sh -c 'echo locked;
+  exec cat > /dev/null'`: its `locked` line is the lock taken, and it holds
+  the lock until the launch closes its stdin, or dies. The kernel frees the
+  lock with the holder, so a launch that died leaves nothing to take over;
+  the file stays, and only the flock on it is the lock. The window is
+  spawned by the launch, not the holder, so it never holds the lock (`-o`
+  keeps the descriptor from `sh` too).
+  - The wait is bounded (`WINDOW_START` plus two hyprctl bounds). A press
+    that does not get the lock within it opens nothing and says, on stderr
+    and in a notification, that another press is still opening the steward
+    (`LOCK_BUSY`).
+  - It fails closed: with no `$XDG_RUNTIME_DIR` directory, or no flock on
+    PATH (util-linux), the press opens nothing and names what is missing,
+    and never goes on unlocked.
+  - A prompt for an open window is sent after the lock is released.
+  - flock is util-linux's, so on macOS `test/launch.test.mjs` puts a
+    stand-in on PATH that runs the command and excludes nothing, and skips
+    the lock's own tests (a held lock, a dead holder, two overlapping
+    presses, the window not holding the lock), saying why; CI on Linux runs
+    them with the real flock.
 - **Otherwise the outer process only opens the window.** It checks that
-  `omarchy-launch-tui` is on PATH, and makes the handoff: a private directory (0700) under `$XDG_RUNTIME_DIR` (else the temporary
-  directory) that holds the prompt, if any. Then it starts
+  `omarchy-launch-tui` is on PATH, and makes the handoff: a private directory (0700) under `$XDG_RUNTIME_DIR` that holds the
+  prompt, if any. Then it starts
   `omarchy-launch-tui --app-id=org.omarchy.agent.oats-steward <node> <plugin>/bin/launch.mjs
   --in-terminal --claim-file <handoff>/claim [--prompt-file
   <handoff>/prompt]` on its own, detached, with its own output as an exec
