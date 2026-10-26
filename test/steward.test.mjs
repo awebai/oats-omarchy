@@ -238,7 +238,7 @@ test("stewardsIn: the address is the row's identityAddress in namespace/alias fo
   assert.equal(rowOf(undefined).address, null, "a row without identityAddress");
   assert.equal(rowOf(7).address, null);
   assert.equal(rowOf("merak.aweb.ai/steward", ALL_FEATURES.filter((f) => f !== "desktop-facts")).address, null, "a kernel without desktop-facts");
-  assert.equal(rowOf("merak.aweb.ai/steward", undefined).address, null, "features not given");
+  assert.equal(stewardsIn(JSON.stringify({ ...STATUS, agents: withAddress("merak.aweb.ai/steward") }))[0].address, null, "features not given");
 });
 
 test("findSteward: the address only from a kernel that advertises desktop-facts", async (t) => {

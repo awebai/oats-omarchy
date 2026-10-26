@@ -514,11 +514,13 @@ same node lookup as `setup`. Without a node it says so on stderr and with
     README make that acceptable. Setup's own lookup always scans.
   - `stewardsIn` gives each steward's `address`, for `--check`'s steward
     line and the found-list's `stewardAddress`: its status row's
-    `identityAddress` (the kernel's `desktop-facts`). It is an address only
-    when the kernel reports one in namespace/alias form; a bare alias is not
-    an address. The kernel gives a local identity's alias there, so a local
+    `identityAddress`, only when the kernel's features (`version --json`)
+    list `desktop-facts` (`ADDRESS_FEATURE`). It is an address only when the
+    kernel reports one in namespace/alias form; a bare alias is not an
+    address. The kernel gives a local identity's alias there, so a local
     steward's is null, as is a row without the field. Nothing is read from
-    the steward's home. The name is never used to find the steward, so
+    the steward's home. `findSteward` passes the features it reads;
+    `deploymentsWithSteward` reads them once for the found-list. The name is never used to find the steward, so
     `SPAWN_HINT` names none.
 - **The prompt** (`--prompt`) travels in a 0600 file in the handoff,
   passed as `--prompt-file`. It never goes in argv, which uwsm writes to the journal.

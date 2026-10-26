@@ -81,10 +81,11 @@ One JSON object, with no secrets:
   installer stops, naming it: a `steward: false` was always read.
   - **`stewardAddress`** is the steward's aweb address when the deployment
     lists exactly one steward: its row's `identityAddress` in that
-    deployment's `oats status --json` (the kernel's `desktop-facts`). It is
-    an address only when the kernel reports one in namespace/alias form; a
-    bare alias is not an address. Otherwise, a local identity or a row
-    without the field included, it is null.
+    deployment's `oats status --json`, read only when the kernel's
+    `version --json` lists the feature `desktop-facts`. It is an address
+    only when the kernel reports one in namespace/alias form; a bare alias
+    is not an address. Otherwise, a local identity, a row without the field
+    or a kernel without the feature included, it is null.
 
 ## Versioning
 
