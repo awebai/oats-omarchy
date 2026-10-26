@@ -3,12 +3,11 @@
 // test/fixtures/steward, shaped like 0.67.1's), through setup's shim.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import { STATE_SCHEMA } from "../lib/state.mjs";
-import { findSteward, stewardAddress, stewardsIn } from "../lib/steward.mjs";
+import { findSteward, stewardsIn } from "../lib/steward.mjs";
 import { STEWARD_AGENT, STEWARD_KEY } from "../lib/steward-agent.mjs";
 import { ALL_FEATURES, fakeKernel, gone } from "./helpers/fake-kernel.mjs";
 import { fixture, sandbox } from "./helpers/sandbox.mjs";
@@ -226,24 +225,15 @@ test("recordedFirst: no recorded deployment, or no list: as without it", async (
   assert.deepEqual(statusReads(old), [old.paths[0]], "read once, as the state's one deployment");
 });
 
-// stewardAddress: the address the oats.aweb provider records in the steward's
-// home (instance.json capabilityMeta."oats.aweb".identity) for a seat on a
-// GLOBAL resident; null for anything else, never a throw.
-test("stewardAddress: a global identity's address, else null", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "oats-omarchy-address-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const home = (name, text) => {
-    const dir = join(root, name);
-    mkdirSync(dir);
-    if (text !== undefined) writeFileSync(join(dir, "instance.json"), text);
-    return dir;
-  };
-  const record = (identity) => JSON.stringify({ instance: "steward", capabilityMeta: { "oats.aweb": { identity } } });
-  assert.equal(stewardAddress(home("global", record({ mode: "global", alias: "steward", address: "merak.aweb.ai/steward", resident: "steward" }))), "merak.aweb.ai/steward");
-  assert.equal(stewardAddress(home("local", record({ mode: "local", alias: "steward", address: null, resident: null }))), null);
-  assert.equal(stewardAddress(home("global-without-address", record({ mode: "global", alias: "steward", address: null }))), null);
-  assert.equal(stewardAddress(home("no-messaging", JSON.stringify({ instance: "steward", capabilityMeta: {} }))), null);
-  assert.equal(stewardAddress(home("not-json", "{")), null);
-  assert.equal(stewardAddress(home("no-record")), null);
-  assert.equal(stewardAddress(join(root, "no-home")), null);
+// The steward's address: the row's `identityAddress` (the kernel's
+// desktop-facts) when it is an aweb namespace/alias; a bare alias (a local
+// identity), or none, is no address.
+test("stewardsIn: the address is the row's identityAddress in namespace/alias form, else null", () => {
+  const withAddress = (identityAddress) => status({ stewards: [["steward", STEWARD_HOME]] }).agents.map((a) => (a.name === STEWARD_AGENT ? { ...a, instances: a.instances.map((i) => ({ ...i, identityAddress })) } : a));
+  const rowOf = (identityAddress) => stewardsIn(JSON.stringify({ ...STATUS, agents: withAddress(identityAddress) }))[0];
+  assert.deepEqual(rowOf("merak.aweb.ai/steward"), { instance: "steward", home: STEWARD_HOME, address: "merak.aweb.ai/steward" });
+  assert.equal(rowOf("steward").address, null, "a local identity's alias is not an address");
+  assert.equal(rowOf(null).address, null);
+  assert.equal(rowOf(undefined).address, null, "a row without identityAddress");
+  assert.equal(rowOf(7).address, null);
 });
