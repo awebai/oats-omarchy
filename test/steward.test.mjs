@@ -226,14 +226,29 @@ test("recordedFirst: no recorded deployment, or no list: as without it", async (
 });
 
 // The steward's address: the row's `identityAddress` (the kernel's
-// desktop-facts) when it is an aweb namespace/alias; a bare alias (a local
-// identity), or none, is no address.
+// desktop-facts) when it is an aweb namespace/alias and the kernel
+// advertises desktop-facts; a bare alias (a local identity), or none, is no
+// address.
 test("stewardsIn: the address is the row's identityAddress in namespace/alias form, else null", () => {
   const withAddress = (identityAddress) => status({ stewards: [["steward", STEWARD_HOME]] }).agents.map((a) => (a.name === STEWARD_AGENT ? { ...a, instances: a.instances.map((i) => ({ ...i, identityAddress })) } : a));
-  const rowOf = (identityAddress) => stewardsIn(JSON.stringify({ ...STATUS, agents: withAddress(identityAddress) }))[0];
+  const rowOf = (identityAddress, features = ALL_FEATURES) => stewardsIn(JSON.stringify({ ...STATUS, agents: withAddress(identityAddress) }), features)[0];
   assert.deepEqual(rowOf("merak.aweb.ai/steward"), { instance: "steward", home: STEWARD_HOME, address: "merak.aweb.ai/steward" });
   assert.equal(rowOf("steward").address, null, "a local identity's alias is not an address");
   assert.equal(rowOf(null).address, null);
   assert.equal(rowOf(undefined).address, null, "a row without identityAddress");
   assert.equal(rowOf(7).address, null);
+  assert.equal(rowOf("merak.aweb.ai/steward", ALL_FEATURES.filter((f) => f !== "desktop-facts")).address, null, "a kernel without desktop-facts");
+  assert.equal(rowOf("merak.aweb.ai/steward", undefined).address, null, "features not given");
+});
+
+test("findSteward: the address only from a kernel that advertises desktop-facts", async (t) => {
+  const row = (s) => ({ ...s, agents: s.agents.map((a) => (a.name === STEWARD_AGENT ? { ...a, instances: a.instances.map((i) => ({ ...i, identityAddress: "merak.aweb.ai/steward" })) } : a)) });
+  const facts = world(t, { a: row(STATUS), b: status({ stewards: [] }) });
+  assert.equal((await facts.find()).address, "merak.aweb.ai/steward");
+  recorded(facts, facts.paths[0]);
+  assert.equal((await facts.find({ recordedFirst: true })).address, "merak.aweb.ai/steward", "the launcher's fast path");
+  const old = world(t, { a: row(STATUS), b: status({ stewards: [] }), features: ALL_FEATURES.filter((f) => f !== "desktop-facts") });
+  assert.equal((await old.find()).address, null);
+  recorded(old, old.paths[0]);
+  assert.equal((await old.find({ recordedFirst: true })).address, null, "the launcher's fast path");
 });

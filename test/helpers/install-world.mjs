@@ -23,6 +23,15 @@ export const INSTALLER = join(repo, "bin", "omarchy-install-oats");
 const TTY = join(repo, "test", "helpers", "tty.py");
 // The host's python3, which runs it (the sandbox's PATH has none).
 const PYTHON = (process.env.PATH || "").split(":").filter(Boolean).map((d) => join(d, "python3")).find((f) => existsSync(f));
+// The features the stand-in OATS CLI advertises (`version --json`), as 0.67.1's.
+export const KERNEL_FEATURES = ["deployments-list", "desktop-facts", "session-attach-detach-key", "session-inspect-running", "waiting-on-you"];
+// Without desktop-facts: an `oats status --json` row's identityAddress is not
+// the kernel's to rely on.
+export const withoutDesktopFacts = (w) => {
+  const file = join(w.kernel.k, "version.json");
+  const version = JSON.parse(readFileSync(file, "utf8"));
+  writeFileSync(file, JSON.stringify({ ...version, features: version.features.filter((f) => f !== "desktop-facts") }));
+};
 export const STATUS = JSON.parse(readFileSync(fixture("steward", "status-0.67.1.json"), "utf8"));
 // git is the host's own, run against this HOME's ~/.gitconfig only
 // (GIT_CONFIG_NOSYSTEM), for github.com's credential helper.
@@ -178,7 +187,7 @@ echo "gh: $*" >&2; exit 1
     mkdirSync(join(pkg, "skills", "oats-getting-started"), { recursive: true });
     writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@awebai/oats", version }));
     writeFileSync(join(pkg, "skills", "oats-getting-started", "SKILL.md"), "# getting started\n");
-    writeFileSync(join(kernel.k, "version.json"), JSON.stringify({ schemaVersion: 1, name: "@awebai/oats", version, features: ["deployments-list", "session-attach-detach-key", "session-inspect-running", "waiting-on-you"] }));
+    writeFileSync(join(kernel.k, "version.json"), JSON.stringify({ schemaVersion: 1, name: "@awebai/oats", version, features: KERNEL_FEATURES }));
     writeExecutable(join(pkg, "bin", "oats.mjs"), `#!/bin/sh\nexec '${process.execPath}' '${join(kernel.k, "oats.mjs")}' "$@"\n`);
     return join(pkg, "bin", "oats.mjs");
   };

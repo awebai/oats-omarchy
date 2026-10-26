@@ -8,7 +8,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkS
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { awEnvironment, consentFacts, gettingStartedSkill, handoff, parseTools, PROMPT_FILE, renderPrompt } from "../lib/install.mjs";
-import { ALL, deployments, found, GH_SCOPES, harnessRun, INSTALLER, keyMoved, miseInstalls, signedIn, stepLines, withChannel, world } from "./helpers/install-world.mjs";
+import { ALL, deployments, found, GH_SCOPES, harnessRun, INSTALLER, keyMoved, miseInstalls, signedIn, stepLines, withChannel, withoutDesktopFacts, world } from "./helpers/install-world.mjs";
 import { repo, snapshot, writeExecutable } from "./helpers/sandbox.mjs";
 
 const BOOTSTRAP = ["oats onboard", "oats spawn", "aweb setup", "harness trust"];
@@ -57,6 +57,11 @@ test("--check: the steward's address only when the kernel reports one in namespa
     deployments(local, { identityAddress });
     assert.match(local.run(["--check"]).stdout, /^steward: found steward @ merak$/m, String(identityAddress));
   }
+  const old = world(t);
+  ALL(old);
+  withoutDesktopFacts(old);
+  deployments(old, { identityAddress: "merak.aweb.ai/steward" });
+  assert.match(old.run(["--check"]).stdout, /^steward: found steward @ merak$/m, "a kernel without desktop-facts");
 });
 
 test("--check: no steward in any deployment is not ready, and says how to spawn one", (t) => {
@@ -230,6 +235,13 @@ test("--now: the found-list gives the steward's address from its oats status row
   deployments(local, { identityAddress: "steward" });
   assert.equal(local.run(["--now", "--harness", "claude"]).status, 0);
   assert.equal(found(local).deployments[0].stewardAddress, null, "a local identity's alias is not an address");
+  const old = world(t);
+  ALL(old);
+  withChannel(old);
+  withoutDesktopFacts(old);
+  deployments(old, { identityAddress: "merak.aweb.ai/steward" });
+  assert.equal(old.run(["--now", "--harness", "claude"]).status, 0);
+  assert.equal(found(old).deployments[0].stewardAddress, null, "a kernel without desktop-facts");
 });
 
 test("--now installs what is missing with mise, says so, and the found-list says installed", (t) => {
