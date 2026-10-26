@@ -182,13 +182,21 @@ test("destroying the widget during a read stops waiting and the kernel's read wi
   w.plugin({ deployment, waiting: [process.execPath, join(repo, "bin", "waiting.mjs"), "--dir", deployment] });
   // waiting, the shim's sleep and its child (awk's own command line does not match).
   const ps = "ps -eo args | awk '/^sleep 30[01]$/ || /bin[/]waiting[.]mjs --dir/ { n++ } END { print n + 0 }'";
+  // Counted every 200 ms, waiting on each condition rather than a fixed time,
+  // which a loaded host can overrun: the widget is destroyed once all three
+  // run, and the count after that is taken once none does. Each wait gives
+  // up at 20 s, far inside the sleeps' 300 s, with the count it last saw.
   const records = w.play(scene(`
-  Process { id: ps; command: ["/bin/sh", "-c", ${JSON.stringify(ps)}]; stdout: StdioCollector { waitForEnd: true; onStreamFinished: scene.probe("ps", Number(text.trim())) } }
-  Timer { interval: 1000; running: true; onTriggered: scene.w.open() }
-  Timer { interval: 2500; running: true; onTriggered: ps.running = true }
-  Timer { interval: 3500; running: true; onTriggered: loader.active = false }
-  Timer { interval: 5000; running: true; onTriggered: ps.running = true }`, 6));
-  assert.deepEqual(records.map((r) => r.value), [3, 0], "waiting, the shim's sleep and its child; then none");
+  QtObject { id: watch; property int phase: 0; property real since: 0 }
+  function counted(n) {
+    var late = Date.now() - watch.since > 20000
+    if (watch.phase === 1 && (n === 3 || late)) { scene.probe("reading", n); watch.phase = 2; watch.since = Date.now(); loader.active = false }
+    else if (watch.phase === 2 && (n === 0 || late)) { scene.probe("destroyed", n); watch.phase = 3; Qt.quit() }
+  }
+  Process { id: ps; command: ["/bin/sh", "-c", ${JSON.stringify(ps)}]; stdout: StdioCollector { waitForEnd: true; onStreamFinished: scene.counted(Number(text.trim())) } }
+  Timer { interval: 1000; running: true; onTriggered: { scene.w.open(); watch.since = Date.now(); watch.phase = 1 } }
+  Timer { interval: 200; repeat: true; running: true; onTriggered: if ((watch.phase === 1 || watch.phase === 2) && !ps.running) ps.running = true }`, 50));
+  assert.deepEqual(records.map((r) => [r.what, r.value]), [["reading", 3], ["destroyed", 0]], "waiting, the shim's sleep and its child; then none");
 });
 
 // What the panel shows: whether it is reading, the rows, and the failure.
