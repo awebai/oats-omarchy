@@ -137,9 +137,14 @@ test("--check: an oats on PATH that links to an instance home's shim is not the 
   assert.equal(w.log("shim.log"), "");
 });
 
-test("--now without --harness and without a terminal is refused before anything runs, the floating terminal included", (t) => {
+// The no-terminal paths run under /bin/sh and under dash (Debian's and
+// Ubuntu's /bin/sh), where a failed redirection of a special builtin ends
+// the shell.
+const SHELLS = ["/bin/sh", "/bin/dash"].filter((f) => existsSync(f));
+
+for (const shell of SHELLS) test(`--now without --harness and without a terminal is refused before anything runs, the floating terminal included (${shell})`, (t) => {
   const w = world(t);
-  const r = w.run(["--now"], { tty: false });
+  const r = w.run(["--now"], { tty: false, shell });
   assert.equal(r.status, 2, r.out);
   assert.match(r.stderr, /^omarchy-install-oats: --now needs --harness claude\|codex\|pi without a terminal to ask in$/m);
   assert.equal(w.log("floating.log"), "");
@@ -587,11 +592,11 @@ test("--now takes its answers from the terminal: a y on stdin is not an answer",
   nothingChanged(w);
 });
 
-test("--now with no terminal to answer in, in the floating terminal's run, changes nothing and opens no other terminal", (t) => {
+for (const shell of SHELLS) test(`--now with no terminal to answer in, in the floating terminal's run, changes nothing and opens no other terminal (${shell})`, (t) => {
   const w = world(t);
   nothingDone(w);
   const { installer } = pluginCopy(w);
-  const r = w.run(["--now", "--harness", "claude"], { installer, tty: false, stdin: "y\n", extraEnv: { OMARCHY_INSTALL_OATS_TERMINAL: "1" } });
+  const r = w.run(["--now", "--harness", "claude"], { installer, tty: false, shell, stdin: "y\n", extraEnv: { OMARCHY_INSTALL_OATS_TERMINAL: "1" } });
   assert.equal(r.status, 2, r.out);
   assert.ok(r.stderr.endsWith("omarchy-install-oats: Nothing was changed: no terminal to answer in\n"), r.stderr);
   nothingChanged(w);
@@ -600,17 +605,31 @@ test("--now with no terminal to answer in, in the floating terminal's run, chang
   const asked = world(t);
   ALL(asked, { harness: "pi" });
   asked.setDefaultAgent("opencode");
-  const r2 = asked.run(["--now"], { tty: false, stdin: "pi\n", extraEnv: { OMARCHY_INSTALL_OATS_TERMINAL: "1" } });
+  const r2 = asked.run(["--now"], { tty: false, shell, stdin: "pi\n", extraEnv: { OMARCHY_INSTALL_OATS_TERMINAL: "1" } });
   assert.equal(r2.status, 2, r2.out);
   assert.ok(r2.stderr.endsWith("omarchy-install-oats: Nothing was changed: no terminal to answer in\n"), r2.stderr);
   assert.doesNotMatch(r2.stdout, /using pi/);
   nothingChanged(asked);
   assert.equal(asked.log("floating.log"), "");
+
+  // With nothing left to ask (the harness given, both acts done), still
+  // nothing runs: the onboarding agent needs the terminal too.
+  const done = world(t);
+  ALL(done);
+  withChannel(done);
+  const r3 = done.run(["--now", "--harness", "claude"], { tty: false, shell, extraEnv: { OMARCHY_INSTALL_OATS_TERMINAL: "1" } });
+  assert.equal(r3.status, 2, r3.out);
+  assert.ok(r3.stderr.endsWith("omarchy-install-oats: Nothing was changed: no terminal to answer in\n"), r3.stderr);
+  assert.equal(r3.stdout, "");
+  nothingChanged(done);
+  assert.equal(existsSync(join(done.home, "Work")), false, "no ~/Work");
+  assert.equal(existsSync(join(done.home, ".local", "state", "oats-omarchy", "found.json")), false, "no found-list");
+  assert.equal(done.log("floating.log"), "");
 });
 
-test("--now with no terminal runs again in Omarchy's floating terminal, as omarchy-default-agent does", (t) => {
+for (const shell of SHELLS) test(`--now with no terminal runs again in Omarchy's floating terminal, as omarchy-default-agent does (${shell})`, (t) => {
   const w = world(t);
-  const r = w.run(["--now", "--harness", "pi"], { tty: false });
+  const r = w.run(["--now", "--harness", "pi"], { tty: false, shell });
   assert.equal(r.status, 0, r.out);
   assert.equal(w.log("floating.log"), `OMARCHY_INSTALL_OATS_TERMINAL=1 '${INSTALLER}' --now --harness 'pi'\n--\n`);
   assert.equal(w.log("mise.log"), "", "nothing ran here");

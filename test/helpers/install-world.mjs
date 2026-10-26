@@ -236,13 +236,14 @@ echo "gh: $*" >&2; exit 1
 
   // The installer in a session of its own (test/helpers/tty.py): by default
   // with a terminal, a pty it reads `input` from as typed, as a person runs
-  // it; `tty: false` with none. Its stdin is `stdin`, its output captured.
-  const run = (args, { input = "", tty = true, stdin = "", extraEnv = {}, cwd = home, installer = INSTALLER } = {}) => {
+  // it; `tty: false` with none. Its stdin is `stdin`, its output captured;
+  // `shell` runs it (dash, say, which /bin/sh is on Debian and Ubuntu).
+  const run = (args, { input = "", tty = true, stdin = "", extraEnv = {}, cwd = home, installer = INSTALLER, shell = "/bin/sh" } = {}) => {
     const answers = join(root, "answers");
     writeFileSync(answers, input);
     const mode = tty ? ["tty", answers] : ["none"];
     if (!PYTHON) throw new Error("the installer's tests need python3 on PATH (test/helpers/tty.py)");
-    const r = spawnSync(PYTHON, [TTY, ...mode, "--", "/bin/sh", installer, ...args], { env: { ...env(), ...extraEnv }, input: stdin, encoding: "utf8", timeout: 60_000, cwd });
+    const r = spawnSync(PYTHON, [TTY, ...mode, "--", shell, installer, ...args], { env: { ...env(), ...extraEnv }, input: stdin, encoding: "utf8", timeout: 60_000, cwd });
     return { status: r.status, stdout: r.stdout, stderr: r.stderr, out: r.stdout + r.stderr };
   };
   return { root, home, bin, other, npm, miseData, shims, localBin, kernel, env, log, put, planMise, run, setDefaultAgent };

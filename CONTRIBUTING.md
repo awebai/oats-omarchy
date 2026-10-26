@@ -626,10 +626,13 @@ not exist yet), whether the agent key opens OATS (`agentKeyMoved`, and
   script itself. A terminal is a `/dev/tty` that opens.
 - **No terminal.** From the menu or a key, `--now` runs itself again in
   Omarchy's floating terminal, marked with `OMARCHY_INSTALL_OATS_TERMINAL=1`,
-  so that run never opens another; there, with still no terminal to answer
-  in, a question ends the run with "Nothing was changed: no terminal to
-  answer in". Without `--harness` and without the mark it is refused first,
-  since nobody can be asked.
+  so that run never opens another; there, with still no terminal, nothing
+  runs, even with nothing left to ask, since the onboarding agent runs in
+  it: "Nothing was changed: no terminal to answer in". Without `--harness`
+  and without the mark it is refused first, since nobody can be asked. The
+  no-terminal tests run under `/bin/sh` and under dash (Debian's and
+  Ubuntu's `/bin/sh`), where a failed redirection of `:` ends the shell, so
+  `has_terminal` probes in a subshell.
 - **The bar icon.** Before setup has run, the icon's set-up line
   (`widget.mjs` `setupCommand`) asks `--check` first, inside the line, so it
   runs once per click and never otherwise, and runs the installer instead of
