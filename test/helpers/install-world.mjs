@@ -20,6 +20,9 @@ import { agentBindLine } from "../../lib/keys.mjs";
 import { STATE_SCHEMA } from "../../lib/state.mjs";
 
 export const INSTALLER = join(repo, "bin", "omarchy-install-oats");
+const TTY = join(repo, "test", "helpers", "tty.py");
+// The host's python3, which runs it (the sandbox's PATH has none).
+const PYTHON = (process.env.PATH || "").split(":").filter(Boolean).map((d) => join(d, "python3")).find((f) => existsSync(f));
 export const STATUS = JSON.parse(readFileSync(fixture("steward", "status-0.67.1.json"), "utf8"));
 // git is the host's own, run against this HOME's ~/.gitconfig only
 // (GIT_CONFIG_NOSYSTEM), for github.com's credential helper.
@@ -50,7 +53,7 @@ export function world(t, { npmPrefix, system } = {}) {
   const env = () => ({
     HOME: home, LANG: "C.UTF-8", PATH: [bin, shims, localBin, join(npm, "bin"), ...extra, other, ...(system || [hostbin])].join(":"),
     XDG_DATA_HOME: join(home, ".local", "share"), XDG_STATE_HOME: join(home, ".local", "state"), XDG_CONFIG_HOME: join(home, ".config"),
-    OMARCHY_INSTALL_OATS_TERMINAL: "1", GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_NOSYSTEM: "1",
   });
   const log = (name) => (existsSync(join(root, name)) ? readFileSync(join(root, name), "utf8") : "");
   const logArgs = (name) => `for a; do printf '%s\\n' "$a"; done >> '${join(root, name)}'; echo -- >> '${join(root, name)}'`;
@@ -231,8 +234,16 @@ echo "gh: $*" >&2; exit 1
     writeFileSync(join(root, "mise", "plan", key), outcome === "fail" ? `echo "mise ERROR failed to install ${spec}: network unreachable" >&2\nexit 1\n` : "exit 0\n");
   }
 
-  const run = (args, { input = "", extraEnv = {}, cwd = home, installer = INSTALLER } = {}) => {
-    const r = spawnSync("/bin/sh", [installer, ...args], { env: { ...env(), ...extraEnv }, input, encoding: "utf8", timeout: 60_000, cwd });
+  // The installer in a session of its own (test/helpers/tty.py): by default
+  // with a terminal, a pty it reads `input` from as typed, as a person runs
+  // it; `tty: false` with none. Its stdin is `stdin`, its output captured;
+  // `shell` runs it (dash, say, which /bin/sh is on Debian and Ubuntu).
+  const run = (args, { input = "", tty = true, stdin = "", extraEnv = {}, cwd = home, installer = INSTALLER, shell = "/bin/sh" } = {}) => {
+    const answers = join(root, "answers");
+    writeFileSync(answers, input);
+    const mode = tty ? ["tty", answers] : ["none"];
+    if (!PYTHON) throw new Error("the installer's tests need python3 on PATH (test/helpers/tty.py)");
+    const r = spawnSync(PYTHON, [TTY, ...mode, "--", shell, installer, ...args], { env: { ...env(), ...extraEnv }, input: stdin, encoding: "utf8", timeout: 60_000, cwd });
     return { status: r.status, stdout: r.stdout, stderr: r.stderr, out: r.stdout + r.stderr };
   };
   return { root, home, bin, other, npm, miseData, shims, localBin, kernel, env, log, put, planMise, run, setDefaultAgent };

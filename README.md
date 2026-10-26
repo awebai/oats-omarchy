@@ -49,9 +49,12 @@ steps, one line each, and asks you one thing first.
 **One consent screen.** Before it installs anything, it shows every change
 that is yours to make, on one screen, each with why, what it changes and
 the command that undoes it, and asks once: `Make these changes? [y/N]`.
-Only `y` goes on; anything else changes nothing. An agent cannot make these
-changes for you (Claude's auto mode refuses them), so the installer makes
-them as you, in your terminal, and nothing asks you again later. They are:
+Only `y` goes on; anything else changes nothing. The answer is read from
+your terminal, never from standard input, so piping it in (`echo y | …`)
+does not answer it, and with no terminal to answer in nothing is changed.
+An agent cannot make these changes for you (Claude's auto mode refuses
+them), so the installer makes them as you, in your terminal, and nothing
+asks you again later. They are:
 
 - **Sign in to GitHub, once:** one browser approval (GitHub's device flow)
   for `gh`, with every scope onboarding needs (`repo`, `read:org`, `gist`,

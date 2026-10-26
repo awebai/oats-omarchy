@@ -620,10 +620,19 @@ not exist yet), whether the agent key opens OATS (`agentKeyMoved`, and
   identity never answers for it. The harness then replaces the installer
   (`exec`) in `~/Work`, the prompt one argv element, with
   `omarchy-agent`'s unattended flags.
+- **The answers come from the terminal** (`has_terminal`, `ask`): the
+  harness question and the consent screen's `[y/N]` are read from
+  `/dev/tty`, never from stdin, which a piped run (`curl … | sh`) makes the
+  script itself. A terminal is a `/dev/tty` that opens.
 - **No terminal.** From the menu or a key, `--now` runs itself again in
-  Omarchy's floating terminal, marked with `OMARCHY_INSTALL_OATS_TERMINAL=1`
-  (which the tests set to run inline). Without `--harness` there it is
-  refused first, since nobody can be asked.
+  Omarchy's floating terminal, marked with `OMARCHY_INSTALL_OATS_TERMINAL=1`,
+  so that run never opens another; there, with still no terminal, nothing
+  runs, even with nothing left to ask, since the onboarding agent runs in
+  it: "Nothing was changed: no terminal to answer in". Without `--harness`
+  and without the mark it is refused first, since nobody can be asked. The
+  no-terminal tests run under `/bin/sh` and under dash (Debian's and
+  Ubuntu's `/bin/sh`), where a failed redirection of `:` ends the shell, so
+  `has_terminal` probes in a subshell.
 - **The bar icon.** Before setup has run, the icon's set-up line
   (`widget.mjs` `setupCommand`) asks `--check` first, inside the line, so it
   runs once per click and never otherwise, and runs the installer instead of
@@ -642,7 +651,12 @@ with the host's own git, which reads only this HOME's `~/.gitconfig`
 the consent screen only when it undoes one; the screen's tests run a copy
 of the plugin whose `bin/setup.mjs` logs its argv, so no real setup runs
 there (setup's `--steward-pending` is `test/agent-key.test.mjs`'s). No
-real install, mise, gh or harness runs.
+real install, mise, gh or harness runs. The installer runs in a session of
+its own (`test/helpers/tty.py`): by default with a pty as its controlling
+terminal, from which it reads the test's `input` as typed (then end-of-file),
+its stdin and output left as the test gives them; with `tty: false`, with no
+controlling terminal, so the tests never read the real `/dev/tty` and hold
+whether or not the test runner has one.
 
 ### The bar widget and the waiting popup
 
@@ -730,7 +744,10 @@ npm test           # every test/**/*.test.mjs
 ```
 
 The `lint` job of CI runs both on Node 22. There are no dependencies to
-install.
+install. The installer's tests also need python3 (its standard library only)
+on PATH, for `test/helpers/tty.py`: Node has no pty without a native module,
+and `script(1)` differs between BSD and util-linux and makes stdout the pty
+too.
 
 Tests run on a temporary machine (`test/helpers/sandbox.mjs`): a temporary
 HOME and XDG directories, a stand-in for Omarchy's menu definition
