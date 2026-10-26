@@ -101,7 +101,8 @@ is left off the screen; with none left there is no screen.
 Run it again at any time: what is done is found and skipped. Once setup has
 run, it is on your PATH as `omarchy-install-oats`.
 `omarchy-install-oats --check` only looks: one line each for node, tmux, aw,
-the OATS CLI and the steward, and it exits 0 only when OATS is ready here.
+the OATS CLI and the steward (with its global aweb address when it has one),
+and it exits 0 only when OATS is ready here.
 
 **With a coding agent.** You have no terminal to answer in, so pass the
 harness the person chose; ask them which one first, and tell them that
@@ -519,7 +520,8 @@ It needs two things:
   setup recorded, never `oats` from your PATH.
 - **One steward**, the soul `oats.machine/steward` (awebai/oats-machine), in
   the machine's deployment. Spawn it there with
-  `oats spawn oats.machine/steward --name steward`. The steward is looked up
+  `oats spawn oats.machine/steward`, under any instance name: it is found by
+  its soul, never by its name. The steward is looked up
   on every launch: first in the deployment setup is applied for, when setup
   records one, and when that one has exactly one steward, there alone;
   otherwise in every deployment of this computer's list (with an older OATS

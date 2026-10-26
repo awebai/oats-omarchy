@@ -44,13 +44,26 @@ test("--check: nothing installed, exit 1; without node, oats and the steward can
   assert.equal(r.stdout, "node: missing\ntmux: missing\naw: missing\noats: missing: node is needed to run it\nsteward: missing: node and the OATS CLI are needed to look for it\n");
 });
 
+test("--check: a steward on a global resident shows its address; a local one shows none", (t) => {
+  const global = world(t);
+  ALL(global);
+  deployments(global, { identity: { mode: "global", alias: "steward", team: "default:merak.aweb.ai", address: "merak.aweb.ai/steward", resident: "steward" } });
+  const r = global.run(["--check"]);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.stdout, /^steward: found steward @ merak, address merak\.aweb\.ai\/steward$/m);
+  const local = world(t);
+  ALL(local);
+  deployments(local, { identity: { mode: "local", alias: "steward", team: "default:merak.aweb.ai", address: null, resident: null } });
+  assert.match(local.run(["--check"]).stdout, /^steward: found steward @ merak$/m);
+});
+
 test("--check: no steward in any deployment is not ready, and says how to spawn one", (t) => {
   const w = world(t);
   ALL(w);
   deployments(w, { steward: false });
   const r = w.run(["--check"]);
   assert.equal(r.status, 1);
-  assert.match(r.stdout, /^steward: missing: no steward on this machine: spawn one with `oats spawn oats.machine\/steward --name steward` in the machine's deployment$/m);
+  assert.match(r.stdout, /^steward: missing: no steward on this machine: spawn one with `oats spawn oats.machine\/steward` in the machine's deployment$/m);
 });
 
 test("--check: too old, with the upgrade command for how each was installed; an instance's shim is not the CLI", (t) => {
@@ -195,10 +208,20 @@ test("--now with everything there: eight steps, each found and used, then the on
   assert.equal(prompt, renderPrompt({ skill: list.gettingStartedSkill, hostname: hostname(), harness: "claude", pluginDir: repo, pluginVersion: list.plugin.version, foundList: join(w.home, ".local", "state", "oats-omarchy", "found.json"), ...consentFacts({ githubLogin: "octo-person", githubScopes: GH_SCOPES, agentKey: "moved", pluginDir: repo }) }));
   for (const name of BOOTSTRAP) assert.ok(!prompt.includes(name), name);
   assert.deepEqual(list.deployments, [
-    { dir: a, name: "merak", state: "ok", steward: true },
-    { dir: join(w.root, "Work", "acme"), name: "acme", state: "ok", steward: false },
-    { dir: join(w.root, "Gone", "old"), name: "old", state: "missing", steward: null },
+    { dir: a, name: "merak", state: "ok", steward: true, stewardAddress: null },
+    { dir: join(w.root, "Work", "acme"), name: "acme", state: "ok", steward: false, stewardAddress: null },
+    { dir: join(w.root, "Gone", "old"), name: "old", state: "missing", steward: null, stewardAddress: null },
   ]);
+});
+
+test("--now: the found-list gives the steward's global address, from its home's oats.aweb identity", (t) => {
+  const w = world(t);
+  ALL(w);
+  withChannel(w);
+  const { a } = deployments(w, { identity: { mode: "global", alias: "steward", team: "default:merak.aweb.ai", address: "merak.aweb.ai/steward", resident: "steward" } });
+  const r = w.run(["--now", "--harness", "claude"]);
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(found(w).deployments[0], { dir: a, name: "merak", state: "ok", steward: true, stewardAddress: "merak.aweb.ai/steward" });
 });
 
 test("--now installs what is missing with mise, says so, and the found-list says installed", (t) => {
@@ -723,7 +746,7 @@ test("the found-list: the shape docs/found-list.md fixes, written 0600, with a d
   assert.deepEqual(list.tools.map((x) => x.name), ["node", "tmux", "aw", "oats", "claude", "aweb-channel@awebai-marketplace"]);
   assert.equal(list.tools[3].path, join(w.npm, "lib", "node_modules", "@awebai", "oats", "bin", "oats.mjs"));
   assert.deepEqual(list.awIdentity, { dir: join(w.home, "Work", ".aw"), alias: "root", address: null, role: "deployment-root" });
-  for (const d of list.deployments) assert.deepEqual(Object.keys(d), ["dir", "name", "state", "steward"]);
+  for (const d of list.deployments) assert.deepEqual(Object.keys(d), ["dir", "name", "state", "steward", "stewardAddress"]);
   for (const d of list.deployments) assert.equal(d.steward === null, d.state !== "ok", "steward is read for ok deployments only");
 });
 

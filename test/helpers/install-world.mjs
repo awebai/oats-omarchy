@@ -304,11 +304,20 @@ export const withChannel = (w, entry = {}) => {
 };
 // One deployment with a steward, one without, and one the kernel lists as
 // missing (its status is never read).
-export function deployments(w, { steward = true } = {}) {
+// `identity`, when given, is the steward's oats.aweb identity record: its home
+// is then a real directory under the world, with an instance.json holding it.
+export function deployments(w, { steward = true, identity } = {}) {
   const a = join(w.root, "Agents", "merak");
   const b = join(w.root, "Work", "acme");
   for (const d of [a, b]) mkdirSync(d, { recursive: true });
-  writeFileSync(join(a, "status.json"), JSON.stringify(steward ? STATUS : { ...STATUS, agents: STATUS.agents.filter((x) => x.key !== "oats.machine/steward") }));
+  let status = steward ? STATUS : { ...STATUS, agents: STATUS.agents.filter((x) => x.key !== "oats.machine/steward") };
+  if (identity) {
+    const home = join(a, "agents", "oats-machine--steward", "instances", "steward");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "instance.json"), JSON.stringify({ instance: "steward", capabilityMeta: { "oats.aweb": { identity } } }));
+    status = { ...status, agents: status.agents.map((x) => (x.key === "oats.machine/steward" ? { ...x, instances: x.instances.map((i) => ({ ...i, home })) } : x)) };
+  }
+  writeFileSync(join(a, "status.json"), JSON.stringify(status));
   writeFileSync(join(b, "status.json"), JSON.stringify({ ...STATUS, agents: STATUS.agents.filter((x) => x.key !== "oats.machine/steward") }));
   writeFileSync(join(w.kernel.k, "deployments.json"), JSON.stringify({ deploymentsApi: 1, file: join(w.home, ".oats", "config", "deployments.json"), deployments: [{ path: a, name: "merak", state: "ok" }, { path: b, name: "acme", state: "ok" }, { path: join(w.root, "Gone", "old"), name: "old", state: "missing" }], imports: {} }));
   return { a, b };

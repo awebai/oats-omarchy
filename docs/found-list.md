@@ -36,8 +36,8 @@ One JSON object, with no secrets:
   "github": { "login": "octo-person", "scopes": ["repo", "read:org", "gist", "admin:ssh_signing_key", "user:email"] },
   "awIdentity": { "dir": "/home/u/Work/.aw", "alias": "merak", "address": "juan.aweb.ai/merak", "role": "work" },
   "deployments": [
-    { "dir": "/home/u/Agents/merak", "name": "merak", "state": "ok", "steward": true },
-    { "dir": "/home/u/Work/old", "name": "old", "state": "missing", "steward": null }
+    { "dir": "/home/u/Agents/merak", "name": "merak", "state": "ok", "steward": true, "stewardAddress": "merak.aweb.ai/steward" },
+    { "dir": "/home/u/Work/old", "name": "old", "state": "missing", "steward": null, "stewardAddress": null }
   ]
 }
 ```
@@ -79,6 +79,11 @@ One JSON object, with no secrets:
   state the status is not read, and `steward` is null. When an `ok`
   deployment's status cannot be read, no found-list is written and the
   installer stops, naming it: a `steward: false` was always read.
+  - **`stewardAddress`** is the steward's global aweb address when the
+    deployment lists exactly one steward and its home records one: the
+    `oats.aweb` identity in its `instance.json` (`capabilityMeta`), whose
+    `mode` is `global` for a seat on a GLOBAL resident. Otherwise, a local
+    identity or a record that cannot be read included, it is null.
 
 ## Versioning
 
