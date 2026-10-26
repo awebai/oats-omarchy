@@ -184,18 +184,22 @@ test("destroying the widget during a read stops waiting and the kernel's read wi
   const ps = "ps -eo args | awk '/^sleep 30[01]$/ || /bin[/]waiting[.]mjs --dir/ { n++ } END { print n + 0 }'";
   // Counted every 200 ms, waiting on each condition rather than a fixed time,
   // which a loaded host can overrun: the widget is destroyed once all three
-  // run, and the count after that is taken once none does. Each wait gives
-  // up at 20 s, far inside the sleeps' 300 s, with the count it last saw.
+  // run, and the count after that is taken once none does. Both waits share
+  // one deadline, 20 s from the opening, before any read ends by itself
+  // (waiting --json's own bound is 25 s, the widget's 30 s, each from the
+  // read's start, which is after the opening): a count that comes after it
+  // is "late", so only the destruction can have ended the read.
   const records = w.play(scene(`
-  QtObject { id: watch; property int phase: 0; property real since: 0 }
+  QtObject { id: watch; property int phase: 0; property real deadline: 0 }
   function counted(n) {
-    var late = Date.now() - watch.since > 20000
-    if (watch.phase === 1 && (n === 3 || late)) { scene.probe("reading", n); watch.phase = 2; watch.since = Date.now(); loader.active = false }
-    else if (watch.phase === 2 && (n === 0 || late)) { scene.probe("destroyed", n); watch.phase = 3; Qt.quit() }
+    if (watch.phase !== 1 && watch.phase !== 2) return
+    if (Date.now() > watch.deadline) { scene.probe("late", { phase: watch.phase, count: n }); watch.phase = 3; Qt.quit() }
+    else if (watch.phase === 1 && n === 3) { scene.probe("reading", n); watch.phase = 2; loader.active = false }
+    else if (watch.phase === 2 && n === 0) { scene.probe("destroyed", n); watch.phase = 3; Qt.quit() }
   }
   Process { id: ps; command: ["/bin/sh", "-c", ${JSON.stringify(ps)}]; stdout: StdioCollector { waitForEnd: true; onStreamFinished: scene.counted(Number(text.trim())) } }
-  Timer { interval: 1000; running: true; onTriggered: { scene.w.open(); watch.since = Date.now(); watch.phase = 1 } }
-  Timer { interval: 200; repeat: true; running: true; onTriggered: if ((watch.phase === 1 || watch.phase === 2) && !ps.running) ps.running = true }`, 50));
+  Timer { interval: 1000; running: true; onTriggered: { watch.deadline = Date.now() + 20000; scene.w.open(); watch.phase = 1 } }
+  Timer { interval: 200; repeat: true; running: true; onTriggered: if ((watch.phase === 1 || watch.phase === 2) && !ps.running) ps.running = true }`, 30));
   assert.deepEqual(records.map((r) => [r.what, r.value]), [["reading", 3], ["destroyed", 0]], "waiting, the shim's sleep and its child; then none");
 });
 
