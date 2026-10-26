@@ -512,6 +512,12 @@ same node lookup as `setup`. Without a node it says so on stderr and with
     that read. The fast path can miss a second steward in another
     deployment; setup's agent-key gate (one steward per machine) and the
     README make that acceptable. Setup's own lookup always scans.
+  - `stewardAddress` reads a found steward's global aweb address from its
+    home's `instance.json` (`capabilityMeta."oats.aweb".identity`, mode
+    `global`), for `--check`'s steward line and the found-list's
+    `stewardAddress`. It never throws: a local identity or an unreadable
+    record is null. The name is never used to find the steward, so
+    `SPAWN_HINT` names none.
 - **The prompt** (`--prompt`) travels in a 0600 file in the handoff,
   passed as `--prompt-file`. It never goes in argv, which uwsm writes to the journal.
   The window reads the file and deletes it first. `deliverPrompt` then:

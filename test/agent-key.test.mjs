@@ -733,7 +733,7 @@ test("--check: a recorded block with either section or both is this version's; a
 // (lib/steward.mjs) finds exactly one steward, read when setup runs. The
 // recorded choice stays "oats" either way, and a key already moved stays.
 
-const NO_STEWARD = "the agent key stays with Omarchy until this machine has one steward: no steward on this machine: spawn one with `oats spawn oats.machine/steward --name steward` in the machine's deployment; run setup --apply again after spawning it";
+const NO_STEWARD = "the agent key stays with Omarchy until this machine has one steward: no steward on this machine: spawn one with `oats spawn oats.machine/steward` in the machine's deployment; run setup --apply again after spawning it";
 const agentLines = (file) => readFileSync(file, "utf8").includes(keys.AGENT_OURS);
 
 test("the steward gate: one steward, and the key moves to OATS", (t) => {
@@ -784,7 +784,7 @@ test("the steward gate: a key already moved stays with OATS when no steward is f
   assert.equal(part(r, "agent-key").status, "already applied");
   assert.equal(readFileSync(file, "utf8"), moved, "section b is kept, unchanged");
   assert.deepEqual(r.json.result.written, []);
-  assert.ok(r.json.result.notes.includes("No steward was found now (no steward on this machine: spawn one with `oats spawn oats.machine/steward --name steward` in the machine's deployment): the agent key still opens OATS, and says so when it is pressed."), r.json.result.notes.join("\n"));
+  assert.ok(r.json.result.notes.includes("No steward was found now (no steward on this machine: spawn one with `oats spawn oats.machine/steward` in the machine's deployment): the agent key still opens OATS, and says so when it is pressed."), r.json.result.notes.join("\n"));
   assert.deepEqual(s.run(["setup", "--check", "--json"]).json.result.drift, []);
 });
 
@@ -1078,7 +1078,7 @@ test("--only agent-key keeps the steward gate: with no steward the key stays wit
   withStewards(s, []);
   const r = s.run([...ONLY_RUN, "--json"]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.deepEqual(part(r, "agent-key"), { part: "agent-key", status: "skipped", reason: "the agent key stays with Omarchy until this machine has one steward: no steward on this machine: spawn one with `oats spawn oats.machine/steward --name steward` in the machine's deployment; run setup --apply --only agent-key again after spawning it", paths: [] });
+  assert.deepEqual(part(r, "agent-key"), { part: "agent-key", status: "skipped", reason: "the agent key stays with Omarchy until this machine has one steward: no steward on this machine: spawn one with `oats spawn oats.machine/steward` in the machine's deployment; run setup --apply --only agent-key again after spawning it", paths: [] });
   assert.equal(part(r, "shim").status, "applied");
   assert.equal(part(r, "launcher").status, "applied");
   assert.equal(readFileSync(file, "utf8"), USER_BINDINGS);

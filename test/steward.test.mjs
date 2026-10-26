@@ -3,11 +3,12 @@
 // test/fixtures/steward, shaped like 0.67.1's), through setup's shim.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { paths as discoverPaths } from "../lib/discover.mjs";
 import { STATE_SCHEMA } from "../lib/state.mjs";
-import { findSteward, stewardsIn } from "../lib/steward.mjs";
+import { findSteward, stewardAddress, stewardsIn } from "../lib/steward.mjs";
 import { STEWARD_AGENT, STEWARD_KEY } from "../lib/steward-agent.mjs";
 import { ALL_FEATURES, fakeKernel, gone } from "./helpers/fake-kernel.mjs";
 import { fixture, sandbox } from "./helpers/sandbox.mjs";
@@ -88,7 +89,7 @@ test("one steward in the list's deployments: its home, and the deployment it is 
 
 test("no steward: how to spawn one; a deployment that could not be read is named", async (t) => {
   const w = world(t, { a: status({ stewards: [] }), b: status({ stewards: [] }) });
-  assert.deepEqual(await w.find(), { ok: false, none: true, reason: "no steward on this machine: spawn one with `oats spawn oats.machine/steward --name steward` in the machine's deployment" });
+  assert.deepEqual(await w.find(), { ok: false, none: true, reason: "no steward on this machine: spawn one with `oats spawn oats.machine/steward` in the machine's deployment" });
   const failed = world(t, { a: status({ stewards: [] }), b: "envelope:E_LOCK" });
   const r = await failed.find();
   assert.equal(r.ok, false);
@@ -223,4 +224,26 @@ test("recordedFirst: no recorded deployment, or no list: as without it", async (
   const found = await old.find({ recordedFirst: true });
   assert.equal(found.ok, true);
   assert.deepEqual(statusReads(old), [old.paths[0]], "read once, as the state's one deployment");
+});
+
+// stewardAddress: the address the oats.aweb provider records in the steward's
+// home (instance.json capabilityMeta."oats.aweb".identity) for a seat on a
+// GLOBAL resident; null for anything else, never a throw.
+test("stewardAddress: a global identity's address, else null", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "oats-omarchy-address-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = (name, text) => {
+    const dir = join(root, name);
+    mkdirSync(dir);
+    if (text !== undefined) writeFileSync(join(dir, "instance.json"), text);
+    return dir;
+  };
+  const record = (identity) => JSON.stringify({ instance: "steward", capabilityMeta: { "oats.aweb": { identity } } });
+  assert.equal(stewardAddress(home("global", record({ mode: "global", alias: "steward", address: "merak.aweb.ai/steward", resident: "steward" }))), "merak.aweb.ai/steward");
+  assert.equal(stewardAddress(home("local", record({ mode: "local", alias: "steward", address: null, resident: null }))), null);
+  assert.equal(stewardAddress(home("global-without-address", record({ mode: "global", alias: "steward", address: null }))), null);
+  assert.equal(stewardAddress(home("no-messaging", JSON.stringify({ instance: "steward", capabilityMeta: {} }))), null);
+  assert.equal(stewardAddress(home("not-json", "{")), null);
+  assert.equal(stewardAddress(home("no-record")), null);
+  assert.equal(stewardAddress(join(root, "no-home")), null);
 });

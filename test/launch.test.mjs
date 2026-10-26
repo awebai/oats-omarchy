@@ -411,7 +411,7 @@ test("in the window: no steward, several, a shim gone and a CLI gone each name t
   writeFileSync(join(none.s.deployment, "status.json"), JSON.stringify({ ...STATUS, agents: STATUS.agents.filter((a) => a.name !== "oats-machine--steward") }));
   let r = await inner(none);
   assert.equal(r.code, 1);
-  assert.equal(r.err, "omarchy-launch-oats: finding the steward: no steward on this machine: spawn one with `oats spawn oats.machine/steward --name steward` in the machine's deployment\n");
+  assert.equal(r.err, "omarchy-launch-oats: finding the steward: no steward on this machine: spawn one with `oats spawn oats.machine/steward` in the machine's deployment\n");
   assert.equal(r.pauses, 1);
 
   const two = world(t);
