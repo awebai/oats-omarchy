@@ -139,7 +139,7 @@ test("--check: an oats on PATH that links to an instance home's shim is not the 
 
 test("--now without --harness and without a terminal is refused before anything runs, the floating terminal included", (t) => {
   const w = world(t);
-  const r = w.run(["--now"], { extraEnv: { OMARCHY_INSTALL_OATS_TERMINAL: "" } });
+  const r = w.run(["--now"], { tty: false });
   assert.equal(r.status, 2, r.out);
   assert.match(r.stderr, /^omarchy-install-oats: --now needs --harness claude\|codex\|pi without a terminal to ask in$/m);
   assert.equal(w.log("floating.log"), "");
@@ -350,6 +350,13 @@ function nothingDone(w) {
 const setupRuns = (w) => w.log("setup.log").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 const ghCalls = (w) => w.log("gh.log").split("--\n").filter(Boolean).map((c) => c.trim().split("\n"));
 const SCREEN_END = "Make these changes? [y/N] ";
+// Nothing installed, no sign-in, the key not moved, no agent started.
+function nothingChanged(w) {
+  assert.equal(w.log("mise.log").includes("use"), false);
+  assert.deepEqual(ghCalls(w).filter((c) => c[1] !== "status"), [], "no sign-in");
+  assert.deepEqual(setupRuns(w), [], "the key is not moved");
+  assert.equal(existsSync(join(w.root, "harness.json")), false);
+}
 
 test("one consent screen before anything is installed: each act with why, what and its undo on a line of its own; [y/N]", (t) => {
   const w = world(t);
@@ -393,10 +400,7 @@ for (const [name, input] of [["Enter", "\n"], ["n", "n\n"], ["no answer", ""], [
     const r = w.run(["--now", "--harness", "claude"], { installer, input });
     assert.equal(r.status, 1, r.out);
     assert.ok(r.stdout.endsWith(`${SCREEN_END}omarchy-install-oats: Nothing was changed. Run omarchy-install-oats --now again when you're ready.\n`), r.stdout);
-    assert.equal(w.log("mise.log").includes("use"), false);
-    assert.deepEqual(ghCalls(w).filter((c) => c[1] !== "status"), [], "no sign-in");
-    assert.deepEqual(setupRuns(w), [], "the key is not moved");
-    assert.equal(existsSync(join(w.root, "harness.json")), false);
+    nothingChanged(w);
   });
 }
 
@@ -571,9 +575,42 @@ test("a key setup leaves with Omarchy is said, and onboarding still starts, its 
   assert.ok(prompt.includes(`The agent key stays with Omarchy: ${reason}.`), prompt);
 });
 
+// The answers come from the terminal (/dev/tty), never from stdin, which a
+// piped run (curl … | sh) would make the script itself (awebai/oats-omarchy#33).
+test("--now takes its answers from the terminal: a y on stdin is not an answer", (t) => {
+  const w = world(t);
+  nothingDone(w);
+  const { installer } = pluginCopy(w);
+  const r = w.run(["--now", "--harness", "claude"], { installer, input: "", stdin: "y\n" });
+  assert.equal(r.status, 1, r.out);
+  assert.ok(r.stdout.endsWith(`${SCREEN_END}omarchy-install-oats: Nothing was changed. Run omarchy-install-oats --now again when you're ready.\n`), r.stdout);
+  nothingChanged(w);
+});
+
+test("--now with no terminal to answer in, in the floating terminal's run, changes nothing and opens no other terminal", (t) => {
+  const w = world(t);
+  nothingDone(w);
+  const { installer } = pluginCopy(w);
+  const r = w.run(["--now", "--harness", "claude"], { installer, tty: false, stdin: "y\n", extraEnv: { OMARCHY_INSTALL_OATS_TERMINAL: "1" } });
+  assert.equal(r.status, 2, r.out);
+  assert.ok(r.stderr.endsWith("omarchy-install-oats: Nothing was changed: no terminal to answer in\n"), r.stderr);
+  nothingChanged(w);
+  assert.equal(w.log("floating.log"), "");
+
+  const asked = world(t);
+  ALL(asked, { harness: "pi" });
+  asked.setDefaultAgent("opencode");
+  const r2 = asked.run(["--now"], { tty: false, stdin: "pi\n", extraEnv: { OMARCHY_INSTALL_OATS_TERMINAL: "1" } });
+  assert.equal(r2.status, 2, r2.out);
+  assert.ok(r2.stderr.endsWith("omarchy-install-oats: Nothing was changed: no terminal to answer in\n"), r2.stderr);
+  assert.doesNotMatch(r2.stdout, /using pi/);
+  nothingChanged(asked);
+  assert.equal(asked.log("floating.log"), "");
+});
+
 test("--now with no terminal runs again in Omarchy's floating terminal, as omarchy-default-agent does", (t) => {
   const w = world(t);
-  const r = w.run(["--now", "--harness", "pi"], { extraEnv: { OMARCHY_INSTALL_OATS_TERMINAL: "" } });
+  const r = w.run(["--now", "--harness", "pi"], { tty: false });
   assert.equal(r.status, 0, r.out);
   assert.equal(w.log("floating.log"), `OMARCHY_INSTALL_OATS_TERMINAL=1 '${INSTALLER}' --now --harness 'pi'\n--\n`);
   assert.equal(w.log("mise.log"), "", "nothing ran here");
@@ -585,8 +622,8 @@ test("the floating terminal's command line quotes the installer's path, whatever
   const plugin = join(w.root, "plug in's $HOME");
   const self = join(plugin, "bin", "omarchy-install-oats");
   writeExecutable(self, readFileSync(INSTALLER, "utf8"));
-  const r = spawnSync("/bin/sh", [self, "--now", "--harness", "pi"], { env: { ...w.env(), OMARCHY_INSTALL_OATS_TERMINAL: "" }, encoding: "utf8", cwd: w.home });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const r = w.run(["--now", "--harness", "pi"], { tty: false, installer: self });
+  assert.equal(r.status, 0, r.out);
   const line = `OMARCHY_INSTALL_OATS_TERMINAL=1 '${join(w.root, "plug in")}'\\''s $HOME/bin/omarchy-install-oats' --now --harness 'pi'`;
   assert.equal(w.log("floating.log"), `${line}\n--\n`);
   // What Omarchy's floating terminal then runs (bash -c "$*"): the same

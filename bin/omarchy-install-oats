@@ -376,11 +376,26 @@ sh_quote() {
   printf "'%s%s'" "$q_out" "$q_rest"
 }
 
+# The person's terminal, which the answers are read from, never stdin: a
+# piped run (curl … | sh) makes stdin the script itself.
+has_terminal() { { : </dev/tty; } 2>/dev/null; }
+
+# One answer, typed in the terminal, into $answer; with no terminal to
+# answer in, nothing was changed.
+ask() {
+  if ! has_terminal; then
+    printf '%s: %s\n' "$NAME" "Nothing was changed: no terminal to answer in" >&2
+    exit 2
+  fi
+  read -r answer </dev/tty || answer=
+}
+
 # Started from the menu or a key, with no terminal: the same, again, in
 # Omarchy's floating terminal, as omarchy-default-agent does. That terminal
-# runs its arguments as one command line (bash -c), so each word is quoted.
+# runs its arguments as one command line (bash -c), so each word is quoted,
+# and marks the run, which then never opens another one.
 in_terminal() {
-  [ -t 0 ] && [ -t 1 ] && return 0
+  has_terminal && return 0
   [ -n "${OMARCHY_INSTALL_OATS_TERMINAL:-}" ] && return 0
   if floating=$(command -v omarchy-launch-floating-terminal-with-presentation 2>/dev/null); then
     line="OMARCHY_INSTALL_OATS_TERMINAL=1 $(sh_quote "$self") --now"
@@ -393,7 +408,7 @@ in_terminal() {
 
 choose_harness() {
   if [ -n "$harness" ]; then say "using $harness"; return 0; fi
-  if [ ! -t 0 ] && [ -z "${OMARCHY_INSTALL_OATS_TERMINAL:-}" ]; then
+  if ! has_terminal && [ -z "${OMARCHY_INSTALL_OATS_TERMINAL:-}" ]; then
     refuse "--now needs --harness claude|codex|pi without a terminal to ask in"
   fi
   default=$(omarchy-default-agent 2>/dev/null) || default=
@@ -404,7 +419,7 @@ choose_harness() {
   others=
   for h in claude codex pi; do [ "$h" = "$default" ] || others=$others/$h; done
   printf 'Which harness should your agents run on? [%s%s] ' "$default" "$others"
-  read -r answer || answer=
+  ask
   harness=${answer:-$default}
   case $harness in
     claude | codex | pi) say "using $harness" ;;
@@ -534,7 +549,7 @@ consent() {
     printf '   Undo:\n     %s/setup --apply --only agent-key --agent-key omarchy\n' "$plugin"
   fi
   printf '\nMake these changes? [y/N] '
-  read -r answer || answer=
+  ask
   case $answer in
     y | Y | yes | Yes | YES) ;;
     *) say "Nothing was changed. Run $NAME --now again when you're ready."; exit 1 ;;
@@ -603,7 +618,7 @@ start_harness() {
 
 now() {
   # Nobody to ask: refused before anything runs, the floating terminal too.
-  if [ -z "$harness" ] && [ -z "${OMARCHY_INSTALL_OATS_TERMINAL:-}" ] && ! { [ -t 0 ] && [ -t 1 ]; }; then
+  if [ -z "$harness" ] && [ -z "${OMARCHY_INSTALL_OATS_TERMINAL:-}" ] && ! has_terminal; then
     refuse "--now needs --harness claude|codex|pi without a terminal to ask in"
   fi
   in_terminal
