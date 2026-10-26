@@ -599,7 +599,7 @@ session's viewer. v0.8.0 adds:
   anything. It reads your answers from the terminal; with no terminal it
   changes nothing.
 - **The steward's own window.** It has the app-id
-  `org.omarchy.agent.oats-steward`. Hyprland rules keyed on the class
+  `org.omarchy.agent.oats-steward`. Hyprland rules keyed on the exact class
   `org.omarchy.agent` no longer match it, and clicking an Omarchy
   notification doesn't focus it. The agent key focuses the window when it's
   open and opens it otherwise; two quick presses open one window.
