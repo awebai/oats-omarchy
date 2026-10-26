@@ -255,12 +255,16 @@ compares them with what is there, and only then writes:
   reads and writes desktop entries.
 - `plugin.json`, beside the state (`$XDG_STATE_HOME/oats-omarchy`), is what
   the bar widget and the popup run: `{deployment, tui, desktop, ui, waiting,
-  attach, setup}`, each an argv from the same functions the key and the menu
-  use (`tui` and `desktop` null when that part is not applied; `attach` ends
-  at `--home`), and `ui` the default UI (null when neither is set up). A
+  attach, setup, launcher}`, each an argv from the same functions the key
+  and the menu use (`tui` and `desktop` null when that part is not applied; `attach` ends
+  at `--home`), `ui` the default UI (null when neither is set up), and
+  `launcher` the launcher the agent key binds, which the steward's card
+  runs (null when the launcher part is not applied). A
   `plugin.json` from before 0.5.0 has no `ui`: `widget.mjs` `parsePlugin`
   reads it as the TUI, or the Desktop when only it is set up, and ignores
-  v0.4.0's `agents` and `spawn`.
+  v0.4.0's `agents` and `spawn`. One without `launcher` reads as null, so
+  the steward's card opens its session like any other until setup is
+  applied again.
   It is written on every `--apply` that applies the shim, rewritten when it
   differs, removed by a complete `--remove`, and `--check` reports it
   missing. The detach key goes into `attach` when the CLI's `version --json`
@@ -356,9 +360,10 @@ A row waits on you when its `waitingOnYou` is set. A null there means the
 kernel makes no claim about that row, not that it is not waiting: nothing
 here says that nobody is waiting. Only a status that could not be read is
 unknown. `--json` prints what it read and opens nothing: `{ok, count,
-rows: [{instance, home, waitingOnYou}]}` (`waitingOnYou` the kernel's
+rows: [{instance, home, waitingOnYou, steward}]}` (`waitingOnYou` the kernel's
 `since`, `producer`, `reason` and `message`, each a string or null, as
-given), or `{ok: false, reason}` with one bounded line (the kernel's first,
+given; `steward` true for an instance of the steward's agent,
+`lib/steward-agent.mjs` `isStewardAgent`), or `{ok: false, reason}` with one bounded line (the kernel's first,
 when `oats status` failed). It is the only source of the bar widget and the
 popup; the filter lives here alone. With `--json` the kernel's read runs in
 a process group of its own, which waiting kills on its own timeout (25 s,
@@ -400,11 +405,59 @@ empty list.
 same node lookup as `setup`. Without a node it says so on stderr and with
 `omarchy-notification-send` (else `notify-send`) when either is on PATH.
 
-- **The outer process only opens the window.** It checks that setup's shim
-  is there and that `omarchy-launch-tui` is on PATH, and makes the handoff:
-  a private directory (0700) under `$XDG_RUNTIME_DIR` (else the temporary
-  directory) that holds the prompt, if any. Then it starts
-  `omarchy-launch-tui --app-id=org.omarchy.agent <node> <plugin>/bin/launch.mjs
+- **Launch or focus.** Once setup's shim is there, the outer process asks
+  Hyprland for the steward's window: `hyprctl clients -j`, the first client
+  whose `class` is `APP_ID`, `org.omarchy.agent.oats-steward`, exactly
+  (`findWindow`; an address that is not Hyprland's hex is never taken).
+  Every other agent window has the class `org.omarchy.agent`, and the title
+  is the terminal's and tmux's (Omarchy's tmux.conf sets `#h:#W`) and is
+  not there before the viewer attaches, so neither is matched. With no
+  hyprctl, or a Hyprland that does not answer, there is no window to find.
+  - A found window is focused as Omarchy's `omarchy-launch-or-focus` does
+    it (`focusWindow`): `hyprctl dispatch 'hl.dsp.focus({ window =
+    "address:…" })'`, then `hyprctl dispatch focuswindow address:…`. hyprctl
+    exits 0 for most refusals (an unknown dispatcher, a Lua error; it exits
+    non-zero only for a reply that starts with `error:`), so only the reply
+    `ok` is a focus. A window that will not focus is reported on stderr and
+    in a notification, with the reply of the form the config understood,
+    and no second window is opened.
+  - With `--prompt` and the window focused, the launch sends the prompt
+    itself (`sendToOpenWindow`): `lookUpSteward`, then `deliverPrompt`, with
+    no `session start` and no attach, since the window has the viewer. The
+    line goes to stderr and a notification.
+  - `test/fixtures/hyprctl` holds `clients -j` output in the shape Hyprland
+    v0.56.2 prints it (`CHyprCtl::getWindowData`), and `test/launch.test.mjs`
+    has a stand-in hyprctl with its replies under a Lua and a hyprlang
+    config.
+- **One launch at a time** (`LAUNCH_LOCK`, `takeLaunchLock`). The lookup
+  and the launch run under flock(1) on
+  `$XDG_RUNTIME_DIR/oats-omarchy-launch.lock`, held until the launched
+  window claims its handoff, so a second press before the first window maps
+  waits, looks again and focuses that window. Node has no flock, so the
+  launch spawns a holder, `flock -w <secs> -o <lock> sh -c 'echo locked;
+  exec cat > /dev/null'`: its `locked` line is the lock taken, and it holds
+  the lock until the launch closes its stdin, or dies. The kernel frees the
+  lock with the holder, so a launch that died leaves nothing to take over;
+  the file stays, and only the flock on it is the lock. The window is
+  spawned by the launch, not the holder, so it never holds the lock (`-o`
+  keeps the descriptor from `sh` too).
+  - The wait is bounded (`WINDOW_START` plus two hyprctl bounds). A press
+    that does not get the lock within it opens nothing and says, on stderr
+    and in a notification, that another press is still opening the steward
+    (`LOCK_BUSY`).
+  - It fails closed: with no `$XDG_RUNTIME_DIR` directory, or no flock on
+    PATH (util-linux), the press opens nothing and names what is missing,
+    and never goes on unlocked.
+  - A prompt for an open window is sent after the lock is released.
+  - flock is util-linux's, so on macOS `test/launch.test.mjs` puts a
+    stand-in on PATH that runs the command and excludes nothing, and skips
+    the lock's own tests (a held lock, a dead holder, two overlapping
+    presses, the window not holding the lock), saying why; CI on Linux runs
+    them with the real flock.
+- **Otherwise the outer process only opens the window.** It checks that
+  `omarchy-launch-tui` is on PATH, and makes the handoff: a private directory (0700) under `$XDG_RUNTIME_DIR` that holds the
+  prompt, if any. Then it starts
+  `omarchy-launch-tui --app-id=org.omarchy.agent.oats-steward <node> <plugin>/bin/launch.mjs
   --in-terminal --claim-file <handoff>/claim [--prompt-file
   <handoff>/prompt]` on its own, detached, with its own output as an exec
   would give it.
@@ -442,7 +495,8 @@ same node lookup as `setup`. Without a node it says so on stderr and with
   --json`, or without `deployments-list` the deployment setup's state
   records. For each one it runs `oats status --json`, with that deployment
   as the working directory. The steward is an instance of the steward
-  soul's agent (`isStewardAgent`): the agent row whose `key` is
+  soul's agent (`lib/steward-agent.mjs` `isStewardAgent`, which
+  `waiting.mjs` uses to mark the steward's row): the agent row whose `key` is
   `STEWARD_KEY`, `oats.machine/steward` (desktop-cli-api's key on soul and
   agent rows); a row without a key is matched by its name, `STEWARD_AGENT`,
   `oats-machine--steward`, the name the kernel's `packageSoulAgentName`
@@ -602,8 +656,11 @@ read (`plugin.json`'s `waiting` argv plus `--json`), run when it opens, with
 one Quickshell `Process` and the read's deadline as its only `Timer`, which
 does not repeat; its cards in one list (`popupRows`, each group's title as
 the list's section; `popupNotes` the deployments not read), Up/Down or
-Ctrl+J/K, Enter running `attachArgv` through Omarchy's `Util.execArgv` (no
-shell), Esc closing it. With no `plugin.json` it offers setup only; with
+Ctrl+J/K, Enter running `openArgv` through Omarchy's `Util.execArgv` (no
+shell), Esc closing it. A card opens its agent's session in the floating
+terminal, except the steward's, which runs `plugin.json`'s `launcher`
+(`openCommand` for the panel, `openArgv` for the popup), so a click
+focuses the steward's open window instead of opening a second viewer. With no `plugin.json` it offers setup only; with
 nothing waiting it says "No agent has said it is waiting on you", which
 claims nothing about the others.
 

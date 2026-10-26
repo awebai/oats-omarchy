@@ -177,7 +177,7 @@ for (const version of Object.keys(VERSIONS)) {
     const m = state.files.find((f) => f.role === "menu");
     assert.equal(readFileSync(at.menu, "utf8"), menuBefore.replace(oldMenu, m.block));
     assert.deepEqual(Object.keys(menu.omarchyParse(readFileSync(at.menu, "utf8")).items), ["mine", "oats-ui", "setup.default.agent.oats"], "the Default Agent row is there, the key with Omarchy or not");
-    assert.deepEqual(Object.keys(JSON.parse(readFileSync(pluginPath(s), "utf8"))), ["deployment", "tui", "desktop", "ui", "waiting", "attach", "setup"], "plugin.json as this version writes it");
+    assert.deepEqual(Object.keys(JSON.parse(readFileSync(pluginPath(s), "utf8"))), ["deployment", "tui", "desktop", "ui", "waiting", "attach", "setup", "launcher"], "plugin.json as this version writes it");
 
     // The launcher, recorded, in a ~/.local/bin setup made again.
     const wrapper = wrapperPath(s);

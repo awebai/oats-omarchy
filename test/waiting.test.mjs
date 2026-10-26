@@ -63,11 +63,21 @@ test("only the rows waiting on you, in the order listed, by instance name", () =
     { name: "w", instances: [row("four", "/h/4", { ...W, producer: "oats.core" })] },
   ] };
   assert.deepEqual(waitingRows(JSON.stringify(status)), [
-    { instance: "one", home: "/h/1", waitingOnYou: W }, { instance: "three", home: "/h/3", waitingOnYou: W }, { instance: "four", home: "/h/4", waitingOnYou: { ...W, producer: "oats.core" } },
+    { instance: "one", home: "/h/1", waitingOnYou: W, steward: false }, { instance: "three", home: "/h/3", waitingOnYou: W, steward: false }, { instance: "four", home: "/h/4", waitingOnYou: { ...W, producer: "oats.core" }, steward: false },
   ]);
   assert.throws(() => waitingRows(JSON.stringify({ ok: false, error: { message: "boom" } })), /boom/);
   assert.throws(() => waitingRows("{}"), /no agents list/);
   assert.throws(() => waitingRows("not json"));
+});
+
+test("the steward's row is marked, by its agent's soul key, else by its agent's name; no other row is", () => {
+  const status = { root: "/d", agents: [
+    { name: "oats-machine--steward", key: "oats.machine/steward", instances: [row("steward", "/h/s", W)] },
+    { name: "oats-machine--steward", key: "someone.else/steward", instances: [row("lookalike", "/h/l", W)] },
+    { name: "oats-machine--steward", key: null, instances: [row("by-name", "/h/n", W)] },
+    { name: "x", instances: [row("steward", "/h/x", W)] },
+  ] };
+  assert.deepEqual(waitingRows(JSON.stringify(status)).map((r) => [r.instance, r.steward]), [["steward", true], ["lookalike", false], ["by-name", true], ["steward", false]]);
 });
 
 test("the selector shows the count and the names only; a cancel opens nothing and exits 0", (t) => {
@@ -203,7 +213,7 @@ test("--json: the count and the rows waiting on you, nothing opened, nothing not
   withStatus(s, [{ name: "x", instances: [row("alpha", a, W), row("idle", "/h/idle")] }, { name: "y", instances: [row("with space", b, W)] }]);
   const r = await json(s);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.result, { ok: true, count: 2, rows: [{ instance: "alpha", home: a, waitingOnYou: W }, { instance: "with space", home: b, waitingOnYou: W }] });
+  assert.deepEqual(r.result, { ok: true, count: 2, rows: [{ instance: "alpha", home: a, waitingOnYou: W, steward: false }, { instance: "with space", home: b, waitingOnYou: W, steward: false }] });
   assert.equal(r.stdout.split("\n").length, 2, "one line");
   assert.deepEqual(parseWaiting(r.stdout).rows.map((x) => x.instance), ["alpha", "with space"], "what the panel shows");
   assert.equal(r.stderr, "");

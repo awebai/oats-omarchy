@@ -306,7 +306,27 @@ test("the panel's rows are cards: the name, the kernel's message, then reason ·
   assert.deepEqual(panel.cards, ["alpha", "beta"], "one WaitingCard per row");
   for (const text of ["alpha", "Allow Bash?", "beta"]) assert.ok(panel.texts.includes(text), `${text} in ${JSON.stringify(panel.texts)}`);
   assert.ok(panel.texts.some((x) => /^permission · oats\.core · \d+ (min|h|d)$/.test(x)), JSON.stringify(panel.texts));
-  assert.deepEqual(records.filter((r) => r.what === "run").map((r) => r.value), [W.attachCommand({ attach: ["s", "--home"] }, "/h/alpha")]);
+  assert.deepEqual(records.filter((r) => r.what === "run").map((r) => r.value), [W.openCommand({ attach: ["s", "--home"] }, { home: "/h/alpha", steward: false })]);
+});
+
+test("the steward's card, in the panel and in the popup, runs the launcher, which focuses its open window: never a second viewer", { skip }, (t) => {
+  const w = world(t);
+  const rows = [{ instance: "steward", home: "/h/steward", waitingOnYou: CLAIM, steward: true }];
+  const read = w.exe("steward.sh", `#!/bin/sh\ncat <<'E'\n${JSON.stringify({ ok: true, count: 1, rows })}\nE\n`);
+  const plugin = { waiting: ["/bin/sh", read], attach: ["s", "--home"], launcher: ["/l/omarchy-launch-oats"] };
+  w.plugin(plugin);
+  const panel = w.play(scene(`
+  Timer { interval: 500; running: true; onTriggered: scene.w.open() }
+  Timer { interval: 3000; running: true; onTriggered: {
+    var cards = scene.all(scene.w, []).filter(function(x) { return x.shown !== undefined && x.highlighted !== undefined })
+    cards[0].activated()
+  } }`, 4));
+  assert.deepEqual(panel.filter((r) => r.what === "run").map((r) => r.value), [W.openCommand(plugin, { home: "/h/steward", steward: true })]);
+  assert.equal(W.openCommand(plugin, { home: "/h/steward", steward: true }), "exec '/l/omarchy-launch-oats'");
+  const popup = w.play(popupScene(`
+  Timer { interval: 500; running: true; onTriggered: scene.w.open("{}") }
+  Timer { interval: 3000; running: true; onTriggered: scene.key(Qt.Key_Return) }`, 4));
+  assert.deepEqual(popup.filter((r) => r.what === "exec").map((r) => r.value), [["/l/omarchy-launch-oats"]]);
 });
 
 test("with the list, the panel groups the rows by workspace and shows a deployment that could not be read", { skip }, (t) => {

@@ -128,7 +128,7 @@ Item {
     var rows = Widget.popupRows(root.waiting)
     root.rows = rows
     displayModel.clear()
-    for (var i = 0; i < rows.length; i++) displayModel.append({ group: rows[i].group, name: rows[i].label, home: rows[i].home })
+    for (var i = 0; i < rows.length; i++) displayModel.append({ group: rows[i].group, name: rows[i].label, home: rows[i].home, steward: rows[i].steward })
     if (displayModel.count === 0) selectedIndex = 0
     else if (selectedIndex >= displayModel.count) selectedIndex = displayModel.count - 1
     Qt.callLater(function() {
@@ -142,12 +142,13 @@ Item {
     resultList.positionViewAtIndex(selectedIndex, ListView.Contain)
   }
 
-  // Enter on a card: the agent's session. Before setup, Enter runs setup,
+  // Enter on a card: what the row opens (the steward's, through the
+  // launcher). Before setup, Enter runs setup,
   // or the installer when OATS is not installed yet (widget.mjs setupCommand).
   function activate(index) {
     if (root.needsSetup) { var setup = Widget.setupArgv(null, root.setupPath); root.dismiss(); root.execArgv(setup); return }
     if (!root.plugin || index < 0 || index >= displayModel.count) return
-    var argv = Widget.attachArgv(root.plugin, displayModel.get(index).home)
+    var argv = Widget.openArgv(root.plugin, displayModel.get(index))
     root.dismiss()
     root.execArgv(argv)
   }

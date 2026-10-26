@@ -28,11 +28,13 @@ const MENU_DEFAULTS = `{
 // The only host programs on the sandbox's PATH: a shell and the few tools the
 // fakes and the hook use, linked into a private directory. /usr/bin itself is
 // not on the PATH, because on Omarchy it holds the real launchers.
-const HOST_TOOLS = ["sh", "bash", "cat", "echo", "printf", "mkdir", "head", "env", "rm", "ls", "dirname", "cp", "grep"];
+// flock is util-linux's (the launch lock); where the host has none, as on
+// macOS, it is left out.
+const HOST_TOOLS = ["sh", "bash", "cat", "echo", "printf", "mkdir", "head", "env", "rm", "ls", "dirname", "cp", "grep", "flock"];
 
 // The kernel stand-in's `status --json` (run without --dir, as findSteward
 // runs it in each deployment) lists these instances of oats.machine's
-// steward agent (lib/steward.mjs STEWARD_AGENT): setup moves the agent key
+// steward agent (lib/steward-agent.mjs STEWARD_AGENT): setup moves the agent key
 // to OATS only when it finds exactly one.
 export function withStewards(s, names = ["steward"]) {
   const home = (name) => join(s.deployment, "agents", "oats-machine--steward", "instances", name);
