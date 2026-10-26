@@ -509,19 +509,25 @@ test("--prompt: a just-started steward is inspected until it runs, then gets the
 });
 
 test("--prompt: the wait for a running steward is bounded in all, slow inspects included; a late yes is not taken", async (t) => {
+  // Only the deadline ends a read here: the inspect's own bound is past it,
+  // so a loaded host, however slow each read, still meets the deadline and
+  // never an inspect timeout. The second read, which says yes, would end at
+  // 4 s or later (two reads of 2 s and a poll), so a run that ends before it
+  // has had its read ended at the deadline.
   const w = world(t);
-  set(w, "inspect.json", JSON.stringify([{ running: false }, { running: false }, { running: true }]));
-  set(w, "inspect.delay", "400");
+  set(w, "inspect.json", JSON.stringify([{ running: false }, { running: true }]));
+  set(w, "inspect.delay", "2000");
   const start = Date.now();
-  const sent = await deliverPrompt({ shim: w.k.shim, home: w.home, text: "hello", env: w.env, cwd: w.s.deployment, features: ALL_FEATURES, timeouts: { ready: 1000, inspect: 800, poll: 50 } });
+  const sent = await deliverPrompt({ shim: w.k.shim, home: w.home, text: "hello", env: w.env, cwd: w.s.deployment, features: ALL_FEATURES, timeouts: { ready: 3000, inspect: 60_000, poll: 50 } });
   const took = Date.now() - start;
-  assert.deepEqual(sent, { delivered: false, line: "sending your prompt: the steward was not running within 1 s: your prompt was not sent" });
-  assert.ok(took < 1600, `the third inspect is ended at the deadline (${took} ms)`);
+  assert.deepEqual(sent, { delivered: false, line: "sending your prompt: the steward was not running within 3 s: your prompt was not sent" });
+  assert.ok(took < 4000, `the second inspect is ended at the deadline (${took} ms)`);
   assert.ok(!argvs(w).some((a) => a[1] === "input"));
 
+  // A slow yes within the bounds is taken; they leave a loaded host room.
   const slowYes = world(t);
   set(slowYes, "inspect.delay", "300");
-  const ok = await inner(slowYes, ["--prompt-file", promptFile(slowYes, "hello")], { timeouts: { ready: 1000, inspect: 800, poll: 50 } });
+  const ok = await inner(slowYes, ["--prompt-file", promptFile(slowYes, "hello")], { timeouts: { ready: 10_000, inspect: 5000, poll: 50 } });
   assert.equal(ok.err, "omarchy-launch-oats: your prompt was sent to the steward\n");
 });
 
